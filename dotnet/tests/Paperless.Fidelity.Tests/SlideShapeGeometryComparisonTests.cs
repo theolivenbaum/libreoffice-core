@@ -51,7 +51,7 @@ public sealed class SlideShapeGeometryComparisonTests : IDisposable
     [Fact]
     public void EveryPresetIsTheShapeLibreOfficeDraws()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfPath> ours = Shapes(PdfPaths.Read(Ours(path)));
@@ -101,7 +101,7 @@ public sealed class SlideShapeGeometryComparisonTests : IDisposable
     [Fact]
     public void EveryDashedLineCarriesLibreOfficesOwnDashArray()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfStroke> ours = PdfStrokes.Read(Ours(path));
@@ -140,7 +140,7 @@ public sealed class SlideShapeGeometryComparisonTests : IDisposable
     [Fact]
     public void EveryAutomaticNumberIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

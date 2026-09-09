@@ -81,7 +81,50 @@ public sealed record PlacedShape
     public string? Name { get; init; }
 
     /// <summary>The outline, in slide coordinates.</summary>
+    /// <remarks>
+    /// The whole outline, every subpath of it. What is <em>painted</em> is
+    /// <see cref="FillOutline"/> and <see cref="StrokeOutline"/>; this is what a clip, a bound and
+    /// a hit test want, because a subpath excluded from the fill still occupies the shape.
+    /// </remarks>
     public required GraphicsPath Outline { get; init; }
+
+    /// <summary>
+    /// The part of <see cref="Outline"/> that <see cref="Fill"/> covers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A subpath states whether it is filled, and filling the whole outline draws a solid
+    /// blob where the file states a line.</strong> Every connector preset —
+    /// <c>straightConnector1</c>, <c>bentConnector2</c> to <c>5</c>, <c>curvedConnector2</c> to
+    /// <c>5</c> — is one open subpath declaring <c>fill="none"</c>, and a shape carrying one still
+    /// takes a fill from its <c>a:fillRef</c> or its <c>p:style</c>. LibreOffice honours the flag:
+    /// <c>Path2D::getFillMode</c> feeds <c>EnhancedCustomShape2d::CreateSubPath</c>, which pushes a
+    /// subpath whose mode is <c>NONE</c> into the stroke-only list
+    /// (<c>svx/source/customshapes/EnhancedCustomShape2d.cxx</c>).
+    /// </para>
+    /// <para>
+    /// Defaults to <see cref="Outline"/>, so a reader that has no subpaths to report — a picture
+    /// frame, a table cell, a shape built from a plain rectangle — behaves exactly as before.
+    /// </para>
+    /// </remarks>
+    public GraphicsPath FillOutline
+    {
+        get => _fillOutline ?? Outline;
+        init => _fillOutline = value;
+    }
+
+    /// <summary>The part of <see cref="Outline"/> that <see cref="Line"/> is drawn along.</summary>
+    /// <remarks>
+    /// The shading faces of the presets that fake a third dimension — <c>cube</c>, <c>can</c>,
+    /// <c>bevel</c>, <c>foldedCorner</c> — are filled and not stroked, so stroking the whole
+    /// outline rules every one of them and turns a solid into a wireframe. Defaults to
+    /// <see cref="Outline"/> for the same reason <see cref="FillOutline"/> does.
+    /// </remarks>
+    public GraphicsPath StrokeOutline
+    {
+        get => _strokeOutline ?? Outline;
+        init => _strokeOutline = value;
+    }
 
     /// <summary>
     /// The rectangle the shape occupies before any rotation, in slide coordinates.
@@ -108,10 +151,10 @@ public sealed record PlacedShape
     /// — and a reader that wants the model rather than the drawing should be able to see which
     /// end of which line the file put a marker on.
     /// </remarks>
-    public SlideLineEnd HeadEnd { get; init; }
+    public LineEnd HeadEnd { get; init; }
 
     /// <summary>The marker at the end of its outline.</summary>
-    public SlideLineEnd TailEnd { get; init; }
+    public LineEnd TailEnd { get; init; }
 
     /// <summary>The picture it draws, or null when it is not a picture frame.</summary>
     /// <remarks>
@@ -127,8 +170,30 @@ public sealed record PlacedShape
     /// <summary>The text inside it, or null when it holds none.</summary>
     public PlacedText? Text { get; init; }
 
+    /// <summary>
+    /// The parts of <see cref="Outline"/> drawn in a lightened or darkened <see cref="Fill"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A preset's shading faces are not decoration and not a gradient: they are subpaths
+    /// with a stated brightness.</strong> A <c>cube</c> is one plain face and two shaded ones, a
+    /// <c>can</c> an ellipse lightened by 0.4 over a body, and a <c>foldedCorner</c>'s fold is the
+    /// shape's own fill darkened by 0.2. Painting them all in the flat fill draws a cube as an
+    /// outlined hexagon.
+    /// </para>
+    /// <para>
+    /// Painted after <see cref="FillOutline"/> and in this order, which is the order the preset
+    /// states its subpaths in and the order <c>EnhancedCustomShape2d::CreateSubPath</c> pushes
+    /// them. Empty for every shape whose subpaths all take the fill unchanged.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<SlideShadedPart> ShadedParts { get; init; } = [];
+
     /// <summary>The drop shadow it casts, or null when it casts none.</summary>
     public SlideShadow? Shadow { get; init; }
+
+    private readonly GraphicsPath? _fillOutline;
+    private readonly GraphicsPath? _strokeOutline;
 }
 
 /// <summary>

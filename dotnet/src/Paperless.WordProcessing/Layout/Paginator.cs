@@ -39,6 +39,83 @@ public sealed record PaginationOptions
     };
 
     /// <summary>
+    /// Whether a content-anchored frame is pulled back inside the page it is on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>DoNotCaptureDrawObjsOnPage</c>, read the other way round.
+    /// <c>SwAnchoredObjectPosition</c>'s constructor sets <c>mbDoNotCaptureAnchoredObj</c> from that
+    /// flag together with two per-object conditions
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:122-144), and
+    /// <c>AdjustVertRelPos</c> then skips <c>ImplAdjustVertRelPos</c> entirely while it holds
+    /// (<c>sw/source/core/inc/anchoredobjectposition.hxx</c>:185-201). With the flag off — which is the
+    /// document default (<c>DocumentSettingManager.cxx</c>:100) — every content-anchored object is
+    /// captured.
+    /// </para>
+    /// <para>
+    /// <b>Which importers set it is the whole of the distinction.</b>
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:332 sets it <c>true</c> for every
+    /// writerfilter import, which is DOCX <em>and</em> RTF; the WW8 binary filter does not set it at
+    /// all, and the ODF one sets it only for a document written before SO8
+    /// (<c>sw/source/filter/xml/xmlimp.cxx</c>:1554-1557).
+    /// </para>
+    /// <para>
+    /// So this is on in <see cref="Default"/> and in <see cref="Word"/> — a <c>.doc</c> and an ODF
+    /// document are both captured — and the DOCX and RTF readers turn it off. The two per-object
+    /// conditions the C++ also applies (<em>a fly is exempt only when it is wrap-through and not a
+    /// textbox</em>, and <em>only when it does not follow the text flow</em>) are deliberately not
+    /// modelled: they would only make a DOCX frame captured where this leaves it alone, which is where
+    /// the tree already was. Measured over the words track, turning the capture on for DOCX as well
+    /// moves 28 renderings and costs 1.73 of <c>|ink|%</c> on
+    /// <c>050_Visual_Product_Roadmap_Template_Yellow_and_Blue_Theme</c> alone.
+    /// </para>
+    /// </remarks>
+    public bool CapturesAnchoredObjectsOnPage { get; init; } = true;
+
+    /// <summary>
+    /// Whether a frame stated against a <em>margin band</em>, and wrapped around by the text, is
+    /// pulled back inside the page's body.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two C++ facts meet here and neither is the flag above.
+    /// <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
+    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801) is
+    /// <c>bDisablePositioning &amp;&amp; bIsWrapThrough</c> — a conjunction — so
+    /// <c>DisableOffPagePositioning</c> exempts a <em>wrap-through</em> object and nothing else, and a
+    /// DOCX frame stating <c>wp:wrapSquare</c> is captured although
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> is off for that format. And the area it is captured
+    /// in is not the sheet: <c>ImplAdjustVertRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:562-573) narrows it to the
+    /// page body frame under its own comment — <em>"Instead of using the top of the page as the
+    /// vertical limit, DOCX compatibilityMode 15 started to use the text body as the vertical limit for
+    /// most paragraph or line-oriented anchored non-wrapthrough objects"</em> — for every vertical
+    /// relation except <c>PAGE_FRAME</c> and <c>PAGE_PRINT_AREA</c> (:564-565).
+    /// </para>
+    /// <para>
+    /// <b>This is deliberately narrower than that rule, and the narrowing is measured rather than
+    /// cautious.</b> The C++ captures every non-wrap-through content-anchored frame, whatever its
+    /// origin. Applied that widely to this tree it moves <b>10 of the 338</b> words renderings and is
+    /// net worse against 26.2.4.2: the three documents this exists for improve (mean page ink
+    /// 1.347 → 0.588, 2.302 → 0.868, 3.065 → 2.441), and <c>b053-19</c> goes 11.254 → 19.508 and
+    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524. The likely missing half is
+    /// <c>bCheckBottom = !DoesObjFollowsTextFlow()</c>
+    /// (<c>tocntntanchoredobjectposition.cxx</c>:457): a frame that follows the text flow has its
+    /// <em>bottom</em> correction skipped, and <c>PROP_FOLLOW_TEXT_FLOW</c> is written only for an
+    /// anchor inside a table (<c>GraphicImport.cxx</c>:1316-1318, :1859-1861), so the pool default
+    /// decides everywhere else. Establishing that is its own round; until then the capture is applied
+    /// where this round measured it — the two margin bands — and nowhere else, which regresses nothing
+    /// because those two origins reach nothing that was placed before.
+    /// </para>
+    /// <para>
+    /// Set for a DOCX stating <c>compatibilityMode</c> 15 or more. Below 15 the C++ area is the sheet
+    /// rather than the body, which for a top-margin band changes nothing at the top and only clamps a
+    /// frame hanging off the bottom; no corpus document exercises it, so it is left.
+    /// </para>
+    /// </remarks>
+    public bool CapturesMarginBandObjects { get; init; }
+
+    /// <summary>
     /// Whether a page-anchored fly may hang below the body into the bottom margin and the footer area
     /// rather than being split there.
     /// </summary>
@@ -324,6 +401,43 @@ public sealed record PaginationOptions
 
     /// <summary>Word's fixed note-separator length: two inches.</summary>
     public static Length WordNoteSeparatorLength { get; } = Length.FromInches(2);
+
+    /// <summary>
+    /// Whether endnotes collecting at the end of the document follow the body text instead of taking
+    /// pages of their own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's <c>DocumentSettingId::CONTINUOUS_ENDNOTES</c>, whose own option string says exactly
+    /// what it does: <em>"Render endnotes at the end of document inline, rather than on a separate
+    /// page"</em> (<c>sw/inc/strings.hrc</c>:1540). On that branch
+    /// <c>SwFootnoteBossFrame::FindFootnoteBossFrame</c>'s caller builds an endnote
+    /// <c>SwSectionFrame</c> and inserts it into the <em>body</em> frame behind the last body content
+    /// (<c>sw/source/core/layout/ftnfrm.cxx</c>:1644-1684), so the notes are ordinary body-flow content
+    /// that begins where the text ended and continues onto the next page when it must. Off it, the
+    /// <c>else</c> arm two lines further down inserts a page marked <c>SetEndNotePage</c> and the notes
+    /// start there.
+    /// </para>
+    /// <para>
+    /// <b>Both Word filters set it and neither ODF one nor the RTF one does</b>, which is why it is a flag
+    /// of its own rather than part of <see cref="Word"/> — the same division
+    /// <see cref="UsesWordNoteSeparator"/> makes and for the same reason:
+    /// <c>WriterFilter::setTargetDocument</c> sets <c>ContinuousEndnotes</c> under a comment reading
+    /// "options that are valid for the DOCX format"
+    /// (<c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:338), <c>SwWW8ImplReader</c> sets
+    /// <c>CONTINUOUS_ENDNOTES</c> for DOC (<c>sw/source/filter/ww8/ww8par.cxx</c>:2050), and
+    /// <c>RtfFilter::setTargetDocument</c> sets neither.
+    /// </para>
+    /// <para>
+    /// <b>This is the reference's own behaviour moving, and only for DOCX.</b> 24.2.7.2 did not set the
+    /// flag in the DOCX filter and 26.2.4.2 does: measured on <c>endnotes.docx</c>, converted through both
+    /// binaries to FODT, <c>ContinuousEndnotes</c> reads <c>false</c> under 24.2.7.2 and <c>true</c> under
+    /// 26.2.4.2, and the same file renders 2 pages against 1. The DOC has been on this branch all along —
+    /// 1 page under both — and the ODT and FODT stay at 2, which is what says it is the filter and not the
+    /// layout.
+    /// </para>
+    /// </remarks>
+    public bool EndnotesFollowTheBody { get; init; }
 }
 
 /// <summary>
@@ -340,23 +454,46 @@ public sealed record PaginationOptions
 /// header appears on most pages of a section, and laying it out again for each would shape its text over
 /// and over for an answer that cannot change.
 /// </param>
-/// <param name="RestartsNumberingAtFirstPageBreak">
-/// True when the section's <see cref="WritingSection.RestartPageNumberAt"/> takes effect at the first hard
-/// page break <em>inside</em> the section rather than where the section begins.
+/// <param name="StatesOwnFurniture">
+/// True when the section names a header or a footer of its own rather than inheriting every slot from
+/// the section above it.
 /// <para>
-/// A continuous section becomes a Writer text section, which has nowhere to hang a number offset: a page
-/// number lives on a page descriptor and <c>InsertSegments</c> gives a continuous section none. The one
-/// exception it makes for itself is a continuous section that states a running head of its own — it builds
-/// a descriptor after all, then walks the section's nodes for the first that carries a hard page break and
-/// hangs the descriptor, number offset and all, on <em>that</em> node
-/// (<c>sw/source/filter/ww8/ww8par.cxx</c>:4516-4559). A section with no such break restores the previous
-/// descriptor and the restart is dropped entirely.
+/// Meaningless except on a continuous section, and on one it decides everything: a continuous section
+/// has no page of its own and so no page descriptor of its own, and the only thing that makes either
+/// reader build one for it is furniture it states itself. Having built one, both readers hang it —
+/// paper, margins, running head, numbering format and number offset together — on the first hard page
+/// break <em>inside</em> the section, and drop the whole descriptor when there is none.
+/// <c>SectionPropertyMap::CloseSectionGroup</c> guards its search on
+/// <c>!m_bDefaultHeaderLinkToPrevious</c> and its five siblings
+/// (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:1746-1801); <c>wwSectionManager</c> guards
+/// the same search on <c>HasOwnHeaderFooter</c> and puts the previous descriptor back when it fails
+/// (<c>sw/source/filter/ww8/ww8par.cxx</c>:4515-4560). See
+/// <see cref="ContinuousPageDescriptors"/>, which applies the whole of that rule, and which this flag
+/// exists to feed.
+/// </para>
+/// </param>
+/// <param name="SideMarginsAreASectionIndent">
+/// True when the reader has already turned a continuous section's left and right margins into an
+/// indent on the text section, so that they survive the page descriptor being dropped.
+/// <para>
+/// <strong>The two Word readers genuinely differ here and the difference is measurable.</strong>
+/// <c>wwSectionManager::InsertSection</c> puts <c>section.left − page.left</c> and its right-hand
+/// twin on the section format as an <c>SvxLRSpaceItem</c>
+/// (<c>sw/source/filter/ww8/ww8par6.cxx</c>:758-770), unconditionally, for every continuous section
+/// that becomes a text section — so a <c>.doc</c>'s continuous section keeps its own side margins
+/// however its vertical ones and its furniture turn out. writerfilter's
+/// <c>SectionPropertyMap::ApplySectionProperties</c> sets a writing mode and an endnote flag and
+/// nothing else (<c>dmapper/PropertyMap.cxx</c>:792-812), so a DOCX's or RTF's side margins are on
+/// the page style alone and die with it. Measured on the synthetic
+/// <c>ContinuousSectionGeometryTests</c> builds: 26.2.4.2 leaves page two of a DOCX whose continuous
+/// section states a one-inch left margin at the first section's <strong>36.1 pt</strong>.
 /// </para>
 /// </param>
 public sealed record PaginatedSection(
     WritingSection Section,
     PageFurnitureSet? Furniture = null,
-    bool RestartsNumberingAtFirstPageBreak = false);
+    bool StatesOwnFurniture = false,
+    bool SideMarginsAreASectionIndent = false);
 
 /// <summary>
 /// Fills pages: lay out a paragraph, put what fits on the page, carry the rest over.
@@ -506,8 +643,15 @@ public sealed class Paginator
 
         Blocks = null;
 
+        // A continuous section's page properties are settled before anything is laid out, because the
+        // answer is a property of the document rather than of where the pages happen to fall: a
+        // continuous section that cannot hang its descriptor on a hard page break does not have one at
+        // all, and wears the section above's paper, margins and running head instead. See
+        // ContinuousPageDescriptors for the rule and for what it explains.
         List<PaginatedSection> withFrames =
-            sections.Count > 0 ? [.. sections] : [new PaginatedSection(new WritingSection())];
+            sections.Count > 0
+                ? [.. ContinuousPageDescriptors.Resolve(sections, blocks)]
+                : [new PaginatedSection(new WritingSection())];
 
         List<LaidOutPage> pages = Fill(blocks, withFrames, startingNumber);
 
@@ -558,7 +702,8 @@ public sealed class Paginator
         // reached through the flow it landed in, which exists only once a page has been filled. Scanning
         // the blocks instead returned early on exactly those documents and left their frames unplaced.
         FrameResolution resolution = FrameResolution.Of(
-            blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing);
+            blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
+            _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
         if (resolution.IsEmpty) return Numbered(pages, blocks);
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
@@ -577,7 +722,8 @@ public sealed class Paginator
             }
 
             FrameResolution settled = FrameResolution.Of(
-                blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing);
+                blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
+                _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
             pages = next;
 
             bool converged = settled.SameAs(resolution);
@@ -791,7 +937,7 @@ public sealed class Paginator
 
         // A continuous section's page-number restart, waiting for the first hard page break inside the
         // section to hang itself on. Null where there is nothing waiting, which is every other section —
-        // see PaginatedSection.RestartsNumberingAtFirstPageBreak for why a continuous section's restart
+        // see PaginatedSection.StatesOwnFurniture for why a continuous section's restart
         // cannot take effect where the section begins. Cleared at the next section break: the descriptor
         // Writer builds is only offered to the nodes of the section that built it, so a restart that
         // reaches the section's end unclaimed is dropped rather than carried forward.
@@ -904,6 +1050,18 @@ public sealed class Paginator
         // `EmitPage` onto the sheet it has just started. Empty for every document but the two the census
         // names — see `PlaceFloatedTable`.
         List<FloatedTablePart> pendingFloats = [];
+
+        // The bottom a fly filling its column has left the flow to carry on below, or null when nothing
+        // is waiting to be cleared. Held rather than added to `used` at once because the block it lands
+        // on has to know *how far* it was moved: an anchored frame stays where the flow was — see
+        // `PlacedLine.FlyDisplacement`. Consumed by the first block of the flow that follows the fly,
+        // and forgotten at the end of a page or a column, neither of which the fly reaches into.
+        Length? clearsFly = null;
+
+        // Which block that was, and by how much, for the anchored frames hanging off it. `-1` when the
+        // block in flight was not displaced, which is every block of nearly every document.
+        int displacedBlock = -1;
+        Length displacedBy = Length.Zero;
 
         // Blocks laid out a second time because they landed in a column narrower or wider than the one the
         // pass above assumed. Empty for every document whose columns are even, which is nearly all of them.
@@ -1094,17 +1252,31 @@ public sealed class Paginator
                 // 36 pt to 574 pt and pages two and three from 72 pt to 539 pt. Switching at the break put
                 // page one at 72 pt, which is a tenth of the measure lost on every line of it.
                 // Columns are the exception and change at once, because Writer *does* start a text section
-                // for them mid-page.
+                // for them mid-page — and where the section is a text section outright
+                // (`WritingSection.IsTextSection`, which is what a `text:section` is) its own indents
+                // change with them, since a `SwSectionFrame` is laid out inside the body rather than
+                // being the body. Its paper and its vertical margins still belong to the sheet.
                 page = kind == SectionBreak.Continuous && !pageIsEmpty
                     ? page with
                     {
+                        Margins = geometry.IsTextSection
+                            ? page.Margins with
+                            {
+                                Left = geometry.Page.Margins.Left,
+                                Right = geometry.Page.Margins.Right,
+                            }
+                            : page.Margins,
                         Columns = geometry.Page.Columns,
                         ColumnGap = geometry.Page.ColumnGap,
                         ColumnRuler = geometry.Page.ColumnRuler,
                     }
                     : geometry.Page;
 
-                deferredPage = kind == SectionBreak.Continuous && !pageIsEmpty ? geometry.Page : null;
+                // A text section has nothing left to hand the next sheet: its indents and its columns have
+                // already been taken above, and the paper it sits on is the paper it started on.
+                deferredPage = kind == SectionBreak.Continuous && !pageIsEmpty && !geometry.IsTextSection
+                    ? geometry.Page
+                    : null;
                 sectionFirstPage = pages.Count;
 
                 // A restart of the page numbering also decides which side of the sheet the section wants,
@@ -1133,10 +1305,10 @@ public sealed class Paginator
 
                 // A continuous section that states a running head of its own carries its restart forward to
                 // the first hard page break inside it instead of applying it here — see
-                // PaginatedSection.RestartsNumberingAtFirstPageBreak. Every other break settles the number
+                // PaginatedSection.StatesOwnFurniture. Every other break settles the number
                 // now, and clears anything an earlier section left waiting.
                 bool defers = kind == SectionBreak.Continuous
-                              && resolved[blockSection].RestartsNumberingAtFirstPageBreak
+                              && resolved[blockSection].StatesOwnFurniture
                               && geometry.RestartPageNumberAt is not null;
 
                 deferredRestart = defers ? geometry.RestartPageNumberAt : null;
@@ -1163,6 +1335,11 @@ public sealed class Paginator
                 BeginBalance();
                 continue;
             }
+
+            // A fly filling the column pushes the flow under itself — see `clearsFly`. A table asks
+            // later, from inside its own arm, because a table that turns out to float is not in the flow
+            // and must not take the displacement with it.
+            if (blocks[paragraphIndex] is not PageTable) ClearTheFly();
 
             if (blocks[paragraphIndex] is PageTable table)
             {
@@ -1199,17 +1376,28 @@ public sealed class Paginator
                     && rowDrawn == Length.Zero
                     && PlaceFloatedTable(
                         table, paragraphIndex, blocks, Laid, body, page, column, used, tables, notes,
-                        out FloatedTablePart? carried))
+                        out FloatedTablePart? carried, out Length? resumesAt))
                 {
                     // What did not fit below `w:tblpY` goes at the top of the next page — see
                     // `PlaceFloatedTable`, and `ContinueFloatedTables` for where it lands.
                     if (carried is { } rest) pendingFloats.Add(rest);
+
+                    // A fly filling the column pushes the flow under itself — see `FillsTheColumn` for
+                    // when, and `clearsFly` for why the flow is not moved down here and now.
+                    if (resumesAt is { } below)
+                    {
+                        clearsFly = clearsFly is { } already ? Length.Max(already, below) : below;
+                    }
 
                     paragraphIndex++;
                     lineIndex = 0;
                     rowDrawn = Length.Zero;
                     continue;
                 }
+
+                // Not floated after all, so this table is in the flow like any other block and takes the
+                // displacement a fly above it left waiting.
+                ClearTheFly();
 
                 // The paragraph above's leading, which a table takes exactly as a paragraph does.
                 // `SwFlowFrame::CalcUpperSpace` adds `nPrevLineSpacing` to `nUpper` in all four of its
@@ -1471,6 +1659,9 @@ public sealed class Paginator
             }
 
             allowed = WholeLines(layout.Lines, lineIndex, allowed);
+            allowed = GivingUpALineToKeepItsNote(
+                paragraph, layout, lineIndex, allowed, notes,
+                used + spaceAbove, columnBottom, columnIsEmpty);
 
             Length top = used + spaceAbove;
             bool firstLineHere = columnIsEmpty;
@@ -1508,7 +1699,13 @@ public sealed class Paginator
                     // again below it, and the page is written with whatever is current when it is emitted.
                     Math.Max(1, page.Columns),
                     page.ColumnGap,
-                    page.Ruler));
+                    page.Ruler,
+
+                    // And how much of `top` is a fly having pushed this paragraph clear of itself, which
+                    // an anchored frame takes back off again. See `PlacedLine.FlyDisplacement`.
+                    lineIndex + i == 0 && paragraphIndex == displacedBlock
+                        ? displacedBy
+                        : Length.Zero));
 
                 // A stretch that shares its line with the next one leaves the pen where it is: the box
                 // after it is more of the same line, at the same top.
@@ -1579,6 +1776,13 @@ public sealed class Paginator
         columnTop = Length.Zero;
         columnBottom = bodyHeight;
 
+        // Endnotes that follow the body join the last page's own notes, before it is written. They are
+        // added here and not while the body was being filled because they must take no room from it: an
+        // endnote section is inserted *behind* the last body content and grows into whatever is left,
+        // spilling onto a further page when there is not enough — which the note-carrying loop below
+        // already does. See `PaginationOptions.EndnotesFollowTheBody`.
+        if (_options.EndnotesFollowTheBody) notes.AddRange(DocumentEndNotes(blocks));
+
         // FinishPage rather than EmitPage, because the last page has to be *emitted*: in a multi-column
         // section EmitPage moves to the next column when there is one, so a document ending part way through
         // column one of a two-column section would advance to column two and never write the page at all.
@@ -1604,8 +1808,13 @@ public sealed class Paginator
         // The endnotes, which are the one flow that is not part of any page's body: they collect *after* the
         // last of them, on pages of their own. Measured — LibreOffice puts a two-endnote document's notes at
         // the top of a fresh second page, in the body's own text area, and takes nothing off page one.
-        pages.AddRange(
-            EndnotePages(blocks, resolved[^1], pageNumber, pages.Count));
+        // Unless the document came from a Word filter, where they follow the body instead and have already
+        // been placed above.
+        if (!_options.EndnotesFollowTheBody)
+        {
+            pages.AddRange(
+                EndnotePages(blocks, resolved[^1], pageNumber, pages.Count));
+        }
 
         _tableOrigins = _nextTableOrigins;
 
@@ -1650,7 +1859,7 @@ public sealed class Paginator
 
         // Claims a continuous section's waiting restart for the page a hard break has just started, which
         // is where Writer hangs the descriptor it built for such a section — see
-        // PaginatedSection.RestartsNumberingAtFirstPageBreak. Only the first break inside the section
+        // PaginatedSection.StatesOwnFurniture. Only the first break inside the section
         // claims it, and only a break that actually started a page: in a multi-column section EmitPage may
         // have moved to the next column, and a column is not a page to hang a number on.
         void TakeDeferredRestart(int pagesBefore)
@@ -1707,6 +1916,19 @@ public sealed class Paginator
                        is not (SectionBreak.Continuous or SectionBreak.NewColumn);
         }
 
+        // Takes the displacement a fly filling the column left waiting and applies it to the block about
+        // to be placed, remembering how far that block moved. See `clearsFly`.
+        void ClearTheFly()
+        {
+            if (clearsFly is not { } under) return;
+
+            Length wasAt = used;
+            used = Length.Max(used, under);
+            clearsFly = null;
+            displacedBlock = paragraphIndex;
+            displacedBy = used - wasAt;
+        }
+
         void EmitPage()
         {
             if (column + 1 < Math.Max(1, page.Columns))
@@ -1724,6 +1946,11 @@ public sealed class Paginator
                 column++;
                 used = columnTop;
                 lineUsed = columnTop;
+
+                // A fly is placed in the column it was floated in, so the next column has nothing to
+                // clear — the same reason a new page has none. See `clearsFly`.
+                clearsFly = null;
+                displacedBlock = -1;
                 return;
             }
 
@@ -1741,8 +1968,9 @@ public sealed class Paginator
             // column that ended the page rather than under all of them — generous rather than tight,
             // which errs towards placing a note here instead of carrying it, and so cannot start a
             // spill that would not otherwise happen.
+            Length bodyInk = BodyInk(placed, tables, body.TextArea.Y);
             (PlacedFlow? noteArea, List<PageNote> carriedNotes) =
-                NoteArea(notes, body, bodyHeight - BodyInk(placed, tables, body.TextArea.Y));
+                NoteArea(notes, body, bodyHeight - bodyInk, bodyInk);
 
             pages.Add(Page(
                 pages.Count,
@@ -1754,6 +1982,7 @@ public sealed class Paginator
                     pageFurniture, pageFurnitureSection, pageFurnitureGeometry, pageNumber,
                     first: pageIsSectionFirst),
                 noteArea,
+                isSectionFirst: pageIsSectionFirst,
                 Separator(noteArea, body)));
 
             // The sheet just written is the one the outgoing geometry belonged to; the next one is free to
@@ -1775,6 +2004,10 @@ public sealed class Paginator
             notes = carriedNotes;
             used = Length.Zero;
             lineUsed = Length.Zero;
+
+            // A fly is on the page it was placed on, so the flow on the *next* page has nothing to clear.
+            clearsFly = null;
+            displacedBlock = -1;
             MeasureBody();
             columnTop = Length.Zero;
             columnBottom = bodyHeight;
@@ -2406,6 +2639,7 @@ public sealed class Paginator
         List<PlacedTable> tables,
         (PlacedFlow? Header, PlacedFlow? Footer) furniture,
         PlacedFlow? notes,
+        bool isSectionFirst,
         DocRect? separator = null)
         => new()
         {
@@ -2413,6 +2647,7 @@ public sealed class Paginator
             Number = number,
             Size = geometry.Size,
             BodyArea = geometry.TextArea,
+            Borders = BordersOn(geometry, isSectionFirst),
             ColumnCount = geometry.Columns,
             ColumnGap = geometry.ColumnGap,
             ColumnRuler = geometry.Ruler,
@@ -2425,17 +2660,33 @@ public sealed class Paginator
             NoteSeparator = separator,
         };
 
+    /// <summary>
+    /// The page border this page carries, resolved against <c>w:display</c>.
+    /// </summary>
+    /// <remarks>
+    /// Resolved here rather than at drawing time because this is the only layer that knows whether a
+    /// page is the first of its section — <c>firstPage</c>/<c>notFirstPage</c> are the whole of what
+    /// <c>w:display</c> can say — and the only one that holds the sheet and the text area together,
+    /// which is what <c>w:offsetFrom</c> chooses between.
+    /// </remarks>
+    private static PlacedPageBorder? BordersOn(PageGeometry geometry, bool isSectionFirst)
+        => geometry.Borders is { } borders && borders.AppearsOn(isSectionFirst)
+            ? borders.Place(geometry.Size, geometry.TextArea)
+            : null;
+
     private static LaidOutPage EmptyPage(
         int index,
         int number,
         PageGeometry geometry,
-        (PlacedFlow? Header, PlacedFlow? Footer) furniture)
+        (PlacedFlow? Header, PlacedFlow? Footer) furniture,
+        bool isSectionFirst = true)
         => new()
         {
             Index = index,
             Number = number,
             Size = geometry.Size,
             BodyArea = geometry.TextArea,
+            Borders = BordersOn(geometry, isSectionFirst),
             ColumnCount = geometry.Columns,
             ColumnGap = geometry.ColumnGap,
             ColumnRuler = geometry.Ruler,
@@ -2583,6 +2834,13 @@ public sealed class Paginator
     /// fresh page two in the body's own text area.
     /// </para>
     /// <para>
+    /// <b>For an ODF or an RTF document.</b> A document a Word filter opened does not reach this at all:
+    /// it takes <see cref="PaginationOptions.EndnotesFollowTheBody"/>'s branch instead, where the notes
+    /// join the last page's own note area rather than starting a page. The measurement above was taken on
+    /// the ODT and holds for it; the same content as a DOCX renders one page under 26.2.4.2 and two under
+    /// 24.2.7.2.
+    /// </para>
+    /// <para>
     /// So this is an ordinary pagination of an ordinary flow, done by recursion rather than by a second
     /// implementation — the notes get page breaks, headers and footers exactly as body text does, because
     /// they are body text on those pages. The last section's geometry is what they take, being what the
@@ -2599,8 +2857,7 @@ public sealed class Paginator
         int startingNumber,
         int alreadyEmitted)
     {
-        List<PageBlock> flow = [];
-        Collect(blocks, depth: 0);
+        List<PageBlock> flow = [.. DocumentEndNotes(blocks).SelectMany(note => note.Blocks)];
 
         if (flow.Count == 0 || alreadyEmitted >= _options.MaxPages) return [];
 
@@ -2624,8 +2881,22 @@ public sealed class Paginator
                 Blocks = flow,
             })];
 
-        // Depth-first through tables, because a cell can cite an endnote and its notes still collect with
-        // the rest. Endnote bodies are *not* searched: a note inside a note would collect after itself.
+    }
+
+    /// <summary>
+    /// The notes a flow cites that collect at the end of the document, in the order they are cited.
+    /// </summary>
+    /// <remarks>
+    /// Depth-first through tables, because a cell can cite an endnote and its notes still collect with the
+    /// rest. Endnote bodies are <em>not</em> searched: a note inside a note would collect after itself.
+    /// </remarks>
+    /// <param name="blocks">The body's blocks, whose paragraphs are searched for endnote anchors.</param>
+    private static List<PageNote> DocumentEndNotes(IReadOnlyList<PageBlock> blocks)
+    {
+        List<PageNote> collected = [];
+        Collect(blocks, depth: 0);
+        return collected;
+
         void Collect(IReadOnlyList<PageBlock> from, int depth)
         {
             if (depth > FlowLayouter.MaxNesting) return;
@@ -2637,7 +2908,7 @@ public sealed class Paginator
                     case PageParagraph paragraph:
                         foreach (PageNote note in paragraph.Notes)
                         {
-                            if (note.Placement == NotePlacement.DocumentEnd) flow.AddRange(note.Blocks);
+                            if (note.Placement == NotePlacement.DocumentEnd) collected.Add(note);
                         }
 
                         break;
@@ -2652,6 +2923,70 @@ public sealed class Paginator
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Shortens a paragraph's stay on this page when doing so is what keeps a note it cites here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The room offered to a paragraph is <c>columnBottom - NoteHeight(notes)</c>, and
+    /// <paramref name="notes"/> is what is cited <em>before</em> it. So a citation inside the very
+    /// lines being fitted is charged nothing: the lines go down, the note is added afterwards, and
+    /// there is no room left for it. Writer instead lets the note container grow into the body, so
+    /// the citing page carries one line less and the note it cites.
+    /// </para>
+    /// <para>
+    /// <strong>An earlier round did this unconditionally and it was reverted with a document to
+    /// show for it.</strong> On <c>template---tpr-technical-progress-report-with-guidance.docx</c>
+    /// a footnote cited from the third line of a bullet left no room for the bullet at all, so the
+    /// bullet went to the next page and the <c>keepNext</c> heading above it followed, at 8 pages
+    /// against 7. The guard is what that case needed and did not have: shortening is taken only
+    /// when it leaves the paragraph <em>something</em> here, and only when it actually buys the
+    /// note. Reduce to nothing and the paragraph moves, which is the regression; reduce past the
+    /// citation and the note is no longer cited on this page, which buys nothing.
+    /// </para>
+    /// <para>
+    /// One attempt rather than a loop, and it re-runs <see cref="Fit"/> against the larger
+    /// reservation rather than predicting where the lines would land. Predicting means restating
+    /// <see cref="ParagraphLeading"/>'s first-line rules and the shared-baseline case somewhere
+    /// else, and a second copy of that arithmetic is a second thing to get wrong.
+    /// </para>
+    /// </remarks>
+    private int GivingUpALineToKeepItsNote(
+        PageParagraph paragraph,
+        LaidOutParagraph layout,
+        int lineIndex,
+        int allowed,
+        List<PageNote> notes,
+        Length from,
+        Length columnBottom,
+        bool columnIsEmpty)
+    {
+        if (allowed <= 1 || paragraph.Notes.Count == 0) return allowed;
+
+        List<PageNote> cited = [.. NotesIn(paragraph, layout, lineIndex, allowed)];
+        if (cited.Count == 0) return allowed;
+
+        Length reserved = NoteHeight(notes, cited);
+        if (reserved <= NoteHeight(notes)) return allowed;
+
+        int refitted = Fit(
+            layout, paragraph.Format.LineSpacing, lineIndex, from, columnBottom - reserved,
+            atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
+
+        int shortened = WholeLines(
+            layout.Lines, lineIndex,
+            Allowed(paragraph.Format, layout.Lines.Count, lineIndex, refitted, columnIsEmpty));
+
+        // Nothing left here, or nothing gained: leave it alone and let the note flow onward.
+        if (shortened <= 0 || shortened >= allowed) return allowed;
+
+        // And the citation has to survive the cut, or the room was reserved for a note this page
+        // no longer holds.
+        return NotesIn(paragraph, layout, lineIndex, shortened).Count() == cited.Count
+            ? shortened
+            : allowed;
     }
 
     private static IEnumerable<PageNote> NotesIn(
@@ -2809,8 +3144,12 @@ public sealed class Paginator
     /// <param name="notes">The notes owed by this page, in citation order.</param>
     /// <param name="page">The page's geometry.</param>
     /// <param name="available">The room left beneath the body, which may be nought or less.</param>
+    /// <param name="bodyInk">
+    /// How far down the text area the body reached, which is where an endnote flow that follows the body
+    /// begins. Ignored for every other note area, which is bottom-aligned.
+    /// </param>
     private (PlacedFlow? Area, List<PageNote> Spilled) NoteArea(
-        List<PageNote> notes, PageGeometry page, Length available)
+        List<PageNote> notes, PageGeometry page, Length available, Length bodyInk)
     {
         if (notes.Count == 0) return (null, []);
 
@@ -2841,9 +3180,29 @@ public sealed class Paginator
             blocks.AddRange(note.Blocks);
         }
 
+        // An endnote area that follows the body is body-flow content and begins where the body left off;
+        // a footnote area is bottom-aligned in the text area. That split is measured on both sides, on
+        // one authored document rendered by 26.2.4.2: `footnotes.docx` puts its note area's first line at
+        // 760.831 pt on a page whose body ends at 702.299 — bottom-aligned, which is what we already draw
+        // to 0.002 pt — while `endnotes.docx` and `endnotes.doc` both put theirs at 716.131, directly
+        // under the same body. So the rule is the note's placement and not the filter.
+        //
+        // Decided by the first note the page owes, so a last page carrying a footnote *and* the
+        // document's endnotes keeps the footnote area's own position and takes the endnotes into it — an
+        // approximation, and the only shape where the two rules meet on one page.
+        // The separator's own room comes first, exactly as `taken` charges it above: the endnote
+        // container's top border is the reservation and the notes begin below it. Measured against
+        // 26.2.4.2 on `endnotes.docx` — its body's last line ends at 702.298 pt and its first endnote
+        // line's box begins at 716.131, a gap of 13.833, which is this document's default paragraph
+        // line height and not nought.
+        Length? offsetFromTop =
+            _options.EndnotesFollowTheBody && notes[0].Placement != NotePlacement.PageBottom
+                ? bodyInk + _options.NoteSeparatorHeight
+                : null;
+
         return (
             FlowLayouter.LayOut(
-                blocks, page.TextArea, offsetFromTop: null,
+                blocks, page.TextArea, offsetFromTop,
                 collapsesSpacing: _options.CollapsesSpacing,
                 addsCellLineSpacing: _options.AddsCellLineSpacing),
             spilled);
@@ -2955,6 +3314,12 @@ public sealed class Paginator
     {
         for (int i = from; i < blocks.Count; i++)
         {
+            // A second fly is not the flow. It is placed where it says and takes no room on the way
+            // there, so it can neither be displaced by the first nor push the scan past it — and a
+            // table is the one block `HasInk` answers for without looking, so without this a document
+            // holding two positioned tables displaces its whole flow on account of the second.
+            if (blocks[i] is PageTable { IsPositioned: true }) continue;
+
             LaidBlock laid = laidAt(i);
 
             Length height = Length.Zero;
@@ -2982,7 +3347,8 @@ public sealed class Paginator
     /// Whether a block would draw anything a fly could displace.
     /// </summary>
     /// <remarks>
-    /// A table always would. A paragraph counts only when it holds a character that is neither
+    /// A table always would — except a positioned one, which the caller skips before asking, because it
+    /// is not in the flow at all. A paragraph counts only when it holds a character that is neither
     /// whitespace nor a control — the anchor character a frame, a field or a note citation occupies is
     /// <c>U+0001</c>, and a paragraph holding nothing else is the empty spacer this has to let past.
     /// </remarks>
@@ -3029,16 +3395,21 @@ public sealed class Paginator
     /// a top edge at <b>72.00</b>, the top margin exactly, with no <c>w:tblpY</c> applied a second time.
     /// </para>
     /// <para>
-    /// <b>A table taller than a whole column is still left in the flow, and that is a guard rather than
-    /// the rule.</b> Writer floats and splits that one too. Two corpus documents are in that class and
-    /// both pass the gate today — <c>ESPN-R - MCF - RA - Ed1.docx</c>, 123 rows against a 481.90 pt body,
-    /// and <c>part-147_approval list_20230119.docx</c>, 782 pt against 714.30 — so the guard is kept
-    /// this round rather than traded blind. See <c>probes/words-r62/floattable-census.py</c>.
+    /// <b>A table taller than a whole column splits like any other fly</b>, and the guard that used to
+    /// leave one in the flow is gone. It was kept for a round as the honest conservative choice — the
+    /// two corpus documents then in its class both passed the gate, so trading it blind would have risked
+    /// them for nothing. <c>Case-Study-Heathrow-Airport.docx</c> is the third and does not pass: its
+    /// whole first page is a three-page fly, and dropping the fly treatment drops <c>w:tblpY</c> with it,
+    /// which is 33 pt of the page. Measured on ten authored fixtures against both installed references,
+    /// which agree to a tenth of a point: a 90-row table anchored at <c>w:tblpY="662"</c> puts its first
+    /// row at 105.6 and its thirty-third at the <em>top of page two</em>, 72.5, with the same x. See
+    /// <c>probes/words-page-anchored-table/</c>.
     /// </para>
     /// <para>
-    /// <b>A fly whose stated top is already past the bottom of the body</b> is also left as it was:
-    /// there is no first part to place, and every row of it would be carried onto pages of its own. No
-    /// corpus document does it and no measurement covers it, so it keeps the behaviour it had.
+    /// <b>A fly whose stated top leaves no room on the page</b> is the one case still left in the flow,
+    /// and it is now guarded explicitly rather than as a side effect of the height test: there is no
+    /// first part to place, so floating it would draw every row off the sheet. No corpus document
+    /// reaches it.
     /// </para>
     /// <para>
     /// Nothing about page breaking is decided here: the caller has already honoured
@@ -3065,6 +3436,11 @@ public sealed class Paginator
     /// The rows this page could not take, for the caller to place at the top of the next one, or null
     /// when the whole table went here.
     /// </param>
+    /// <param name="resumesAt">
+    /// Where the flow must carry on, when the fly fills the column and the flow would have run into it
+    /// — see <see cref="FillsTheColumn"/>. Null when the flow is clear of the fly and stays where it is,
+    /// which is the ordinary case.
+    /// </param>
     /// <returns>True when the table was floated and the caller should move on without advancing.</returns>
     private bool PlaceFloatedTable(
         PageTable table,
@@ -3077,9 +3453,11 @@ public sealed class Paginator
         Length used,
         List<PlacedTable> tables,
         List<PageNote> notes,
-        out FloatedTablePart? carried)
+        out FloatedTablePart? carried,
+        out Length? resumesAt)
     {
         carried = null;
+        resumesAt = null;
 
         if (!table.IsPositioned) return false;
 
@@ -3089,8 +3467,6 @@ public sealed class Paginator
         Length height = Length.Zero;
         foreach (Length row in laid.RowHeights) height += row;
 
-        // The guard above: too tall to float, so it stays in the flow and paginates as it always did.
-        if (height > area.Height) return false;
 
         // `w:vertAnchor`, resolved onto an offset from the top of the column the flow is in. `area.Y` is
         // the body's own top, which a running head may already have pushed down, so the page-relative
@@ -3105,14 +3481,42 @@ public sealed class Paginator
         // The fly's own extent, not the part of it this page takes: the test asks whether the flow after
         // the table would put ink where the table goes, and the table goes where `w:tblpY` says whether
         // or not the sheet is long enough to hold all of it.
-        if (RunsIntoTheFly(blocks, laidAt, index + 1, used, top, top + height)) return false;
+        bool displaces = false;
+        if (RunsIntoTheFly(blocks, laidAt, index + 1, used, top, top + height))
+        {
+            // A fly with room beside it is one this cannot place: Writer wraps the flow into that room
+            // and nothing here can. A fly that fills the column has no such room, and Writer puts the
+            // flow *under* it — which is a position rather than a wrap, and is reproducible.
+            //
+            // Only for a fly the file has actually moved off the flow. A `w:vertAnchor="text"` fly sits
+            // where the flow already is, so leaving it there reproduces it exactly — while floating it
+            // drops the table's own space above and below, which the flow still owes. Measured:
+            // `slcc-architecture-uu-architecture.docx` states `vertAnchor="text" tblpY="1"` on a fly
+            // filling its column, matches the reference at 4 pages with the table in the flow, and comes
+            // to 3 pages and 24 words short with it floated.
+            if (table.VerticalOrigin is not (FrameVerticalOrigin.Page or FrameVerticalOrigin.PageMargin))
+            {
+                return false;
+            }
+
+            if (!FillsTheColumn(table, area)) return false;
+
+            displaces = true;
+        }
 
         // How much of the fly this sheet can hold, which is Writer's `GetFlyAnchorBottom` deadline
         // measured from the fly's own top. A fly that starts below the body has no first part at all,
         // and one that fits entirely is placed exactly as before — `room` is then at least the whole
         // height and no cut can happen.
         Length room = DeadlineFor(table, area, sheet, top, height) - top;
-        bool splits = room > Length.Zero && room < height;
+
+        // A fly whose stated top leaves no room at all on this page is the one case still left in the
+        // flow. There is no first part to place, so floating it would draw every row off the sheet —
+        // which is what the height guard removed above used to prevent by accident, for the whole class
+        // rather than for this corner of it. Nothing in the corpus reaches it either way.
+        if (room <= Length.Zero) return false;
+
+        bool splits = room < height;
 
         TablePart part = PlaceTablePart(
             table, laid, 0, Length.Zero, area, top, column, splits ? room : height,
@@ -3131,7 +3535,55 @@ public sealed class Paginator
         // Where the table's own zero landed, for the pass after this one — the same record an in-flow
         // table leaves, and a cell's anchored frame is measured against it either way.
         _nextTableOrigins[index] = new DocPoint(area.X, area.Y + top);
+
+        if (displaces) resumesAt = top + height + table.LowerSpacing;
+
         return true;
+    }
+
+    /// <summary>
+    /// Whether a floated table leaves no room beside itself, so that the flow must go under it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's body flies take the parallel surround, so the flow is pushed clear of one rather than
+    /// drawn through it — and <em>clear</em> means beside where there is room and below where there is
+    /// not. Nothing here can wrap into a margin beside a fly, which is why
+    /// <see cref="RunsIntoTheFly"/> refuses to float a table the flow would meet; but the second case
+    /// needs no wrapping at all, only a position, and it is the one the corpus is full of.
+    /// </para>
+    /// <para>
+    /// Measured against 24.2.7.2 on two authored probes differing only in the table's width — the same
+    /// <c>w:tblpPr</c>, the same following paragraph. A 200 pt table in a 451.3 pt column puts
+    /// <c>AFTER</c> at <b>x = 266.25</b>, level with the table's first row and hard against its right
+    /// edge; a table as wide as the column puts it at <b>y = 133.03</b>, under the table's last row,
+    /// at the column's own left edge.
+    /// </para>
+    /// <para>
+    /// <b>Writer's own test is whether the first word fits the strip</b>, which the same probe
+    /// establishes: sweeping the fly's width, a following <c>AFTER</c> goes beside it down to a strip
+    /// of 28.9 pt and under it at 22.6 pt, and replacing that word with one five times as long moves
+    /// the switch from 95 per cent of the column to somewhere below 80. That is line breaking, and
+    /// nothing here can do it — so what is used instead is the case where <em>no</em> word could fit.
+    /// </para>
+    /// <para>
+    /// A twentieth of the column, which on A4 is 22.6 pt. The corpus makes that safe rather than
+    /// arbitrary: censused over its <b>46 positioned tables that state a grid</b>, the fly's width
+    /// against its column is bimodal with nothing at all between <b>0.911</b> and <b>0.960</b> — six
+    /// narrow flies, forty that fill their column and forty of which overflow it. A fly leaving a
+    /// wider strip than that keeps the behaviour it had, which is to stay in the flow.
+    /// </para>
+    /// </remarks>
+    private static bool FillsTheColumn(PageTable table, DocRect area)
+    {
+        if (area.Width <= Length.Zero) return false;
+
+        Length left = table.LeftWithin(area.Width);
+        Length right = left + table.WidthWithin(area.Width);
+
+        Length beside = Length.Max(Length.Zero, left) + Length.Max(Length.Zero, area.Width - right);
+
+        return beside.Emu * 20 < area.Width.Emu;
     }
 
     /// <summary>
@@ -3289,9 +3741,12 @@ public sealed class Paginator
             bool acrossSpans = SpansMayBeCut(heights[from], body.Height);
 
             TableLayouter.RowSlice? tail =
-                TableLayouter.SliceRow(table.Rows[from], rowCells, drawn, room - placed, acrossSpans)
+                TableLayouter.SliceRow(
+                    table.Rows[from], rowCells, drawn, room - placed, acrossSpans,
+                    _options.KeepsSpacingAtTopOfPage)
                 ?? TableLayouter.SliceRow(
-                    table.Rows[from], rowCells, drawn, Length.FromEmu(long.MaxValue), acrossSpans);
+                    table.Rows[from], rowCells, drawn, Length.FromEmu(long.MaxValue), acrossSpans,
+                    _options.KeepsSpacingAtTopOfPage);
 
             // A remainder with nothing in it, which the cut said there was: the row is finished rather
             // than unfinished. Asking again is what would not terminate.
@@ -3358,7 +3813,8 @@ public sealed class Paginator
                     rowCells,
                     Length.Zero,
                     room - placed,
-                    SpansMayBeCut(heights[end], body.Height))
+                    SpansMayBeCut(heights[end], body.Height),
+                    _options.KeepsSpacingAtTopOfPage)
                 is { } head)
             {
                 cells.AddRange(TableLayouter.Offset(head.Cells, body.X, body.Y + top + placed));

@@ -153,7 +153,9 @@ public sealed record OdfTextFormat
     /// LibreOffice treats 600 and above as bold, and matching that keeps a document
     /// authored with <c>font-weight="600"</c> looking the same in both.
     /// </remarks>
-    private static bool IsBoldWeight(string? value) => value switch
+    /// <param name="value">The attribute's value, or null where no style states one.</param>
+    /// <returns>True when the weight is bold.</returns>
+    public static bool IsBoldWeight(string? value) => value switch
     {
         null or "normal" or "lighter" => false,
         "bold" or "bolder" => true,

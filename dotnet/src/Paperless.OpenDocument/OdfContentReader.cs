@@ -67,6 +67,9 @@ public sealed partial class OdfContentReader
     private bool _atBlockStart = true;
     private bool _lastWasSpace;
 
+    // True while the walk is inside a spreadsheet cell whose text Calc takes verbatim.
+    private bool _cellVerbatim;
+
     /// <summary>
     /// Receives the bookmarks, change marks and fields the walk steps over, when a caller wants them.
     /// </summary>
@@ -75,6 +78,60 @@ public sealed partial class OdfContentReader
     /// and only the word-processing reader has anywhere to put a bookmark's range.
     /// </remarks>
     public IOdfMarkSink? Marks { get; set; }
+
+    /// <summary>
+    /// Whether a table cell's own text is taken exactly as written rather than collapsed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Calc does not collapse white space inside a cell's <c>text:p</c>, and Writer
+    /// and Impress do.</strong> ODF's text content model is shared, but the importer is not:
+    /// a spreadsheet cell's paragraphs are read by Calc's own filter rather than by
+    /// <c>xmloff</c>'s text import, and <c>ScXMLCellTextParaContext::characters</c> appends
+    /// the characters it is handed with no normalisation at all
+    /// (<c>sc/source/filter/xml/celltextparacontext.cxx</c>:36-39).
+    /// </para>
+    /// <para>
+    /// The consequence that shows is the <em>newline</em>. A cell holding a raw <c>U+000A</c>
+    /// inside its <c>text:p</c> — which is how LibreOffice's own exporter carries a multi-line
+    /// cell that came in from a binary or SpreadsheetML workbook, without a single
+    /// <c>text:line-break</c> in the file — is multi-line text, and
+    /// <c>ScXMLTableRowCellContext::PushParagraphEnd</c> hands it to the EditEngine for exactly
+    /// that reason: <c>ScStringUtil::isMultiline</c> is a search for <c>\n</c> or <c>\r</c>
+    /// (<c>sc/source/core/tool/stringutil.cxx</c>:426-429) and it is one of the two conditions
+    /// that turn a string cell into an edit cell
+    /// (<c>sc/source/filter/xml/xmlcelli.cxx</c>:625-629). Collapsing it to a space throws
+    /// away every line of such a cell after the first.
+    /// </para>
+    /// <para>
+    /// Only the cell's own text takes this route. A drawing anchored in the cell holds
+    /// <em>shape</em> text, which Calc imports through <c>xmloff</c> like any other shape, so
+    /// the flag is cleared for the duration of that walk.
+    /// </para>
+    /// </remarks>
+    public bool CellTextIsVerbatim { get; set; }
+
+    /// <summary>
+    /// True when a drawing shape anchored in a table cell is read as a flow of its own rather
+    /// than as part of the cell's text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A spreadsheet is the one family that anchors a drawing <em>inside</em> a table cell:
+    /// LibreOffice's Calc exporter writes a cell-anchored object as a child of the
+    /// <c>table:table-cell</c> it is fastened to (<c>sc/source/filter/xml/xmlexprt.cxx</c>,
+    /// <c>WriteShapes</c>), so a walk that reads the cell reads the shape. Its paragraphs belong
+    /// in the cell for extraction — the words really are in that cell of that sheet — and belong
+    /// nowhere near it for layout, because in Calc the object is in the drawing layer and no cell
+    /// question can see it. See <see cref="ContentTableCell.GetOwnText"/>.
+    /// </para>
+    /// <para>
+    /// Set by the ODS reader alone. In a word-processing document a shape is anchored inside a
+    /// paragraph and already hoists to a frame section of its own
+    /// (<see cref="ReadAnchoredShape"/>), so nothing there reaches this.
+    /// </para>
+    /// </remarks>
+    public bool CellShapesAreOwnFlow { get; set; }
 
     private readonly List<int> _listCounters = [];
     private OdfListStyle? _currentListStyle;
@@ -189,17 +246,22 @@ public sealed partial class OdfContentReader
                     return;
             }
         }
+        else if (OdfNamespaces.IsTable(ns) && name == "table")
+        {
+            // Either spelling, because LibreOffice writes a table inside a drawing shape's text as
+            // `loext:table` — see OdfNamespaces.IsTable.
+            ReadTable(element, target);
+            return;
+        }
         else if (ns == OdfNamespaces.Table)
         {
-            if (name == "table") { ReadTable(element, target); return; }
-
             // Everything else at table level in a spreadsheet body — named expressions,
             // database ranges, data pilot tables, calculation settings — is not content.
             return;
         }
         else if (ns is OdfNamespaces.Draw or OdfNamespaces.Dr3d)
         {
-            ReadShape(element, target);
+            ReadCellAnchoredShape(element, target);
             return;
         }
         else if (ns == OdfNamespaces.Office)
@@ -429,6 +491,15 @@ public sealed partial class OdfContentReader
     private void AppendCollapsed(ContentParagraph paragraph, string text, string? hyperlink)
     {
         if (text.Length == 0) return;
+
+        // A spreadsheet cell's text is not collapsed at all; see CellTextIsVerbatim.
+        if (_cellVerbatim)
+        {
+            Emit(paragraph, text, hyperlink);
+            _atBlockStart = false;
+            _lastWasSpace = text[^1] is ' ' or '\t' or '\r' or '\n';
+            return;
+        }
 
         StringBuilder collapsed = new(text.Length);
         foreach (char character in text)
@@ -821,6 +892,7 @@ public sealed partial class OdfContentReader
     private readonly record struct ReadingState(
         bool AtBlockStart,
         bool LastWasSpace,
+        bool CellVerbatim,
         int ListLevel,
         OdfListStyle? ListStyle,
         string PendingText,
@@ -835,7 +907,7 @@ public sealed partial class OdfContentReader
     private ReadingState SuspendReading()
     {
         ReadingState state = new(
-            _atBlockStart, _lastWasSpace, _listLevel, _currentListStyle,
+            _atBlockStart, _lastWasSpace, _cellVerbatim, _listLevel, _currentListStyle,
             _pendingText.ToString(), _pendingFormat, _pendingHyperlink, _pendingStyleName);
 
         _pendingText.Clear();
@@ -844,6 +916,7 @@ public sealed partial class OdfContentReader
         _pendingStyleName = null;
         _listLevel = 0;
         _currentListStyle = null;
+        _cellVerbatim = false;
         return state;
     }
 
@@ -851,6 +924,7 @@ public sealed partial class OdfContentReader
     {
         _atBlockStart = state.AtBlockStart;
         _lastWasSpace = state.LastWasSpace;
+        _cellVerbatim = state.CellVerbatim;
         _listLevel = state.ListLevel;
         _currentListStyle = state.ListStyle;
         _pendingText.Clear();
@@ -899,6 +973,44 @@ public sealed partial class OdfContentReader
         }
 
         _hoisted.Add(frame);
+    }
+
+    /// <summary>
+    /// Reads a shape that a block-level walk found, keeping a spreadsheet cell's shape text out
+    /// of the cell's own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The section is added only once the shape turns out to hold something, so a picture-only
+    /// frame — which contributes a <see cref="ContentImage"/> and no text — is unaffected, and a
+    /// shape holding nothing at all leaves the cell exactly as it was.
+    /// </para>
+    /// <para>
+    /// The reading state is suspended around the walk for the same reason
+    /// <see cref="ReadAnchoredShape"/> suspends it: the shape's paragraphs are ordinary
+    /// <c>xmloff</c> text and are collapsed like any other, where the cell's own are taken
+    /// verbatim. See <see cref="CellTextIsVerbatim"/>, whose remarks have always said so.
+    /// </para>
+    /// </remarks>
+    private void ReadCellAnchoredShape(XElement shape, ContentNode target)
+    {
+        if (!CellShapesAreOwnFlow || target is not ContentTableCell cell)
+        {
+            ReadShape(shape, target);
+            return;
+        }
+
+        ContentSection frame = new()
+        {
+            Kind = SectionKind.Frame,
+            Name = Attribute(shape, OdfNamespaces.Draw, "name"),
+        };
+
+        ReadingState state = SuspendReading();
+        ReadShape(shape, frame);
+        ResumeReading(state);
+
+        if (frame.Children.Count > 0) cell.Children.Add(frame);
     }
 
     /// <summary>

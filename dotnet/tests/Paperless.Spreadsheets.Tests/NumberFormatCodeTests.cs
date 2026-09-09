@@ -89,40 +89,47 @@ public class NumberFormatCodeTests
         // Most workbooks say "format 14" and expect the reader to know. Without the table a
         // majority of dates in a majority of files extract as five-digit numbers.
         BuiltInNumberFormats.Code(0).ShouldBe("General");
-        BuiltInNumberFormats.Code(14).ShouldBe("DD/MM/YYYY");
+        BuiltInNumberFormats.Code(14).ShouldBe("M/D/YYYY");
         BuiltInNumberFormats.Code(9).ShouldBe("0%");
         BuiltInNumberFormats.Code(49).ShouldBe("@");
 
         // 27 is one of the international spellings, which resolve to the base format.
-        BuiltInNumberFormats.Code(27).ShouldBe("DD/MM/YYYY");
+        BuiltInNumberFormats.Code(27).ShouldBe("M/D/YYYY");
 
         // Everything from 164 up is the file's own.
         BuiltInNumberFormats.Code(BuiltInNumberFormats.FirstUserIndex).ShouldBeNull();
     }
 
     [Fact]
-    public void TheBiffAndOoxmlBuiltInTablesDisagreeAndAreMeantTo()
+    public void TheBiffAndOoxmlReadersShareOneBuiltInTable()
     {
-        // The one place the two readers deliberately do not share a table. LibreOffice reads
-        // BIFF through spBuiltInFormats_DONTKNOW (sc/source/filter/excel/xlstyle.cxx:819) and
-        // OOXML through the per-locale table in
-        // sc/source/filter/oox/numberformatsbuffer.cxx:436, whose en_US row is the one used
-        // here — and the two spell the same index differently. Merging them would silently
-        // change what one of the readers extracts, so the disagreement is asserted rather
-        // than left to be tidied away by somebody who notices the duplication.
+        // This asserted the opposite until round 68, on the reading that LibreOffice sends BIFF
+        // through `spBuiltInFormats_DONTKNOW` (sc/source/filter/excel/xlstyle.cxx:819) and OOXML
+        // through a per-locale table, so that the two readers were meant to spell index 14
+        // differently. That is the wrong axis. **Neither table is chosen by the file.**
+        // `XclNumFmtBuffer`'s table is picked by `meSysLang` — `rRoot.GetSysLanguage()`,
+        // documented in sc/source/filter/inc/xlstyle.hxx:469 as "Current system language" — and
+        // `DONTKNOW` is only the last parent in that walk (xlstyle.cxx:1437-1470);
+        // `NumberFormatsBuffer::insertBuiltinFormats` does the same with its own system locale
+        // (numberformatsbuffer.cxx:1919-1975). So both readers land on the same row, and here
+        // that row is en-US.
+        //
+        // Measured rather than re-read: dotnet/probes/numfmt-r68/make-codes.py puts one cell per
+        // built-in id in a workbook declaring no <numFmt> and renders it through both installed
+        // binaries. Both draw 8/21/2022 for id 14, 2:20 and 0:00 for id 20, and (100.00) for
+        // id 40 — never the DD/MM/YYYY, hh:mm and -100.00 the DONTKNOW table spells. The cost of
+        // the old reading was 126 cells reading 00:00 on
+        // `Template Pilot Logbook JAR-FCL V3.0.xls` and 13 corpus documents' dates transposed.
         NumberFormatCode biff = NumberFormatCode.Parse(BuiltInNumberFormats.Code(14));
         NumberFormatCode ooxml = XlsxStyles.Empty.FormatForId(14);
 
-        biff.Code.ShouldBe("DD/MM/YYYY");
-        ooxml.Code.ShouldBe("M/D/YYYY");
-
-        // Same day, two orders — which is the locale problem, not a defect in either reader.
-        NumberFormatter.Format(biff, 46233).ShouldBe("30/07/2026");
+        biff.Code.ShouldBe(ooxml.Code, "one table now serves both readers");
+        NumberFormatter.Format(biff, 46233).ShouldBe("7/30/2026");
         NumberFormatter.Format(ooxml, 46233).ShouldBe("7/30/2026");
 
-        // Index 37 differs in the same way: BIFF signs a negative and OOXML brackets it.
+        // Index 37 was the other half of the old claim: the two now bracket a negative alike.
         NumberFormatter.Format(NumberFormatCode.Parse(BuiltInNumberFormats.Code(37)), -1234)
-                       .ShouldBe("-1,234");
+                       .ShouldBe("(1,234)");
         NumberFormatter.Format(XlsxStyles.Empty.FormatForId(37), -1234)
                        .ShouldBe("(1,234)");
     }

@@ -295,6 +295,45 @@ public static class DrawingChartAutoFormat
     }
 
     /// <summary>
+    /// The colour a chart's text takes when its own element states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>spChartTitleTexts</c>, <c>spAxisTitleTexts</c> and <c>spOtherTexts</c>
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx:415-434</c>) are three tables of two
+    /// rows each, and all three carry the same two colours: <c>tx1</c> for styles 1 to 40 and
+    /// <c>lt1</c> for 41 to 48. What separates the tables is the size and the weight, which
+    /// <see cref="DrawingChartPlot"/> already reads; the colour is one answer for every piece of
+    /// text a chart holds, so it is one function.
+    /// </para>
+    /// <para>
+    /// <strong>It is not "black", and the difference is a whole chart.</strong>
+    /// <c>TextFormatter</c>'s constructor pushes this colour in as the placeholder the element's
+    /// own <c>a:defRPr</c> then overrides (<c>:906-928</c>), so an element that states nothing
+    /// takes it outright. Style 42 is one of the dark styles — <see cref="FrameFillOf"/> paints
+    /// its chart space black — and its text is <c>lt1</c>, white. Falling back to black instead
+    /// draws every title, tick label and legend entry of a dark chart in black on black:
+    /// measured on <c>DynamicBubbleChart.xlsx</c>, whose title, both axis titles and all four
+    /// tick labels are in our PDF's text layer and none of them visible.
+    /// </para>
+    /// <para>
+    /// The 1-to-40 row matters too, and less dramatically. <c>tx1</c> resolves to the theme's
+    /// <c>dk1</c>, which is black on 162 of the corpus's 169 chart-bearing OOXML files and
+    /// <c>3C3D36</c> or <c>003F42</c> on the other seven — so those seven were drawn a shade too
+    /// dark rather than invisibly.
+    /// </para>
+    /// </remarks>
+    /// <param name="style">The chart's <c>c:style/@val</c>.</param>
+    /// <param name="theme">The theme the scheme name resolves against.</param>
+    public static Colour? TextColourOf(int style, DrawingTheme? theme)
+    {
+        XElement colour = new(
+            Drawing.Name("schemeClr"), new XAttribute("val", style >= 41 ? "lt1" : "tx1"));
+
+        return DrawingColour.Read(colour)?.Resolve(theme);
+    }
+
+    /// <summary>
     /// The colour a series takes when it states none, as a <c>a:solidFill</c>, or null for none.
     /// </summary>
     /// <param name="style">The chart's <c>c:style/@val</c>.</param>

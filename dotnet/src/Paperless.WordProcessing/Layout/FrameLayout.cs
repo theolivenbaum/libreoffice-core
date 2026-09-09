@@ -45,34 +45,124 @@ public static class FrameLayout
     /// True when the page is a right-hand one, which is the only thing the inside and outside alignments
     /// differ by.
     /// </param>
+    /// <param name="bodyArea">
+    /// The page's body rectangle as it was actually laid out — <see cref="LaidOutPage.BodyArea"/>, which
+    /// is <paramref name="geometry"/>'s text area with whatever a running head or foot that outgrew its
+    /// reserved room did to it. Only <see cref="FrameVerticalOrigin.PageMargin"/> uses it, and it
+    /// defaults to the stated text area, which is what the two are on a page whose furniture fits.
+    /// </param>
+    /// <param name="capturesOnPage">
+    /// Whether a content-anchored frame is pulled back inside the page —
+    /// <c>SwAnchoredObjectPosition::ImplAdjustVertRelPos</c>. See
+    /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/> for which formats set it.
+    /// </param>
+    /// <param name="capturesMarginBands">
+    /// Whether a frame stated against a margin band, and wrapped around by the text, is pulled back
+    /// inside the body — see <see cref="PaginationOptions.CapturesMarginBandObjects"/>, which is where
+    /// the rule, its two C++ seats and the reason it is applied no more widely are written out.
+    /// </param>
     public static DocRect Place(
         PageFrame frame,
         PageGeometry geometry,
         DocRect column,
         Length anchorTop,
         bool rightHandPage = true,
-        Length? anchorLineTop = null)
+        Length? anchorLineTop = null,
+        DocRect? bodyArea = null,
+        bool capturesOnPage = true,
+        bool capturesMarginBands = false)
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(geometry);
 
         DocRect page = new(Length.Zero, Length.Zero, geometry.Size.Width, geometry.Size.Height);
         DocRect text = geometry.TextArea;
+        DocRect body = bodyArea ?? text;
 
+        // The two margin *bands* are their own alignment areas rather than the page — `PAGE_LEFT` is
+        // `GetLeftMargin(page)` wide from the sheet's left edge and `PAGE_RIGHT` is
+        // `GetRightMargin(page)` wide from `GetPrtRight(page)`
+        // (`sw/source/core/objectpositioning/anchoredobjectposition.cxx`:769-788). Only the y and the
+        // height of these rectangles are unused, so they carry the page's.
+        //
+        // Measured in `dotnet/probes/frame-area-r85/`, a 40 x 20 pt band on A4 with 72 pt margins.
+        // Band left edge in points, both installed references identical on every row:
+        //
+        //   fixture                    reference   ours before
+        //   h-leftmargin-0                  0.00          0.00   <- an offset agrees by accident
+        //   h-leftmargin-centre            16.00        277.75
+        //   h-leftmargin-right             32.00        555.25
+        //   h-rightmargin-0               523.25          0.00
+        //   h-rightmargin-centre          539.25        277.75
+        //   h-outsidemargin-0              72.00          0.00
+        //
+        // `h-leftmargin-0` is why reading only offsets would have missed this: the band and the page
+        // share a left edge, so the defect is invisible until something is aligned in it.
         DocRect horizontal = frame.HorizontalOrigin switch
         {
             FrameHorizontalOrigin.Page => page,
             FrameHorizontalOrigin.PageMargin => text,
             FrameHorizontalOrigin.Column => column,
+            FrameHorizontalOrigin.LeftMarginArea =>
+                new DocRect(page.X, page.Y, text.X - page.X, page.Height),
+            FrameHorizontalOrigin.RightMarginArea =>
+                new DocRect(text.Right, page.Y, page.Right - text.Right, page.Height),
             _ => column,
         };
 
         Length lineTop = anchorLineTop ?? anchorTop;
 
+        // The margin-relative area runs from the *header frame's bottom to the footer frame's top*, not
+        // from `w:top` to `w:bottom`. `RelOrientation::PAGE_PRINT_AREA` takes the page's print area and
+        // then walks the page frame's lowers, subtracting each header frame's height from the area and
+        // adding it to the offset and subtracting each footer frame's height —
+        // `sw/source/core/objectpositioning/anchoredobjectposition.cxx`:336-361. Since Writer's DOCX
+        // import makes the page's own top margin `w:header` and gives the header frame `w:top - w:header`
+        // as a *dynamic* height (`dmapper/PropertyMap.cxx`:1148), the two coincide exactly while the
+        // running heads fit the room those margins reserve, and part company when one outgrows it — which
+        // is the same quantity `Paginator.PushedDownBy` and `PulledUpBy` already apply to the body, so
+        // the body's own rectangle is the answer.
+        //
+        // Measured in `dotnet/probes/words-margin-print-area/`, a 200 x 50 pt band centred vertically
+        // against the margin on A4 with `w:top` = `w:header` = 708 twips. Band centre, in points, both
+        // installed references identical on every row:
+        //
+        //   fixture       reference   body top   ours before
+        //   none            402.62      35.4       402.75
+        //   hdr-empty       409.38      48.9       402.75
+        //   hdr-3line       423.38      76.8       402.75
+        //   hdr-roomy       435.00     100.0       435.00     <- reserved room not exceeded
+        //   ftr-3line       400.25      35.4       402.75
+        //   hdr3-ftr3       421.00      76.8       402.75
+        //
+        // `hdr-roomy` is the control that says it is the *frame* and not the header's content: a header
+        // of one line inside a 64.6 pt reservation moves nothing. Horizontally there is no such rule —
+        // the header/footer walk in the horizontal case is guarded by `aRectFnSet.IsVert()`
+        // (the same file, :824), so it applies to a vertical writing mode only.
+        //
+        // The two vertical margin bands are bounded by the *body*, so they are the complement of
+        // `PageMargin` above and move with a running head that outgrew its reserved room in the same
+        // way. `PAGE_PRINT_AREA_TOP` runs from the sheet's top to the body's top — see
+        // `FrameVerticalOrigin.TopMarginArea` for why the layout's own switch does not say so — and
+        // `PAGE_PRINT_AREA_BOTTOM` from the body's bottom to the sheet's.
+        //
+        // Same probe, a 60 x 20 pt band, both installed references identical on every row:
+        //
+        //   fixture                    reference   ours before
+        //   v-topmargin-0                   0.00         72.00
+        //   v-topmargin-centre             26.00        411.00
+        //   v-topmargin-bottom             52.00        750.00
+        //   v-bottommargin-0              770.00         72.00
+        //   v-bottommargin-centre         796.00        411.00
+        //   v-bottommargin-bottom         821.75        750.00
         DocRect vertical = frame.VerticalOrigin switch
         {
             FrameVerticalOrigin.Page => page,
-            FrameVerticalOrigin.PageMargin => text,
+            FrameVerticalOrigin.PageMargin => body,
+            FrameVerticalOrigin.TopMarginArea =>
+                new DocRect(page.X, page.Y, page.Width, body.Y - page.Y),
+            FrameVerticalOrigin.BottomMarginArea =>
+                new DocRect(page.X, body.Bottom, page.Width, page.Bottom - body.Bottom),
             FrameVerticalOrigin.Line =>
                 new DocRect(column.X, lineTop, column.Width, text.Bottom - lineTop),
             _ => new DocRect(column.X, anchorTop, column.Width, text.Bottom - anchorTop),
@@ -104,9 +194,200 @@ public static class FrameLayout
             _ => vertical.Y + frame.VerticalOffset,
         };
 
+        Length placedX = x + frame.GroupOffset.X;
+        Length placedY = y + frame.GroupOffset.Y;
+
+        // Whether this frame is captured at all, and in what. `DisableOffPagePositioning` exempts a
+        // *wrap-through* object and nothing else (`IsDraggingOffPageAllowed`,
+        // `sw/source/core/layout/anchoredobject.cxx`:790-801), so a DOCX frame the text wraps around
+        // is captured although `capturesOnPage` is off for that format; and the area it is captured
+        // in narrows from the sheet to the body under `compatibilityMode` 15, for every vertical
+        // origin except the sheet and the margin area (`anchoredobjectposition.cxx`:562-573). Only
+        // the two margin bands take it here, and `PaginationOptions.CapturesMarginBandObjects`
+        // measures why the wider rule is left. The horizontal capture never narrows —
+        // `ImplAdjustHoriRelPos` (:674-722) takes the page frame's own rectangle with no such branch.
+        bool inBody = capturesMarginBands
+            && frame.Wrap != TextWrap.Through
+            && frame.VerticalOrigin
+                is FrameVerticalOrigin.TopMarginArea or FrameVerticalOrigin.BottomMarginArea;
+
         return new DocRect(
-            x + frame.GroupOffset.X, y + frame.GroupOffset.Y, frame.Size.Width, frame.Size.Height);
+            capturesOnPage || inBody ? CapturedOnPageAcross(frame, page, placedX) : placedX,
+            capturesOnPage || inBody ? CapturedOnPage(frame, inBody ? body : page, placedY) : placedY,
+            frame.Size.Width,
+            frame.Size.Height);
     }
+
+    /// <summary>
+    /// A content-anchored frame pulled back inside the page it is on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwAnchoredObjectPosition::ImplAdjustVertRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:504-667), which is what its
+    /// own comment calls <em>"adjust calculated vertical in order to keep object inside 'page'
+    /// alignment layout frame"</em>. Two corrections in order: the bottom first —
+    /// <c>nTopOfAnch + nAdjustedRelPosY + aObjSize.Height() &gt; aPgAlignArea.Bottom()</c> pulls the
+    /// object up until its bottom rests on the area's — and then the top, which pushes it back down if
+    /// the first correction has taken it above. A frame taller than the page therefore ends flush with
+    /// the top and overflows the bottom, which is the order the C++ applies and not an accident of it.
+    /// </para>
+    /// <para>
+    /// <b>The area is the whole page, and only a content anchor is captured.</b>
+    /// <c>SwToLayoutAnchoredObjectPosition</c> — a <c>FLY_AT_PAGE</c> fly — never calls this at all
+    /// (<c>tolayoutanchoredobjectposition.cxx</c>:100-131 sets the position and then only grows the
+    /// page in browse mode), so a page-anchored frame may hang off the sheet and is left alone here.
+    /// The area is <c>rPageFrame.getFrameArea()</c> whenever
+    /// <c>CONSIDER_WRAP_ON_OBJECT_POSITION</c> is set, which every Word import sets; the narrowing to
+    /// the body frame beside it is DOCX <c>compatibilityMode</c> 15 and non-wrap-through only, and is
+    /// deliberately not reproduced — it can only clamp <em>further</em>, so leaving it out cannot put a
+    /// frame outside the page.
+    /// </para>
+    /// <para>
+    /// The one escape is <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
+    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801), which needs
+    /// <c>DisableOffPagePositioning</c> <em>and</em> a wrap-through object.
+    /// <b>This used to say that no DOC or DOCX import sets that flag, and it is set for two of the
+    /// four formats:</b> <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 sets it for every
+    /// writerfilter import, one line below the <c>DoNotCaptureDrawObjsOnPage</c> the paragraph above
+    /// cites, so it is live for DOCX and RTF and absent from WW8 and ODF. It fires on none of the
+    /// twenty-one RTF probes in <c>dotnet/probes/rtf-shape-r73/</c>, two of which are wrap-through,
+    /// so what makes it inert there is not yet established.
+    /// </para>
+    /// <para>
+    /// Measured on <c>words/done-013/doc/omrIMInterpretiveGuideLine.doc</c> against 26.2.4.2 with the
+    /// tarball's <c>LiberationSansNarrow</c> moved aside, so the two stacks resolve the same faces.
+    /// Its <c>COMMENTS AND QUESTIONS</c> block is a WW8 APO — <c>sprmPDyaAbs</c> 100.90 pt from a
+    /// paragraph whose top is 666.45 pt down a 792 pt page, 36.00 pt tall — so its stated bottom is
+    /// 803.35, <b>11.35 pt below the sheet</b>, and its second line was drawn at a baseline of −0.70.
+    /// The reference draws the same block with its bottom flush at 791.95. Every one of page 1's other
+    /// 30 lines already agreed to 0.05 pt in both directions; the frame was the only thing that did
+    /// not.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The frame, for its anchor and its height.</param>
+    /// <param name="area">
+    /// The rectangle the frame is captured in: the sheet, or the page's body under DOCX
+    /// <c>compatibilityMode</c> 15 — see <see cref="PaginationOptions.CapturesMarginBandObjects"/>.
+    /// </param>
+    /// <param name="y">The position the origin and the offset gave it.</param>
+    private static Length CapturedOnPage(PageFrame frame, DocRect area, Length y)
+    {
+        if (frame.Anchor is not (FrameAnchor.Paragraph or FrameAnchor.Character)) return y;
+
+        Length height = frame.Size.Height;
+        if (y + height > area.Bottom) y = area.Bottom - height;
+        if (y < area.Y) y = area.Y;
+
+        return y;
+    }
+
+    /// <summary>
+    /// The same capture across the page, which is the other half of the same rule.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwAnchoredObjectPosition::ImplAdjustHoriRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:674-721) — <em>"adjust
+    /// calculated horizontal in order to keep object inside 'page' alignment layout frame"</em> — sits
+    /// beside <c>ImplAdjustVertRelPos</c> and is reached through the same
+    /// <c>mbDoNotCaptureAnchoredObj</c> guard (<c>anchoredobjectposition.hxx</c>:268-273). It applies
+    /// the two corrections in the same order: the right edge first, so a frame wider than the page ends
+    /// flush with the left and overflows the right.
+    /// </para>
+    /// <para>
+    /// A fly gets the same treatment a second time from <c>SwFlyFreeFrame::CheckClip</c>
+    /// (<c>sw/source/core/layout/flylay.cxx</c>:471-545), which moves it left until its right edge
+    /// rests on the clip rectangle's and never past that rectangle's own left.
+    /// </para>
+    /// <para>
+    /// <b>The area is the page, not its text area.</b> Measured against 26.2.4.2 on fifteen one-shape
+    /// RTF probes — five <c>\shpwr</c> values × <em>fits</em>, <em>overflows right</em>,
+    /// <em>overflows left</em> — on A4 with a 3139-twip left margin: a 10723-twip box offered
+    /// 3730 twips is drawn at <b>1183</b>, which is <c>paperw − width</c> to the twip, and a box offered
+    /// −861 is drawn at <b>0</b>. A box that begins entirely off the sheet is moved too. See
+    /// <c>dotnet/probes/rtf-shape-r73/results.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The frame, for its anchor and its width.</param>
+    /// <param name="page">The page rectangle, which is the area a frame is captured in.</param>
+    /// <param name="x">The position the origin and the offset gave it.</param>
+    private static Length CapturedOnPageAcross(PageFrame frame, DocRect page, Length x)
+    {
+        if (frame.Anchor is not (FrameAnchor.Paragraph or FrameAnchor.Character)) return x;
+
+        Length width = frame.Size.Width;
+        if (x + width > page.Right) x = page.Right - width;
+        if (x < page.X) x = page.X;
+
+        return x;
+    }
+
+    /// <summary>
+    /// The frame as tall as its own text, for a frame whose stated height is only a floor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="PageFrame.GrowsToContent"/> carries the rule and its citations; this is the
+    /// arithmetic, in <c>SwFlyFrame::Format</c>'s own order
+    /// (<c>sw/source/core/layout/fly.cxx</c>:1549-1570): the content height, raised to the stated
+    /// minimum less the insets, raised again to <c>MINFLY</c>, and the insets added back. Doing the
+    /// two clamps in the other order would let a frame with a large inset and no content come out
+    /// shorter than <c>MINFLY</c>.
+    /// </para>
+    /// <para>
+    /// <strong>This runs before <see cref="Place"/>, and needs to.</strong> The round that first
+    /// placed an ODF frame supposed that growing one would mean inverting the order of the two,
+    /// because a frame's rectangle is what its content is laid out in. It does not:
+    /// <see cref="Place"/> is a pure function of the frame's <em>size</em> and the page and anchor
+    /// geometry, and what the content's own layout needs is the frame's <em>width</em>, which every
+    /// format states outright. So the height can be measured in a pass that runs first, and only a
+    /// rule where placement fed back into measurement would need the inversion.
+    /// </para>
+    /// <para>
+    /// <strong>The inset taken is <see cref="PageFrame.Padding"/> alone, where Writer's <c>nUL</c> is
+    /// the padding <em>plus</em> the border width plus the shadow space.</strong> That is deliberate
+    /// and it is consistency rather than an approximation of the rule: <c>FrameResolution.Content</c>
+    /// insets a frame's text by the padding and nothing else, so taking a wider inset here would
+    /// leave the frame taller than the text it was measured from. Of the 59 growing frames in the
+    /// 338 converted <c>.odt</c>, 53 declare <c>fo:border="none"</c> and the other five declare
+    /// 0.06 pt or 0.74 pt, so the whole of what this leaves out is under a point and a half, on
+    /// five frames.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The frame as the reader gave it.</param>
+    /// <param name="collapsesSpacing">See <see cref="FlowLayouter.LayOut"/>.</param>
+    /// <param name="addsCellLineSpacing">See <see cref="PaginationOptions.AddsCellLineSpacing"/>.</param>
+    /// <returns>The frame, grown, or exactly the frame given when it does not grow.</returns>
+    public static PageFrame Grown(
+        PageFrame frame, bool collapsesSpacing = false, bool addsCellLineSpacing = false)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (!frame.GrowsToContent) return frame;
+
+        Length insets = frame.Padding.Top + frame.Padding.Bottom;
+        Length width = frame.Size.Width - frame.Padding.Left - frame.Padding.Right;
+
+        Length inside = frame.Blocks.Count == 0 || width <= Length.Zero
+            ? Length.Zero
+            : FlowLayouter.HeightOf(
+                frame.Blocks, width, 0, collapsesSpacing, addsCellLineSpacing);
+
+        inside = Length.Max(inside, frame.Size.Height - insets);
+        inside = Length.Max(inside, MinimumFlyHeight);
+
+        Length height = inside + insets;
+
+        return height == frame.Size.Height
+            ? frame
+            : frame with { Size = new DocSize(frame.Size.Width, height) };
+    }
+
+    /// <summary>
+    /// The floor under every fly's print area: <c>MINFLY</c>, 23 twips
+    /// (<c>sw/inc/swtypes.hxx</c>:59, <em>"Minimal size for FlyFrames"</em>).
+    /// </summary>
+    private static readonly Length MinimumFlyHeight = Length.FromTwips(23);
 }
 
 /// <summary>
@@ -167,12 +448,23 @@ internal sealed class FrameResolution
     /// Whether a table inside a frame grows its cells by their last paragraph's proportional line
     /// spacing — see <see cref="PaginationOptions.AddsCellLineSpacing"/>.
     /// </param>
+    /// <param name="capturesOnPage">
+    /// Whether a content-anchored frame is pulled back inside its page — see
+    /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/>, which is where the rule and the
+    /// formats it applies to are written out.
+    /// </param>
+    /// <param name="capturesMarginBands">
+    /// Whether a frame stated against a margin band and wrapped around by the text is pulled back
+    /// inside the body — see <see cref="PaginationOptions.CapturesMarginBandObjects"/>.
+    /// </param>
     public static FrameResolution Of(
         IReadOnlyList<PageBlock> blocks,
         IReadOnlyList<PaginatedSection> sections,
         IReadOnlyList<LaidOutPage> pages,
         bool collapsesSpacing = false,
-        bool addsCellLineSpacing = false)
+        bool addsCellLineSpacing = false,
+        bool capturesOnPage = true,
+        bool capturesMarginBands = false)
     {
         Dictionary<int, Placement> placements = [];
 
@@ -207,6 +499,22 @@ internal sealed class FrameResolution
         List<long> signature = [];
         int frames = 0;
 
+        // A frame whose stated height is only a floor is made as tall as its own text before anything
+        // is placed, and the answer is memoised because the same frame is asked for once per pass and
+        // measuring one costs a whole layout of its blocks. By identity, since two frames of equal
+        // value are still two frames.
+        Dictionary<PageFrame, PageFrame> grown = new(ReferenceEqualityComparer.Instance);
+
+        PageFrame Sized(PageFrame frame)
+        {
+            if (!frame.GrowsToContent) return frame;
+            if (grown.TryGetValue(frame, out PageFrame? already)) return already;
+
+            PageFrame sized = FrameLayout.Grown(frame, collapsesSpacing, addsCellLineSpacing);
+            grown[frame] = sized;
+            return sized;
+        }
+
         // One paragraph's frames, given the rectangle its origins are measured in and where its own top
         // ended up. Shared by the body's blocks and by the flows, which differ only in how those two are
         // arrived at — the body's from a placed line, a flow's from the flow's own area.
@@ -221,12 +529,14 @@ internal sealed class FrameResolution
             PageGeometry geometry = sections[
                 Math.Clamp(page.SectionIndex, 0, sections.Count - 1)].Section.Page;
 
-            foreach (PageFrame frame in paragraph.Frames)
+            foreach (PageFrame stated in paragraph.Frames)
             {
                 // An as-character frame is not placed against an origin at all — it hangs on a line, at
                 // the position its anchor character occupies. That needs the line rather than the
                 // paragraph, so it is done by the walk below.
-                if (frame.Anchor == FrameAnchor.AsCharacter) continue;
+                if (stated.Anchor == FrameAnchor.AsCharacter) continue;
+
+                PageFrame frame = Sized(stated);
 
                 DocRect area = FrameLayout.Place(
                     frame,
@@ -234,7 +544,10 @@ internal sealed class FrameResolution
                     origin,
                     anchorTop,
                     rightHandPage: page.Number % 2 == 1,
-                    anchorLineTop: anchorLineTop);
+                    anchorLineTop: anchorLineTop,
+                    bodyArea: page.BodyArea,
+                    capturesOnPage: capturesOnPage,
+                    capturesMarginBands: capturesMarginBands);
 
                 frames++;
                 signature.Add(area.X.Emu);
@@ -282,10 +595,12 @@ internal sealed class FrameResolution
         void HangInline(
             PageParagraph paragraph, int pageIndex, DocRect area, PlacedLine line)
         {
-            foreach (PageFrame frame in paragraph.Frames)
+            foreach (PageFrame stated in paragraph.Frames)
             {
-                if (frame.Anchor != FrameAnchor.AsCharacter) continue;
-                if (frame.AnchorOffset < line.Box.Line.Start) continue;
+                if (stated.Anchor != FrameAnchor.AsCharacter) continue;
+                if (stated.AnchorOffset < line.Box.Line.Start) continue;
+
+                PageFrame frame = Sized(stated);
 
                 // One past the last character belongs to the *next* line, except on the last line of
                 // the paragraph, where there is no next one. That is not an edge case worth skipping:
@@ -296,10 +611,59 @@ internal sealed class FrameResolution
                 if (frame.AnchorOffset > line.Box.Line.End) continue;
 
                 // Its top is the baseline less however much of it stands above one: the whole height for an
-                // ordinary inline picture, and nought for a shape that hangs below the line instead.
+                // ordinary inline picture, and nought for a shape that hangs below the line instead. The
+                // height in question is the *outer* one, grown by `wp:effectExtent`, because that is the
+                // rectangle Writer rests on the baseline —
+                // `SwAsCharAnchoredObjectPosition::GetObjBoundRectInclSpacing`, the object's rectangle
+                // enlarged by its spacing. The drawing itself keeps the size the file states and sits
+                // inside that rectangle, so it is *not* offset by the extent's left and top edges here.
+                //
+                // Both installed references agree on where the shape lands and it is not where either
+                // half of that sentence alone would put it: measured in
+                // `dotnet/probes/words-inline-effectextent/` and again in
+                // `dotnet/probes/words-inline-shape-ink/`, LibreOffice paints a shape's fill and
+                // outline at the outer top plus the top extent — 96.50 pt against 85.75 for a 10.8 pt
+                // extent — while laying the *text* of a shape carrying a `wps:txbx` out at the outer top
+                // regardless, its "INSIDE" run staying at 104.66 pt in both. That is its draw-shape and
+                // TextBox halves disagreeing rather than a rule, and it cannot be met by one rectangle:
+                // the rectangle here is the *text's*, and `PlacedFrame.Ink` is the drawing's, offset
+                // below it by `PageFrame.InlineInkOffset`.
+                //
+                // A *turned* drawing is offset differently again — centred in its line box in both
+                // axes rather than moved by the extent's left edge — and both rules live on
+                // `PageFrame.InlineOffset`, which carries the measurements.
+                //
+                // **Horizontally there is no such disagreement, and the two edges are not symmetric.**
+                // `make-x-fixture.py` is the same fixture laid across a line as `LEFT` + drawing +
+                // `RIGHT`, and with a 10.8 pt *left* extent both halves of the object move right by it
+                // together: the fill's own column band goes 103.50 -> 114.25 pt and the `INSIDE` run of a
+                // `wps:txbx` goes 155.95 -> 166.75, on both installed references, while a 10.8 pt *top*
+                // extent moves neither of them by anything. So x takes the left extent and y does not
+                // take the top one — which is `SwAsCharAnchoredObjectPosition::CalcPosition`
+                // (`sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx`:129-133) moving
+                // the anchor point by both spacings, with only the vertical one lost again by the
+                // TextBox half failing to follow.
+                DocPoint inside = frame.InlineOffset;
+
+                // A member of a group or a `wpc:wpc` canvas takes its place *inside* the drawing,
+                // and it is the drawing that hangs on the line: what rests on the baseline is the
+                // envelope's rectangle, not the member's, and the member is then offset within it.
+                // `Placed` has always done both for an anchored drawing — `PageFrame.GroupSize` is
+                // the envelope's rectangle and `GroupOffset` where the member sits in it — and this
+                // path did neither, so every member of an *as-character* group or canvas was drawn
+                // at the drawing's own top-left corner, a dozen shapes on one spot. Censused over
+                // the corpus, `wpc:wpc` alone is 9 canvases across 4 documents.
+                DocSize outer = frame.GroupSize is { } group
+                    ? new DocSize(
+                        group.Width + frame.EffectExtent.Left + frame.EffectExtent.Right,
+                        group.Height + frame.EffectExtent.Top + frame.EffectExtent.Bottom)
+                    : frame.InlineExtent;
+
                 DocRect placedAt = new(
-                    area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset),
-                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.Size.Height),
+                    area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset)
+                        + inside.X + frame.GroupOffset.X,
+                    area.Y + line.Baseline - (frame.InlineAscent ?? outer.Height) + inside.Y
+                        + frame.GroupOffset.Y,
                     frame.Size.Width,
                     frame.Size.Height);
 
@@ -387,6 +751,71 @@ internal sealed class FrameResolution
                         flow.Area.Y + line.Top);
                 }
             }
+        }
+
+        // And the frames anchored inside another frame's own text, which is the case a table in a text
+        // box makes ordinary: the outer frame's rectangle has to exist before an inner frame can be
+        // placed against it, so this runs after the loops above rather than beside them. Each round of
+        // the loop places the frames one nesting level deeper and enqueues whatever it placed, since a
+        // frame it placed may itself hold text holding a frame.
+        //
+        // Writer draws no distinction of its own here — an anchored object belongs to the page whatever
+        // it is nested in, exactly as the flow loop above says — and the omission was silent in the way
+        // a missing anchored object always is: the outer frame is drawn, filled and stroked, and only
+        // its inner shapes' text is absent. Measured on the converted `.odt` corpus, where LibreOffice's
+        // exporter writes a Word text box holding a table as exactly this shape: eight documents hold
+        // 857 alphanumeric characters in a shape nested inside a frame, **six of them were failing the
+        // gate for exactly that many**, and on three the loss was the document's whole shortfall
+        // against the reference to the character.
+        List<(int Page, PlacedFrame Frame)> pending = [];
+
+        foreach ((int pageIndex, List<PlacedFrame> placed) in byPage)
+        {
+            foreach (PlacedFrame frame in placed) pending.Add((pageIndex, frame));
+        }
+
+        for (int depth = 0; depth < FlowLayouter.MaxNesting && pending.Count > 0; depth++)
+        {
+            List<(int Page, PlacedFrame Frame)> deeper = [];
+
+            foreach ((int pageIndex, PlacedFrame outer) in pending)
+            {
+                if (outer.Content is not { } content) continue;
+
+                byPage.TryGetValue(pageIndex, out List<PlacedFrame>? before);
+                int already = before?.Count ?? 0;
+
+                foreach (PlacedFlow flow in Inside(content))
+                {
+                    foreach (PlacedLine line in flow.Lines)
+                    {
+                        if (line.ParagraphIndex < 0 || line.ParagraphIndex >= flow.Blocks.Count) continue;
+                        if (flow.Blocks[line.ParagraphIndex] is not PageParagraph paragraph) continue;
+                        if (paragraph.Frames.Count == 0) continue;
+
+                        HangInline(paragraph, pageIndex, flow.Area, line);
+
+                        if (!line.StartsParagraph) continue;
+
+                        PlaceFrames(
+                            paragraph,
+                            pageIndex,
+                            pages[pageIndex],
+                            flow.Area,
+                            flow.Area.Y + line.ParagraphTop,
+                            flow.Area.Y + line.Top);
+                    }
+                }
+
+                if (!byPage.TryGetValue(pageIndex, out List<PlacedFrame>? after)) continue;
+
+                for (int index = already; index < after.Count; index++)
+                {
+                    deeper.Add((pageIndex, after[index]));
+                }
+            }
+
+            pending = deeper;
         }
 
         Dictionary<int, FrameObstacles> byBlock = [];
@@ -526,6 +955,23 @@ internal sealed class FrameResolution
         }
     }
 
+    /// <summary>One placed frame's own flows: its text, and the cells of every table inside it.</summary>
+    /// <remarks>
+    /// The frame-shaped twin of <see cref="FlowsOn"/>, and separate from it because a frame's content is
+    /// not on the page's own lists — it hangs off the <see cref="PlacedFrame"/>, which exists only once
+    /// the frame has been placed.
+    /// </remarks>
+    /// <param name="content">The frame's laid-out content.</param>
+    private static IEnumerable<PlacedFlow> Inside(PlacedFlow content)
+    {
+        yield return content;
+
+        foreach (PlacedTable table in content.Tables)
+        {
+            foreach (PlacedFlow flow in CellFlows(table, 0)) yield return flow;
+        }
+    }
+
     /// <summary>The rectangle text has to keep clear of, which is the frame's plus its wrap spacing.</summary>
     /// <remarks>
     /// Writer's <c>SwAnchoredObject::GetObjRectWithSpaces</c>. Measured: a frame given
@@ -571,9 +1017,48 @@ internal sealed class FrameResolution
             collapsesSpacing: collapsesSpacing,
             addsCellLineSpacing: addsCellLineSpacing);
 
-        return flow is not null && frame.HasFixedHeight
-            ? FlowLayouter.Truncated(flow, inside.Height)
-            : flow;
+        if (flow is not null && frame.HasFixedHeight) flow = FlowLayouter.Truncated(flow, inside.Height);
+
+        return Anchored(flow, frame.TextAlignment, inside.Height);
+    }
+
+    /// <summary>
+    /// The flow moved down to sit where the shape's <c>wps:bodyPr/@anchor</c> asks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same arithmetic a table cell's <c>w:vAlign</c> gets — spare height, then none, half or all
+    /// of it — and it was missing here entirely, so every shape's text sat against the top of its box
+    /// whatever the file said. It is invisible on a text box sized to its text and unmissable on a
+    /// shape sized to be a shape: the Venn diagram templates put their labels in circles two or three
+    /// times a line tall, and a label against the top of its circle lands outside the ink it names.
+    /// </para>
+    /// <para>
+    /// Measured against the ink rather than the advance — <see cref="FlowLayouter.Extent"/> rather
+    /// than <see cref="PlacedFlow.Advance"/> — because centring is about where the text looks
+    /// centred, and the advance carries the last paragraph's space-after, which would push the block
+    /// up by half of a gap nothing draws.
+    /// </para>
+    /// <para>
+    /// Only the flow's rectangle moves; its lines are positioned relative to that rectangle and come
+    /// along. A nested table inside the frame carries page coordinates and would not, which is what
+    /// <c>TableLayouter.ShiftFlow</c> exists for — a frame holding a table and asking for centred
+    /// text would need it, and no corpus document does both.
+    /// </para>
+    /// </remarks>
+    private static PlacedFlow? Anchored(PlacedFlow? flow, VerticalTextAlignment alignment, Length height)
+    {
+        if (flow is null || alignment == VerticalTextAlignment.Top) return flow;
+
+        Length spare = height - FlowLayouter.Extent(flow);
+        if (spare <= Length.Zero) return flow;
+
+        Length offset = alignment == VerticalTextAlignment.Middle ? spare / 2 : spare;
+
+        return flow with
+        {
+            Area = new DocRect(flow.Area.X, flow.Area.Y + offset, flow.Area.Width, flow.Area.Height),
+        };
     }
 
     /// <param name="Index">Which page the block starts on.</param>
@@ -660,12 +1145,12 @@ public sealed class AnchoredObstacles(
 /// reaches the end margin. Top-and-bottom does both, which is what leaves the line with nowhere to go.
 /// </description></item>
 /// <item><description>
-/// <strong>A line whose box merely touches the frame's top edge is already affected.</strong>
-/// Measured: a frame anchored at the top of the second paragraph narrows the <em>last line of the
-/// first</em>, whose box bottom is exactly the frame's top. Writer's rectangles are inclusive
-/// (<c>SwRect::Bottom() == Top() + Height() - 1</c>) and the arithmetic around the fly portion adds a
-/// twip back, so the effective rectangle is one twip larger than its geometry on every side — which is
-/// also why text resumes 3402 rather than 3401 twips along from a frame 2268 twips wide at 1134.
+/// <strong>A line whose box merely touches the frame's top edge is not affected.</strong> Writer's
+/// rectangles are inclusive — <c>SwRect::Bottom() == Top() + Height() - 1</c> — so a frame at twip 2210
+/// and a line ending at 2210 do not overlap, and neither reference wraps that line once the tie is
+/// broken either way by a single twip. Only the <em>horizontal</em> edges gain a twip back from the
+/// arithmetic around the fly portion, which is why text resumes 3402 rather than 3401 twips along from
+/// a frame 2268 twips wide at 1134. See <see cref="FrameObstacles.Inflation"/>.
 /// </description></item>
 /// <item><description>
 /// <strong>The optimal wrap is decided per frame from the room on each side</strong>, per
@@ -677,13 +1162,24 @@ public sealed class AnchoredObstacles(
 internal sealed class FrameObstacles : ILineObstacles
 {
     /// <summary>
-    /// How much larger than its geometry a frame's hole in the text is, on every side.
+    /// How much wider than its geometry a frame's hole in the text is, on each side.
     /// </summary>
     /// <remarks>
-    /// One twip, and it is not a fudge: Writer's rectangles are inclusive, so a fly at twip 1941 has
-    /// <c>Top() == 1941</c> and the line above it has <c>Bottom() == 1940</c>, and yet the two are treated
-    /// as meeting. Measured at both edges — the frame two paragraphs down narrows the line whose box ends
-    /// exactly where it begins, and text after a frame resumes one twip past its right edge.
+    /// <para>
+    /// One twip, and it is not a fudge: Writer's rectangles are inclusive, so a frame 2268 twips wide at
+    /// 1134 has <c>Right() == 3401</c> and the arithmetic around the fly portion adds a twip back, which
+    /// is why text resumes 3402 twips along rather than 3401.
+    /// </para>
+    /// <para>
+    /// <strong>Horizontally only.</strong> It used to be applied on all four sides, on the reading that a
+    /// line whose box bottom is exactly a frame's top is already obstructed. That reading is wrong against
+    /// 26.2.4.2 and the measurement is in
+    /// <c>probes/words-frame-parallel/results.md</c>: moving the frame six twips up makes the touching line
+    /// wrap in six of six documents, moving it six twips down leaves it alone in six of six, and at exact
+    /// equality the reference answers three each way — on the frame's <em>width</em>, its horizontal
+    /// position and its height, none of which can change the vertical relation. So the reference's rule
+    /// away from the boundary is a strict overlap, and on the boundary it has no rule at all.
+    /// </para>
     /// </remarks>
     private static readonly Length Inflation = Length.FromTwips(1);
 
@@ -796,9 +1292,9 @@ internal sealed class FrameObstacles : ILineObstacles
     {
         DocRect area = new(
             obstacle.Area.X - Inflation,
-            obstacle.Area.Y - Inflation,
+            obstacle.Area.Y,
             obstacle.Area.Width + (Inflation * 2),
-            obstacle.Area.Height + (Inflation * 2));
+            obstacle.Area.Height);
 
         TextWrap wrap = obstacle.Wrap == TextWrap.Optimal
             ? Resolve(area, wantedLeft, wantedRight)

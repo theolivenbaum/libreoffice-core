@@ -50,6 +50,17 @@ internal static class BiffChartRecords
     public const ushort SourceLink = 0x1051;
     public const ushort EscherFormat = 0x1066;
 
+    /// <summary>
+    /// <c>CHSERGROUP</c> — which type group a series belongs to.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_ID_CHSERGROUP</c>, read into <c>XclImpChSeries::mnGroupIdx</c>
+    /// (<c>sc/source/filter/excel/xichart.cxx</c>:1825-1826). The index is the type group's own
+    /// <c>mnGroupIdx</c> and is unique across the whole chart, which is why
+    /// <c>XclImpChChart::GetTypeGroup</c> can look it up in either axes set (<c>:3948-3954</c>).
+    /// </remarks>
+    public const ushort SeriesGroup = 0x1045;
+
     /// <summary>An axis' own number format index — <c>EXC_ID_CHFORMAT</c>, <c>xlchart.hxx:635</c>.</summary>
     public const ushort NumberFormat = 0x104E;
 
@@ -109,19 +120,67 @@ internal sealed class XlsChartBuilder
     private bool _valueGrid;
     private bool _categoryGrid;
 
-    /// <summary>The <c>ifmt</c> the value axis' own <c>CHFORMAT</c> states, or none.</summary>
+    /// <summary>
+    /// The <c>ifmt</c> each axes set's value axis states through its own <c>CHFORMAT</c>, or none.
+    /// </summary>
     /// <remarks>
     /// Kept as the index rather than resolved on the spot for the same reason a colour is: the
     /// workbook's format table is not the chart substream's to reach into, and is handed over
-    /// when the plot is built.
+    /// when the plot is built. One per axes set, for the same reason
+    /// <see cref="_valueScales"/> is: a secondary axis that states no format of its own must not
+    /// be written through the primary's, which is how the Pareto chart's percentages came out as
+    /// currency.
     /// </remarks>
-    private int _valueFormatIndex = NoNumberFormat;
+    private readonly int[] _valueFormatIndexes = [NoNumberFormat, NoNumberFormat];
 
     private ChartPlotKind _kind = ChartPlotKind.Bar;
     private ChartBarDirection _direction = ChartBarDirection.Column;
     private bool _stacked;
-    private ChartScaleRequest _valueScale;
+
+    /// <summary>What <c>CHBAR</c> states about the space between category slots and within one.</summary>
+    /// <remarks>
+    /// Null until a <c>CHBAR</c> is read, so that a chart with no bar group keeps
+    /// <see cref="ChartPlot"/>'s own defaults rather than being given a zero.
+    /// </remarks>
+    private double? _gapWidth;
+
+    private double? _overlap;
+
+    /// <summary>
+    /// The value scale of each axes set — <see cref="PrimaryAxesSet"/> and
+    /// <see cref="SecondaryAxesSet"/>.
+    /// </summary>
+    /// <remarks>
+    /// <strong>Two, because a chart substream states two.</strong> <c>CHUSEDAXESSETS</c> says how
+    /// many <c>CHAXESSET</c> groups follow and each carries its own pair of <c>CHAXIS</c>, so a
+    /// combination chart with a percentage series over a currency one writes two
+    /// <c>CHVALUERANGE</c> — and reading them into one field leaves the chart drawn against
+    /// whichever came last. On <c>014_Contextures_chart_sample_991ecfc5.xls</c> that is the
+    /// secondary axis' 0…1.01, so a value axis whose own record says 0…800 in steps of 80 was
+    /// drawn as eleven ticks of 0…1 through the primary axis' currency format:
+    /// <c>$1 $1 $1 $1 $1 $1 $0 $0 $0 $0 $0</c>, with the bars three hundred times off the top of
+    /// the plot.
+    /// </remarks>
+    private readonly ChartScaleRequest[] _valueScales = new ChartScaleRequest[2];
+
     private ChartAxisText _categoryText = DefaultCategoryText;
+
+    /// <summary>Which <c>CHAXESSET</c> the records now being read sit inside.</summary>
+    /// <remarks>
+    /// <c>XclImpChAxesSet::ReadHeaderRecord</c> (<c>xichart.cxx</c>:3542-3546) reads the id as the
+    /// record's first field; <c>EXC_CHAXESSET_PRIMARY</c> is 0 and <c>_SECONDARY</c> is 1
+    /// (<c>sc/source/filter/inc/xlchart.hxx</c>:583-584).
+    /// </remarks>
+    private int _axesSet = PrimaryAxesSet;
+
+    /// <summary>Which <c>CHTYPEGROUP</c> is open, by its own stated index, or −1 for none.</summary>
+    private int _typeGroup = NoTypeGroup;
+
+    /// <summary>Which axes set each type group belongs to, by the group's own index.</summary>
+    private readonly Dictionary<int, int> _groupAxesSet = [];
+
+    /// <summary>What each type group is drawn as, by the group's own index.</summary>
+    private readonly Dictionary<int, ChartPlotKind> _groupKind = [];
 
     /// <summary>Whether <c>CHLABELRANGE</c> asked for every category to be labelled.</summary>
     /// <remarks>
@@ -163,6 +222,31 @@ internal sealed class XlsChartBuilder
     /// date axis is a serial the axis has to cover.
     /// </remarks>
     private bool _blanksAsZero;
+
+    /// <summary>
+    /// Whether the chart plots only the cells its sheet actually shows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CHPROPERTIES</c>' <c>EXC_CHPROPS_SHOWVISIBLEONLY</c>
+    /// (<c>sc/source/filter/inc/xlchart.hxx</c>:599), which
+    /// <c>XclImpChChart::Convert</c> turns straight into the diagram's
+    /// <c>IncludeHiddenCells</c>, negated (<c>xichart.cxx</c>:4027-4028). Calc then honours it
+    /// where the cells are fetched rather than where the chart is built:
+    /// <c>ScChart2DataSequence::BuildDataCache</c> asks <c>ColHidden</c> and <c>RowHidden</c> per
+    /// cell and skips the cell outright unless hidden cells are included
+    /// (<c>sc/source/ui/unoobj/chart2uno.cxx</c>:2636-2646).
+    /// </para>
+    /// <para>
+    /// <strong>It is what stands between seven categories and twenty.</strong>
+    /// <c>014_Contextures_chart_sample_991ecfc5.xls</c> plots <c>ChartSourceData!C13:C32</c>
+    /// against the category names in <c>B13:B32</c>, of which the last thirteen rows are
+    /// <c>#N/A</c> and hidden; the reference draws seven bars filling the plot and we drew seven
+    /// squeezed into its left third followed by thirteen labelled <c>#N/A</c>.
+    /// </para>
+    /// </remarks>
+    private bool _visibleCellsOnly;
+
     private bool _hasType;
     private bool _hasLegend;
 
@@ -311,11 +395,28 @@ internal sealed class XlsChartBuilder
                 break;
 
             case BiffChartRecords.NumberFormat when Inside(BiffChartRecords.Axis) && _axis == AxisY:
-                _valueFormatIndex = stream.ReadUInt16();
+                if (_axesSet is PrimaryAxesSet or SecondaryAxesSet)
+                    _valueFormatIndexes[_axesSet] = stream.ReadUInt16();
                 break;
 
-            case BiffChartRecords.ValueRange:
+            // Only the value axis'. A scatter chart's *category* axis carries a CHVALUERANGE too
+            // — its domain is numeric — and reading that into the value scale is right only by
+            // the accident that BIFF writes CHAXIS 0 before CHAXIS 1, so the value axis'
+            // overwrote it.
+            case BiffChartRecords.ValueRange when _axis == AxisY:
                 ReadValueRange(stream);
+                break;
+
+            case BiffChartRecords.AxesSet:
+                _axesSet = stream.ReadUInt16();
+                break;
+
+            case BiffChartRecords.TypeGroup:
+                ReadTypeGroup(stream);
+                break;
+
+            case BiffChartRecords.SeriesGroup when InnermostIs(BiffChartRecords.Series):
+                if (_series.Count > 0) _series[^1].Group = stream.ReadUInt16();
                 break;
 
             case BiffChartRecords.LabelRange when _axis == AxisX:
@@ -327,7 +428,7 @@ internal sealed class XlsChartBuilder
                 break;
 
             case BiffChartRecords.Properties:
-                stream.Skip(2);
+                _visibleCellsOnly = (stream.ReadUInt16() & ShowVisibleOnly) != 0;
                 _blanksAsZero = stream.ReadByte() == EmptyCellsAsZero;
                 break;
 
@@ -335,25 +436,51 @@ internal sealed class XlsChartBuilder
                 _hasLegend = true;
                 break;
 
+            // A bar direction and a stacking mode belong to one type group, so only the group
+            // that gives the chart its kind states them; a combination chart's second group
+            // must not restate the first's.
             case BiffChartRecords.Bar:
-                stream.Skip(4);
+            {
+                bool leading = !_hasType;
+                int overlap = stream.ReadInt16();
+                int gap = stream.ReadInt16();
                 ushort bar = stream.ReadUInt16();
                 SetKind(ChartPlotKind.Bar);
+                if (!leading) break;
+
+                // The two fields this record was previously skipped past.
+                // XclImpChType::CreateChartType (xichart.cxx:2404-2410) hands chart2 *minus*
+                // the overlap and the gap as it stands, where oox hands the same two properties
+                // c:overlap and c:gapWidth unchanged (typegroupconverter.cxx:459-461) — so BIFF
+                // counts an overlap the opposite way round from OOXML. Both are percentages of
+                // one bar's width, which is what ChartPlot.GapWidth and .Overlap already hold.
+                _gapWidth = gap;
+                _overlap = -overlap;
+
                 _direction = (bar & BarHorizontal) != 0
                     ? ChartBarDirection.Bar
                     : ChartBarDirection.Column;
                 _stacked = (bar & (BarStacked | BarPercent)) != 0;
                 break;
+            }
 
             case BiffChartRecords.Line:
-                _stacked |= (stream.ReadUInt16() & (LineStacked | LinePercent)) != 0;
+            {
+                bool leading = !_hasType;
+                bool stacked = (stream.ReadUInt16() & (LineStacked | LinePercent)) != 0;
                 SetKind(ChartPlotKind.Line);
+                if (leading) _stacked |= stacked;
                 break;
+            }
 
             case BiffChartRecords.Area:
-                _stacked |= (stream.ReadUInt16() & (LineStacked | LinePercent)) != 0;
+            {
+                bool leading = !_hasType;
+                bool stacked = (stream.ReadUInt16() & (LineStacked | LinePercent)) != 0;
                 SetKind(ChartPlotKind.Area);
+                if (leading) _stacked |= stacked;
                 break;
+            }
 
             case BiffChartRecords.Pie:
                 SetKind(ChartPlotKind.Pie);
@@ -430,8 +557,14 @@ internal sealed class XlsChartBuilder
         if (!HasChart) return null;
 
         (IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series,
-            NumberFormatCode? sourceFormat, IReadOnlyList<double?> categoryValues,
+            NumberFormatCode?[] sourceFormats, IReadOnlyList<double?> categoryValues,
             NumberFormatCode? categoryFormat) = BuildSeries(data, sheets, ownSheet, fonts);
+
+        // A secondary scale is offered only when some series is actually measured against it;
+        // ChartPlot.HasSecondaryAxis makes the same test, and a chart stating a second CHAXESSET
+        // whose type group holds no series has one axis to draw.
+        bool secondary = false;
+        foreach (ChartSeries one in series) secondary |= one.AxisIndex == SecondaryAxesSet;
 
         ChartDateAxis? dateAxis = DateAxisOf(categoryValues, categoryFormat, dates);
         if (dateAxis is not null)
@@ -447,11 +580,17 @@ internal sealed class XlsChartBuilder
             Kind = _kind,
             Direction = _direction,
             IsStacked = _stacked,
+            GapWidth = _gapWidth ?? DefaultPlot.GapWidth,
+            Overlap = _overlap ?? DefaultPlot.Overlap,
             Categories = categories,
             Series = series,
-            ValueScale = _valueScale,
+            ValueScale = _valueScales[PrimaryAxesSet],
+            SecondaryValueScale = secondary ? _valueScales[SecondaryAxesSet] : null,
             CategoryAxisText = _categoryText,
-            ValueFormat = ValueFormatOf(sourceFormat, formats),
+            ValueFormat = ValueFormatOf(PrimaryAxesSet, sourceFormats, formats),
+            SecondaryValueFormat = secondary
+                ? ValueFormatOf(SecondaryAxesSet, sourceFormats, formats)
+                : null,
             ValueGrid = _valueGrid ? new ChartGrid(GridColour) : null,
             CategoryGrid = _categoryGrid ? new ChartGrid(GridColour) : null,
             Legend = _hasLegend ? ChartLegendPosition.Right : ChartLegendPosition.None,
@@ -531,14 +670,12 @@ internal sealed class XlsChartBuilder
     /// </para>
     /// </remarks>
     private NumberFormatCode? ValueFormatOf(
-        NumberFormatCode? sourceFormat, Func<int, NumberFormatCode?>? formats)
+        int axesSet, NumberFormatCode?[] sourceFormats, Func<int, NumberFormatCode?>? formats)
     {
-        if (_valueFormatIndex != NoNumberFormat && formats?.Invoke(_valueFormatIndex) is { } stated)
-        {
-            return stated;
-        }
+        int index = _valueFormatIndexes[axesSet];
+        if (index != NoNumberFormat && formats?.Invoke(index) is { } stated) return stated;
 
-        return sourceFormat;
+        return sourceFormats[axesSet];
     }
 
     /// <summary>
@@ -601,17 +738,18 @@ internal sealed class XlsChartBuilder
     /// </para>
     /// </remarks>
     private (IReadOnlyList<string?> Categories, IReadOnlyList<ChartSeries> Series,
-        NumberFormatCode? ValueFormat, IReadOnlyList<double?> CategoryValues,
+        NumberFormatCode?[] ValueFormats, IReadOnlyList<double?> CategoryValues,
         NumberFormatCode? CategoryFormat) BuildSeries(
         XlsChartData? data, XlsExternSheets? sheets, int ownSheet, XlsCellFormats? fonts)
     {
-        if (data is null || _series.Count == 0) return ([], [], null, [], null);
+        NumberFormatCode?[] valueFormats = new NumberFormatCode?[2];
+
+        if (data is null || _series.Count == 0) return ([], [], valueFormats, [], null);
 
         List<string?> categories = [];
         List<double?> categoryValues = [];
         NumberFormatCode? categoryFormat = null;
         List<ChartSeries> built = [];
-        NumberFormatCode? valueFormat = null;
 
         foreach (SeriesLinks series in _series)
         {
@@ -620,7 +758,7 @@ internal sealed class XlsChartBuilder
                 continue;
             }
 
-            List<double?> numbers = data.Numbers(valueSheet, values);
+            List<double?> numbers = data.Numbers(valueSheet, values, _visibleCellsOnly);
             if (numbers.TrueForAll(number => number is null)) continue;
 
             if (BlanksCountAsZero)
@@ -628,18 +766,19 @@ internal sealed class XlsChartBuilder
                 for (int at = 0; at < numbers.Count; at++) numbers[at] ??= 0.0;
             }
 
-            valueFormat ??= data.FormatOf(valueSheet, values);
+            int axis = AxisOf(series.Group);
+            valueFormats[axis] ??= data.FormatOf(valueSheet, values, _visibleCellsOnly);
 
             if (categories.Count == 0
                 && series.Categories is { } labels
                 && Resolve(labels, sheets, ownSheet) is { } labelSheet)
             {
-                categories.AddRange(data.Texts(labelSheet, labels));
+                categories.AddRange(data.Texts(labelSheet, labels, _visibleCellsOnly));
 
                 // Kept beside the displayed text because a date axis plots the *number* and
                 // labels its own ticks; a text axis prints the text and never asks for these.
-                categoryValues.AddRange(data.Numbers(labelSheet, labels));
-                categoryFormat = data.FormatOf(labelSheet, labels);
+                categoryValues.AddRange(data.Numbers(labelSheet, labels, _visibleCellsOnly));
+                categoryFormat = data.FormatOf(labelSheet, labels, _visibleCellsOnly);
             }
 
             string? name = series.Name;
@@ -654,13 +793,39 @@ internal sealed class XlsChartBuilder
                 name is { Length: > 0 } ? name : null,
                 numbers,
                 Fill: series.Fill?.Resolve(fonts),
-                Line: series.Line?.Resolve(fonts)));
+                Line: series.Line?.Resolve(fonts),
+                Kind: KindOf(series.Group))
+            {
+                AxisIndex = axis,
+            });
         }
 
         // Categories are indexed by point, so a shorter list than the longest series leaves the
         // tail of that series unlabelled rather than mislabelled.
-        return (categories, built, valueFormat, categoryValues, categoryFormat);
+        return (categories, built, valueFormats, categoryValues, categoryFormat);
     }
+
+    /// <summary>Which value axis a series' type group is measured against, 0 or 1.</summary>
+    /// <remarks>
+    /// A series states its group and the group states its axes set; a series that states no
+    /// <c>CHSERGROUP</c> takes group 0, which is what <c>XclImpChChart::GetTypeGroup</c>'s
+    /// fall-through to <c>mxPrimAxesSet-&gt;GetFirstTypeGroup()</c> reaches
+    /// (<c>xichart.cxx</c>:3948-3954).
+    /// </remarks>
+    private int AxisOf(int group)
+        => _groupAxesSet.TryGetValue(group, out int set) && set == SecondaryAxesSet
+            ? SecondaryAxesSet
+            : PrimaryAxesSet;
+
+    /// <summary>
+    /// What a series' own type group is drawn as, or null when it is the chart's own kind.
+    /// </summary>
+    /// <remarks>
+    /// Null for every series of a single-group chart, which is what <see cref="ChartSeries.Kind"/>
+    /// means by "no override" — so nothing about a one-group chart changes.
+    /// </remarks>
+    private ChartPlotKind? KindOf(int group)
+        => _groupKind.TryGetValue(group, out ChartPlotKind kind) && kind != _kind ? kind : null;
 
     private static int? Resolve(XlsChartRange range, XlsExternSheets? sheets, int ownSheet)
         => range.Ixti < 0 ? ownSheet : sheets?.SheetOf(range.Ixti);
@@ -698,10 +863,14 @@ internal sealed class XlsChartBuilder
     {
         if (_firstFont == NoFont) _firstFont = index;
 
-        // An axis' own CHFONT sits directly inside its CHAXIS and dresses its tick labels.
+        // An axis' own CHFONT sits directly inside its CHAXIS and dresses its tick labels. Only
+        // the primary axes set's, because a secondary set states two axes of its own and the
+        // category axis this size is chosen for is the primary set's X.
         if (InnermostIs(BiffChartRecords.Axis))
         {
-            if (_axis == AxisX || _labelFont == NoFont) _labelFont = index;
+            if (_axesSet == PrimaryAxesSet && (_axis == AxisX || _labelFont == NoFont))
+                _labelFont = index;
+
             return;
         }
 
@@ -937,11 +1106,31 @@ internal sealed class XlsChartBuilder
         stream.Skip(16);
         ushort flags = stream.ReadUInt16();
 
-        _valueScale = new ChartScaleRequest(
+        if (_axesSet is not (PrimaryAxesSet or SecondaryAxesSet)) return;
+
+        _valueScales[_axesSet] = new ChartScaleRequest(
             (flags & AutoMinimum) != 0 ? null : minimum,
             (flags & AutoMaximum) != 0 ? null : maximum,
             (flags & AutoMajor) != 0 || major <= 0.0 ? null : major,
             (flags & Reversed) != 0);
+    }
+
+    /// <summary>
+    /// Reads one <c>CHTYPEGROUP</c> header: which group it is, and therefore which axes set the
+    /// series naming it are measured against.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChTypeGroup::ReadHeaderRecord</c> (<c>xichart.cxx</c>:2683-2688) ignores sixteen
+    /// bytes, then reads the flags and the group index. The group's own <em>type</em> is a
+    /// separate record inside it — <c>CHBAR</c>, <c>CHLINE</c>, <c>CHSCATTER</c> and the rest,
+    /// all of which fall through <c>ReadSubRecord</c> to <c>maType.ReadChType</c>
+    /// (<c>:2714-2715</c>) — so <see cref="SetKind"/> files it against whichever group is open.
+    /// </remarks>
+    private void ReadTypeGroup(BiffRecordReader stream)
+    {
+        stream.Skip(18);
+        _typeGroup = stream.ReadUInt16();
+        _groupAxesSet[_typeGroup] = _axesSet;
     }
 
     /// <summary>
@@ -1168,13 +1357,27 @@ internal sealed class XlsChartBuilder
         else if (_axis == AxisX) _categoryGrid = true;
     }
 
-    /// <summary>The first type group decides the chart; a second is a combination chart.</summary>
+    /// <summary>
+    /// The first type group decides the chart; a second is a combination chart.
+    /// </summary>
+    /// <remarks>
+    /// Both halves are kept now: the chart's own kind, which is the first group's and decides the
+    /// axes, and the kind of <em>each</em> group, which is what
+    /// <see cref="ChartSeries.Kind"/> carries so that a line over a column chart is drawn as a
+    /// line. Before this a second group's type record was simply dropped, so the second group's
+    /// series were drawn as bars — and on <c>014_Contextures_chart_sample</c> those bars stated
+    /// <c>EXC_PATT_NONE</c>, which draws nothing at all and leaves a hollow legend key where the
+    /// reference has a line and a marker.
+    /// </remarks>
     private void SetKind(ChartPlotKind kind)
     {
+        if (_typeGroup != NoTypeGroup) _groupKind.TryAdd(_typeGroup, kind);
+
         if (_hasType) return;
         _hasType = true;
         _kind = kind;
     }
+
 
     private bool Inside(ushort container) => _open.Contains(container);
 
@@ -1228,6 +1431,12 @@ internal sealed class XlsChartBuilder
 
         /// <summary>The name written literally, when the series states one that way.</summary>
         public string? Name { get; set; }
+
+        /// <summary>
+        /// The type group this series belongs to — <c>CHSERGROUP</c>, or the first group when it
+        /// states none.
+        /// </summary>
+        public int Group { get; set; }
     }
 
     /// <summary>A length stated in 1/65536 of a point, which is how a chart states its frame.</summary>
@@ -1314,6 +1523,17 @@ internal sealed class XlsChartBuilder
     private const int AxisX = 0;
     private const int AxisY = 1;
 
+    /// <summary><c>EXC_CHAXESSET_PRIMARY</c> and <c>_SECONDARY</c>, <c>xlchart.hxx</c>:583-584.</summary>
+    private const int PrimaryAxesSet = 0;
+
+    private const int SecondaryAxesSet = 1;
+
+    /// <summary>No <c>CHTYPEGROUP</c> is open.</summary>
+    private const int NoTypeGroup = -1;
+
+    /// <summary><c>EXC_CHPROPS_SHOWVISIBLEONLY</c>, <c>xlchart.hxx</c>:599.</summary>
+    private const ushort ShowVisibleOnly = 0x0002;
+
     private const ushort MajorGridLine = 1;
 
     private const ushort BarHorizontal = 0x0001;
@@ -1357,4 +1577,7 @@ internal sealed class XlsChartBuilder
     /// as a palette index; reading it is recorded in the module's TODO.
     /// </remarks>
     private static readonly Colour GridColour = Colour.Black;
+
+    /// <summary>The model's own defaults, for the fields a substream may state nothing about.</summary>
+    private static readonly ChartPlot DefaultPlot = new();
 }

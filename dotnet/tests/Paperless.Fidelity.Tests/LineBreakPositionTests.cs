@@ -135,7 +135,7 @@ public sealed class LineBreakPositionTests : IDisposable
 
     private void ParagraphsAgree(string paragraph, double sizePoints, bool kerning)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string? fontPath = FindFont("Carlito-Regular.ttf");
         Assert.SkipWhen(fontPath is null, "Carlito is not installed; see check-env.sh");

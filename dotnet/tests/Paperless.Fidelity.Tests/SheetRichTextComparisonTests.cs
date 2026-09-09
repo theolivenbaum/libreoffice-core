@@ -86,7 +86,7 @@ public sealed class SheetRichTextComparisonTests : IDisposable
     [InlineData("sheet-rich-text.xlsx")]
     public void EveryPortionIsDrawnWhereLibreOfficeDrawsIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -123,7 +123,7 @@ public sealed class SheetRichTextComparisonTests : IDisposable
     [InlineData("sheet-rich-text.xls")]
     public void EveryFormatSplitsTheSameCellsIntoTheSameRuns(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -170,7 +170,7 @@ public sealed class SheetRichTextComparisonTests : IDisposable
     [InlineData("sheet-rich-text.xlsx")]
     public void AWrappingRichCellBreaksWhereLibreOfficeBreaksIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));

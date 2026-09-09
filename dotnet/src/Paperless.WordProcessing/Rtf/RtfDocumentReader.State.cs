@@ -75,6 +75,27 @@ public sealed partial class RtfDocumentReader
 
         /// <summary>A shape property's value, from <c>{\sv …}</c>.</summary>
         ShapePropertyValue,
+
+        /// <summary>
+        /// The list table and the list-override table: read for nothing, but <em>dispatched</em>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Not <see cref="Skip"/>, and the distinction is the whole of round 85.
+        /// <c>RTFTokenizer::dispatchKeyword</c> returns before it looks a keyword up at all when the
+        /// destination is <c>Destination::SKIP</c>
+        /// (<c>sw/source/writerfilter/rtftok/rtftokenizer.cxx</c>:2156-2164), so nothing inside a
+        /// header, a footer or a private extension has any effect whatsoever. A list table is
+        /// <c>Destination::LISTTABLE</c> rather than <c>SKIP</c>, so every control word in it
+        /// <em>is</em> dispatched — including the ones that end the document's first run.
+        /// </para>
+        /// <para>
+        /// Paperless still reads nothing out of either table, so this behaves as <see cref="Skip"/>
+        /// everywhere text or paragraphs are concerned. What it carries is the right to close the
+        /// settings window: see <see cref="_firstRunSeen"/>.
+        /// </para>
+        /// </remarks>
+        ListTable,
     }
 
     /// <summary>
@@ -195,6 +216,17 @@ public sealed partial class RtfDocumentReader
         public bool StyleSheetIsCharacter { get; set; }
         public int? StyleSheetBasedOn { get; set; }
 
+        /// <summary>
+        /// The control words a <c>{\stylesheet}</c> entry has stated, while one is being read.
+        /// </summary>
+        /// <remarks>
+        /// Null outside the stylesheet, and a fresh set for every entry — see <see cref="Clone"/>.
+        /// It exists because a style is written as the difference from its <c>\sbasedon</c> parent
+        /// and RTF's toggles cannot say "unstated": <c>\b0</c> and an absent <c>\b</c> leave the
+        /// same group state, and only one of the two may beat a bold parent style.
+        /// </remarks>
+        public HashSet<string>? StyleSheetStated { get; set; }
+
         /// <summary>Text collected by a group whose destination is not document content.</summary>
         public StringBuilder Collected { get; } = new();
 
@@ -284,6 +316,11 @@ public sealed partial class RtfDocumentReader
             LanguageId = LanguageId,
             CharacterStyleId = CharacterStyleId,
             ParagraphStyleId = ParagraphStyleId,
+
+            // A fresh set rather than the parent's: each {\sN ...;} entry states its own
+            // properties, and sharing one set would make every entry look as though it had
+            // stated whatever an earlier one did.
+            StyleSheetStated = StyleSheetStated is null ? null : [],
             OutlineLevel = OutlineLevel,
             ListId = ListId,
             ListLevel = ListLevel,
@@ -459,6 +496,17 @@ public sealed partial class RtfDocumentReader
         /// </remarks>
         public List<RtfLayoutFrame> PendingFrames { get; } = [];
 
+        /// <summary>
+        /// The <c>PAGE</c> and <c>NUMPAGES</c> results in the paragraph being read, as spans over its
+        /// <em>layout</em> text.
+        /// </summary>
+        /// <remarks>
+        /// Over the layout text rather than the extracted text, because the two are not the same string:
+        /// a note's citation is prefixed to the first and not to the second. <see cref="Layout.PageFields"/>
+        /// rewrites the layout text and nothing else.
+        /// </remarks>
+        public List<Layout.PageFieldSpan> PendingPageFields { get; } = [];
+
         /// <summary>A shape's own text, collected while its <c>{\shptxt}</c> flow is open.</summary>
         public Staged? FrameBlocks { get; init; }
 
@@ -551,7 +599,10 @@ public sealed partial class RtfDocumentReader
         public int?[] RowPadding { get; } = new int?[4];
 
         /// <summary>The vertical alignment <c>\clvertal*</c> stated for the cell being declared.</summary>
-        public Layout.CellVerticalAlignment PendingCellAlignment { get; set; }
+        public Layout.VerticalTextAlignment PendingCellAlignment { get; set; }
+
+        /// <summary>The text flow <c>\cltx*</c> stated for the cell being declared.</summary>
+        public Layout.CellTextDirection PendingCellTextDirection { get; set; }
 
         /// <summary>The <c>\clcbpat</c> colour index for the cell being declared, or null for none.</summary>
         public int? PendingCellShading { get; set; }
@@ -580,6 +631,17 @@ public sealed partial class RtfDocumentReader
         /// <summary><c>\trhdr</c>: the row repeats as a header at the top of every page.</summary>
         public bool RowIsHeader { get; set; }
 
+        /// <summary>
+        /// The row definition's <c>\tblpPr</c> half — the six control-word families that make a row
+        /// part of a <em>positioned</em> table, or null when the definition stated none.
+        /// </summary>
+        /// <remarks>
+        /// Null rather than a flag on the level, because "was one of these words seen for this row"
+        /// is the whole of the question <see cref="Layout.PageTable.IsPositioned"/> asks, and a row
+        /// definition is restated from scratch at every <c>\trowd</c>.
+        /// </remarks>
+        public RowPosition? RowPositioned { get; set; }
+
         /// <summary><c>\trkeep</c>: the row's content may not be broken across a page.</summary>
         /// <remarks>
         /// Named for keeping rather than for splitting because that is what the control word says, and
@@ -587,6 +649,46 @@ public sealed partial class RtfDocumentReader
         /// <c>LN_CT_TrPrBase_cantSplit</c> (<c>rtftok/rtfdispatchflag.cxx</c>).
         /// </remarks>
         public bool RowIsKeptTogether { get; set; }
+    }
+
+    /// <summary>
+    /// Where a row definition said its table goes, when it said anything at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RTF's <em>Positioned Wrapped Tables</em> vocabulary, which LibreOffice's tokeniser turns
+    /// straight into OOXML's <c>w:tblpPr</c> — <c>\tpvpg</c> is <c>vertAnchor="page"</c>,
+    /// <c>\tphmrg</c> is <c>horzAnchor="margin"</c>, <c>\tposxc</c> is <c>tblpXSpec="center"</c>,
+    /// <c>\tposy</c> is <c>tblpY</c> (<c>sw/source/writerfilter/rtftok/rtfdispatchflag.cxx</c>:39-115
+    /// and <c>rtfdispatchvalue.cxx</c>:1802-1837). So the two readers of the two spellings of one
+    /// document reach <see cref="Layout.PageTable"/> by the same route and must agree there.
+    /// </para>
+    /// <para>
+    /// Stated per <em>row</em> in RTF and per <em>table</em> in OOXML, and every producer restates it
+    /// identically on every row of the table; the first row's is what the table takes, exactly as
+    /// <c>\trleft</c> is.
+    /// </para>
+    /// </remarks>
+    private sealed class RowPosition
+    {
+        /// <summary><c>\tpvpg</c>, <c>\tpvmrg</c>, <c>\tpvpara</c>; null when none was stated.</summary>
+        public Layout.FrameVerticalOrigin? VerticalAnchor { get; set; }
+
+        /// <summary>
+        /// True for <c>\tphpg</c> — the one horizontal anchor whose rectangle is the sheet rather than
+        /// the text area, which <see cref="Layout.PageTable.HorizontalPosition"/> cannot express and so
+        /// suppresses, as the DOCX reader does for <c>horzAnchor="page"</c>.
+        /// </summary>
+        public bool HorizontalAnchorIsPage { get; set; }
+
+        /// <summary><c>\tposxc</c> and <c>\tposxr</c> and friends; null when the row stated a distance.</summary>
+        public Layout.FrameHorizontalAlignment? HorizontalSpec { get; set; }
+
+        /// <summary><c>\tposy</c>, in twips, measured from <see cref="VerticalAnchor"/>.</summary>
+        public int VerticalOffset { get; set; }
+
+        /// <summary><c>\tdfrmtxtBottom</c>, in twips: the gap the flow keeps below the fly.</summary>
+        public int BottomFromText { get; set; }
     }
 
     /// <summary>A cell's declaration from <c>\cellx</c> and the merge flags before it.</summary>
@@ -605,6 +707,7 @@ public sealed partial class RtfDocumentReader
     /// <param name="VerticalAlignment">Where the cell's text sits inside its row.</param>
     /// <param name="ShadingColourIndex">Its <c>\clcbpat</c> colour index, or null for none.</param>
     /// <param name="Borders">Its four borders, in left, right, top, bottom order.</param>
+    /// <param name="TextDirection">Which way its text runs — the <c>\cltx*</c> family.</param>
     private readonly record struct CellDefinition(
         int RightEdge,
         bool MergesFirst,
@@ -612,9 +715,10 @@ public sealed partial class RtfDocumentReader
         bool VerticalFirst,
         bool VerticalMerged,
         int?[]? Padding = null,
-        Layout.CellVerticalAlignment VerticalAlignment = Layout.CellVerticalAlignment.Top,
+        Layout.VerticalTextAlignment VerticalAlignment = Layout.VerticalTextAlignment.Top,
         int? ShadingColourIndex = null,
-        (int Twips, int? ColourIndex, bool IsNone)[]? Borders = null);
+        (int Twips, int? ColourIndex, bool IsNone)[]? Borders = null,
+        Layout.CellTextDirection TextDirection = Layout.CellTextDirection.LeftToRight);
 
     private sealed class CellDraft
     {
@@ -645,7 +749,10 @@ public sealed partial class RtfDocumentReader
         public Layout.CellPadding Padding { get; set; }
 
         /// <summary>Where its text sits when the row is taller than its content.</summary>
-        public Layout.CellVerticalAlignment VerticalAlignment { get; set; }
+        public Layout.VerticalTextAlignment VerticalAlignment { get; set; }
+
+        /// <summary>Which way its text runs; upright for almost every cell.</summary>
+        public Layout.CellTextDirection TextDirection { get; set; }
 
         public List<ContentNode> Content { get; } = [];
 
@@ -682,6 +789,12 @@ public sealed partial class RtfDocumentReader
         /// </summary>
         public int Height { get; init; }
 
+        /// <summary>
+        /// Where the row's table is placed, when the definition made it a positioned one — see
+        /// <see cref="RowPosition"/>. Null for an ordinary table in the flow.
+        /// </summary>
+        public RowPosition? Position { get; init; }
+
         public List<CellDraft> Cells { get; } = [];
     }
 
@@ -706,6 +819,7 @@ public sealed partial class RtfDocumentReader
                 // Hidden text is not displayed by any reader, so extracting it would inject text
                 // the document does not show.
                 if (state.Hidden) return;
+                NoteBodyContent();
                 AppendToParagraph(state, text);
                 return;
 
@@ -870,10 +984,60 @@ public sealed partial class RtfDocumentReader
     private void EmitParagraph(GroupState state)
     {
         if (state.Destination is RtfDestination.Skip or RtfDestination.FontTable
-            or RtfDestination.StyleSheet or RtfDestination.Picture) return;
+            or RtfDestination.StyleSheet or RtfDestination.Picture
+            or RtfDestination.ListTable) return;
 
+        NoteBodyContent();
         FinishParagraph(CurrentFlow, state, force: true);
     }
+
+    /// <summary>
+    /// Records that the body has produced content, which closes the window in which a document
+    /// setting can still be stated. See <see cref="_firstRunSeen"/>.
+    /// </summary>
+    /// <remarks>
+    /// Only the body's own flow counts <em>as text</em>. A header, a footer, a note or a shape's
+    /// text is a <em>substream</em> to the importer this follows, resolved when the section that
+    /// names it ends rather than where its group was written. A picture is not gated this way and
+    /// calls <see cref="NoteFirstRun"/> directly.
+    /// </remarks>
+    private void NoteBodyContent()
+    {
+        if (_flows.Count > 0 && ReferenceEquals(CurrentFlow, _flows[0])) NoteFirstRun();
+    }
+
+    /// <summary>
+    /// Records that a control word which ends the document's first run has been dispatched.
+    /// </summary>
+    /// <param name="state">The group the word was written in.</param>
+    /// <remarks>
+    /// <para>
+    /// Two things have to be true before such a word counts, and they have different causes.
+    /// It must be in a destination the RTF importer <em>dispatches</em> at all —
+    /// <c>RTFTokenizer::dispatchKeyword</c> returns before looking a keyword up inside a
+    /// <c>Destination::SKIP</c> group (<c>rtftokenizer.cxx</c>:2156-2164) — and a style-sheet
+    /// entry is excluded by the caller itself
+    /// (<c>rtfdispatchflag.cxx</c>:891, <c>if (!isStyleSheetImport())</c>).
+    /// </para>
+    /// <para>
+    /// And it must be in the document's own flow. LibreOffice makes a header, a footer, a note
+    /// and a shape's text <c>Destination::SKIP</c> where the group is written and re-parses each
+    /// as a <em>substream</em>, for which <c>outputSettingsTable</c> returns immediately
+    /// (<c>rtfdocumentimpl.cxx</c>:414-418); this reader gives each a <see cref="Flow"/> of its
+    /// own instead, so the flow is where the same question is asked.
+    /// <c>FRE-03_mcar_part-3_and_IS_v2.9.rtf</c> is the witness: it writes <c>\super</c> at byte
+    /// 330901 inside a <c>{\header}</c> and <c>\htmautsp</c> at 331546, 26.2.4.2 honours the
+    /// word, and counting the header's <c>\super</c> costs that document three pages.
+    /// </para>
+    /// </remarks>
+    private void NoteSettingsWindowClosed(GroupState state)
+    {
+        if (state.Destination is RtfDestination.Skip or RtfDestination.StyleSheet) return;
+        NoteBodyContent();
+    }
+
+    /// <summary>Records the document's first run. See <see cref="_firstRunSeen"/>.</summary>
+    private void NoteFirstRun() => _firstRunSeen = true;
 
     /// <summary>
     /// Materialises the half-built paragraph, if there is one.
@@ -1108,6 +1272,8 @@ public sealed partial class RtfDocumentReader
         // deliberately leaves out. Prefixing it here rather than in the text builder is what keeps the two
         // apart; the runs already recorded shift along by its length.
         List<RtfLayoutRun> runs = [.. flow.LayoutRuns];
+        List<Layout.PageFieldSpan>? fields =
+            flow.PendingPageFields.Count == 0 ? null : [.. flow.PendingPageFields];
 
         if (flow.LayoutPrefix is { Length: > 0 } prefix)
         {
@@ -1116,6 +1282,12 @@ public sealed partial class RtfDocumentReader
             for (int i = 0; i < runs.Count; i++)
             {
                 runs[i] = runs[i] with { Start = runs[i].Start + prefix.Length };
+            }
+
+            // The field spans shift with the runs: they index the same string.
+            for (int i = 0; i < (fields?.Count ?? 0); i++)
+            {
+                fields![i] = fields[i] with { Start = fields[i].Start + prefix.Length };
             }
 
             runs.Insert(0, CitationRun(state, 0, prefix.Length));
@@ -1170,6 +1342,7 @@ public sealed partial class RtfDocumentReader
             _sectionIndex,
             flow.PendingNotes.Count == 0 ? null : [.. flow.PendingNotes],
             flow.PendingFrames.Count == 0 ? null : [.. flow.PendingFrames],
+            fields,
             // Trimmed, because the group holds the tab that follows the label as well as the label —
             // and an outline level that shows no number writes the group with nothing but that tab,
             // which trims to nothing rather than to a label made of whitespace.
@@ -1347,6 +1520,7 @@ public sealed partial class RtfDocumentReader
         flow.LayoutLength = 0;
         flow.PendingNotes.Clear();
         flow.PendingFrames.Clear();
+        flow.PendingPageFields.Clear();
         flow.PendingRuns.Clear();
         flow.PendingImages.Clear();
         flow.ListMarker.Clear();
@@ -1452,8 +1626,18 @@ public sealed partial class RtfDocumentReader
 
         public int Bottom { get; private set; }
 
-        /// <summary>Around by default, which is what a shape stating no <c>\shpwr</c> gets.</summary>
-        public int Wrap { get; private set; } = 1;
+        /// <summary>
+        /// The <c>\shpwr</c> value, or 0 for a shape that stated none.
+        /// </summary>
+        /// <remarks>
+        /// Zero is not one of RTF's five, and it has to be distinguishable from them: LibreOffice
+        /// leaves an unstated wrap at its <c>WrapTextMode_MAKE_FIXED_SIZE</c> sentinel and never sets
+        /// <c>Surround</c> at all (<c>rtfsdrimport.cxx</c>:1091), so the shape keeps the fly default —
+        /// which is <em>parallel</em>, measured on a probe stating no <c>\shpwr</c> at all against
+        /// 26.2.4.2. Defaulting the field to 1 instead made an unstated shape take the one value that
+        /// puts no text beside it.
+        /// </remarks>
+        public int Wrap { get; private set; }
 
         public int WrapSide { get; private set; }
 
@@ -1478,14 +1662,31 @@ public sealed partial class RtfDocumentReader
         public Core.Geometry.Margins WrapDistance { get; private set; }
 
         /// <summary>
+        /// The inset between the shape's edge and its own text — see
+        /// <see cref="RtfLayoutFrame.TextInset"/>, which records why the default is not zero.
+        /// </summary>
+        public Core.Geometry.Margins TextInset { get; private set; } = RtfLayoutFrame.DefaultTextInset;
+
+        /// <summary>
         /// One <c>{\sp}</c> property, of the handful that decide where a shape goes.
         /// </summary>
         /// <remarks>
-        /// The values are Escher's, so the distances are EMUs and the two <c>posrel</c> properties are
-        /// small enumerations: 0 is the margin, 1 the page, 2 the column or paragraph, and 3 the character
-        /// or line. They are what <c>\shpbxignore</c> defers to, and LibreOffice's own export writes that
-        /// pair on every shape — so a reader that only understood <c>\shpbx*</c> would find no origin at
-        /// all on a file LibreOffice wrote.
+        /// <para>
+        /// The values are Escher's, so the distances are EMUs. They are what <c>\shpbxignore</c> defers
+        /// to, and LibreOffice's own export writes the <c>posrel</c> pair on every shape — so a reader
+        /// that only understood <c>\shpbx*</c> would find no origin at all on a file LibreOffice wrote.
+        /// </para>
+        /// <para>
+        /// <b>Only 1 means anything, and it means the page.</b> <c>RTFSdrImport::resolve</c> has a case
+        /// for that value alone (<c>rtfsdrimport.cxx</c>:696-717) and leaves every other value at the
+        /// <c>RelOrientation::FRAME</c> the text frame was created with
+        /// (<c>getTextFrameDefaults</c>, the same file:111-124) — which is the anchor's own frame, so
+        /// horizontally the body column and vertically the anchor paragraph. Reading 0 as the page
+        /// margin, which is what the enumeration's own names invite, is therefore wrong twice over: the
+        /// import does not map it, and 0 and 3 are measured to place a shape identically. Nine
+        /// horizontal probes — the property absent and every value 0 to 7 — and five vertical ones
+        /// against 26.2.4.2: 1 is the page and the other eight are the frame, on both axes.
+        /// </para>
         /// </remarks>
         public void SetProperty(string name, string value)
         {
@@ -1514,21 +1715,23 @@ public sealed partial class RtfDocumentReader
                     WrapDistance = WrapDistance with { Bottom = distance };
                     StatesWrapDistance = true;
                     break;
+                case "dxTextLeft":
+                    TextInset = TextInset with { Left = Core.Units.Length.FromMm100(number / 360) };
+                    break;
+                case "dyTextTop":
+                    TextInset = TextInset with { Top = Core.Units.Length.FromMm100(number / 360) };
+                    break;
+                case "dxTextRight":
+                    TextInset = TextInset with { Right = Core.Units.Length.FromMm100(number / 360) };
+                    break;
+                case "dyTextBottom":
+                    TextInset = TextInset with { Bottom = Core.Units.Length.FromMm100(number / 360) };
+                    break;
                 case "posrelh":
-                    HorizontalOrigin ??= number switch
-                    {
-                        0 => "shpbxmargin",
-                        1 => "shpbxpage",
-                        _ => "shpbxcolumn",
-                    };
+                    HorizontalOrigin ??= number == 1 ? "shpbxpage" : "shpbxcolumn";
                     break;
                 case "posrelv":
-                    VerticalOrigin ??= number switch
-                    {
-                        0 => "shpbymargin",
-                        1 => "shpbypage",
-                        _ => "shpbypara",
-                    };
+                    VerticalOrigin ??= number == 1 ? "shpbypage" : "shpbypara";
                     break;
                 default:
                     break;
@@ -1571,6 +1774,7 @@ public sealed partial class RtfDocumentReader
                 StatesWrapDistance ? WrapDistance : null)
             {
                 Picture = Picture,
+                TextInset = TextInset,
             };
     }
 
@@ -1728,13 +1932,177 @@ public sealed partial class RtfDocumentReader
         }
     }
 
+    /// <summary>
+    /// Records one <c>{\stylesheet}</c> entry: its name, its <c>\sbasedon</c> parent, and the
+    /// formatting it states.
+    /// </summary>
+    /// <remarks>
+    /// The formatting is read off the entry's own group state, filtered by which control words the
+    /// entry actually wrote — see <see cref="GroupState.StyleSheetStated"/>. A style states the
+    /// <em>difference</em> from its parent, so the filter is what keeps an unstated property from
+    /// overwriting an inherited one with the group state's default.
+    /// </remarks>
     private void RecordStyle(GroupState state, int id)
     {
         string name = state.Collected.ToString().TrimEnd(';').Trim();
         if (name.Length == 0) return;
 
         _styles.Add(id, new RtfStyle(
-            name, state.StyleSheetBasedOn, state.OutlineLevel, state.StyleSheetIsCharacter));
+            name, state.StyleSheetBasedOn, state.OutlineLevel, state.StyleSheetIsCharacter,
+            FormattingOf(state)));
+    }
+
+    /// <summary>The formatting one stylesheet entry stated, as its group saw it.</summary>
+    private static RtfStyleFormatting FormattingOf(GroupState state)
+    {
+        HashSet<string>? said = state.StyleSheetStated;
+        if (said is null || said.Count == 0) return RtfStyleFormatting.Empty;
+
+        bool Said(params string[] words)
+        {
+            foreach (string word in words) if (said.Contains(word)) return true;
+            return false;
+        }
+
+        return new RtfStyleFormatting
+        {
+            FontIndex = Said("f") ? state.FontIndex : null,
+            FontSizeHalfPoints = Said("fs") ? state.FontSizeHalfPoints : null,
+            Bold = Said("b") ? state.Bold : null,
+            Italic = Said("i") ? state.Italic : null,
+            Underline = Said(
+                "ul", "uld", "uldash", "uldashd", "uldashdd", "uldb", "ulhwave", "ulldash",
+                "ulth", "ulthd", "ulthdash", "ulthdashd", "ulthdashdd", "ulthldash",
+                "ululdbwave", "ulw", "ulwave", "ulnone") ? state.Underline : null,
+            Strike = Said("strike", "striked") ? state.Strike : null,
+            Capitals = Said("caps") ? state.Capitals : null,
+            SmallCapitals = Said("scaps") ? state.SmallCapitals : null,
+            ForegroundColourIndex = Said("cf") ? state.ForegroundColourIndex : null,
+            LanguageId = Said("lang", "langnp") ? state.LanguageId : null,
+
+            // The paragraph half. Three properties, not the whole of `\pard`'s vocabulary, and
+            // which three is measured against 26.2.4.2 rather than chosen — see
+            // `RtfStyleFormatting`'s own remarks and `probes/rtf-resid-r80`.
+            Alignment = Said("ql", "qr", "qc", "qj", "qd", "qk") ? state.Alignment : null,
+            SpaceBeforeTwips = Said("sb") ? state.SpaceBefore : null,
+            KeepWithNext = Said("keepn") ? state.KeepWithNext : null,
+        };
+    }
+
+    /// <summary>
+    /// Selects a paragraph style: the one it replaces stops contributing, and this one's character
+    /// formatting becomes the base the paragraph's own control words then override.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RTF writes <c>\sN</c> before the direct formatting that refines it — LibreOffice's export
+    /// writes <c>\pard\plain \s24\li85\lin85\intbl…</c> and Word's does the same — so applying
+    /// the style where the <c>\s</c> appears gives the precedence LibreOffice reaches by merging
+    /// the two at paragraph end (<c>RTFDocumentImpl::getProperties</c>,
+    /// <c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:534-637, whose own comment is
+    /// <em>"Take paragraph style into account for character properties as well, as paragraph style
+    /// may contain character properties"</em> at :616-618).
+    /// </para>
+    /// <para>
+    /// A style <em>replaces</em> its predecessor rather than piling onto it, which is why the old
+    /// one is withdrawn first: <c>\pard</c> selects style zero
+    /// (<c>rtfdispatchflag.cxx</c>:600-614, <em>"By default the style with index 0 is applied"</em>)
+    /// and the <c>\sN</c> immediately after it selects another.
+    /// </para>
+    /// </remarks>
+    private void SelectParagraphStyle(GroupState state, int id)
+    {
+        RtfStyleFormatting outgoing = _styles.ContributionOf(state.ParagraphStyleId);
+        WithdrawCharacters(state, outgoing);
+        WithdrawParagraph(state, outgoing);
+        state.ParagraphStyleId = id;
+        RtfStyleFormatting incoming = _styles.ContributionOf(id);
+        ApplyCharacters(state, incoming);
+        ApplyParagraph(state, incoming);
+    }
+
+    /// <summary>
+    /// Puts the paragraph style's character formatting back after <c>\plain</c>.
+    /// </summary>
+    /// <remarks>
+    /// The style sits under the direct formatting rather than beside it, so clearing the direct
+    /// half exposes the style's again. Only the character half: <c>\plain</c> resets character
+    /// formatting and leaves the paragraph's alone, which is why <c>\pard\plain \sN</c> and
+    /// <c>\pard\sN\plain</c> place a paragraph identically.
+    /// </remarks>
+    private void ReapplyStyleCharacters(GroupState state)
+        => ApplyCharacters(state, _styles.ContributionOf(state.ParagraphStyleId));
+
+    /// <summary>
+    /// Lays a paragraph style's alignment, space before and keep-with-next over the group state,
+    /// where the direct control words that follow the <c>\sN</c> then override them.
+    /// </summary>
+    private static void ApplyParagraph(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.Alignment is { } alignment) state.Alignment = alignment;
+        if (f.SpaceBeforeTwips is { } before) state.SpaceBefore = before;
+        if (f.SpaceAfterTwips is { } after) state.SpaceAfter = after;
+        if (f.KeepWithNext is { } keep) state.KeepWithNext = keep;
+    }
+
+    /// <summary>
+    /// Undoes what a paragraph style's paragraph half contributed, returning each property it set
+    /// to the value <see cref="GroupState.ResetParagraph"/> leaves.
+    /// </summary>
+    private static void WithdrawParagraph(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.Alignment is not null) state.Alignment = TextAlignment.Start;
+        if (f.SpaceBeforeTwips is not null) state.SpaceBefore = null;
+        if (f.SpaceAfterTwips is not null) state.SpaceAfter = null;
+        if (f.KeepWithNext is not null) state.KeepWithNext = false;
+    }
+
+    /// <summary>
+    /// Lays a paragraph style's character contribution over the group state, where the direct
+    /// control words that follow the <c>\sN</c> then override it.
+    /// </summary>
+    /// <remarks>
+    /// The font <em>face</em> is deliberately not among them, and that is measured: <c>\deff</c>'s
+    /// name sits in the importer's default character state
+    /// (<c>RTFDocumentImpl::beforePopState</c>,
+    /// <c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:2494-2500), which every group state
+    /// is copied from, so every run carries it as direct formatting and no style's <c>\f</c> can
+    /// beat it. Four probes over a document whose <c>\deff</c>, whose style's <c>\f</c> and whose
+    /// <c>Times New Roman</c> default are three different faces answer <c>\deff</c>'s in all four
+    /// — style's own or inherited, with <c>\plain</c> and without.
+    /// </remarks>
+    private static void ApplyCharacters(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.IsEmpty) return;
+
+        if (f.FontSizeHalfPoints is { } size) state.FontSizeHalfPoints = size;
+        if (f.Bold is { } bold) state.Bold = bold;
+        if (f.Italic is { } italic) state.Italic = italic;
+        if (f.Underline is { } underline) state.Underline = underline;
+        if (f.Strike is { } strike) state.Strike = strike;
+        if (f.Capitals is { } capitals) state.Capitals = capitals;
+        if (f.SmallCapitals is { } smallCapitals) state.SmallCapitals = smallCapitals;
+        if (f.ForegroundColourIndex is { } colour) state.ForegroundColourIndex = colour;
+        if (f.LanguageId is { } language) state.LanguageId = language;
+    }
+
+    /// <summary>
+    /// Undoes what a paragraph style's character half contributed, returning each property it set
+    /// to the value a bare <c>\pard\plain</c> leaves.
+    /// </summary>
+    private static void WithdrawCharacters(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.IsEmpty) return;
+
+        if (f.FontSizeHalfPoints is not null) state.FontSizeHalfPoints = null;
+        if (f.Bold is not null) state.Bold = false;
+        if (f.Italic is not null) state.Italic = false;
+        if (f.Underline is not null) state.Underline = false;
+        if (f.Strike is not null) state.Strike = false;
+        if (f.Capitals is not null) state.Capitals = false;
+        if (f.SmallCapitals is not null) state.SmallCapitals = false;
+        if (f.ForegroundColourIndex is not null) state.ForegroundColourIndex = null;
+        if (f.LanguageId is not null) state.LanguageId = 0;
     }
 
 }

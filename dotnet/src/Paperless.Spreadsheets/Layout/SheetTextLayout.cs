@@ -22,12 +22,17 @@ namespace Paperless.Spreadsheets.Layout;
 /// The left edge of the block of columns being printed, scaled — Calc's <c>mnScrX</c>.
 /// </param>
 /// <param name="BlockRight">Its right edge, Calc's <c>mnScrX + mnScrW</c>.</param>
+/// <param name="BreaksStartLines">
+/// Whether a hard break starts a line in a cell that does not wrap. An importer's decision rather
+/// than a cell's; see <see cref="SheetLayout.CellBreaksStartLines"/>.
+/// </param>
 internal readonly record struct SheetTextContext(
     double Scale,
     Func<int, int, bool> IsAvailable,
     Func<int, Length> ColumnWidth,
     Length BlockLeft = default,
-    Length BlockRight = default);
+    Length BlockRight = default,
+    bool BreaksStartLines = false);
 
 /// <summary>One cell as it is about to be drawn.</summary>
 /// <param name="Text">The text the number format produced.</param>
@@ -103,6 +108,28 @@ internal static class SheetTextLayout
     private const string HashText = "###";
 
     /// <summary>
+    /// The measure a cell that does not wrap is broken against: wide enough that only a hard
+    /// break can end a line.
+    /// </summary>
+    /// <remarks>
+    /// A metre and a half, which no cell's text approaches and which leaves the length arithmetic
+    /// far from overflow. Calc reaches the same place by giving such a cell a paper it can never
+    /// fill rather than by turning the breaker off.
+    /// </remarks>
+    private static readonly Length UnboundedWidth = Length.FromPoints(4096);
+
+    /// <summary>
+    /// The width a wrapping cell is broken against when its column leaves it none.
+    /// </summary>
+    /// <remarks>
+    /// One twip, standing for the one unit of the engine's own map mode that
+    /// <c>ImpEditEngine::calculateMaxLineWidth</c> clamps to
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:542-543). No glyph fits it, so the fill loop's
+    /// "a line takes at least one character" rule puts every character on a line of its own.
+    /// </remarks>
+    private static readonly Length NarrowestWrapWidth = Length.FromTwips(1);
+
+    /// <summary>
     /// The colour a hyperlink cell's text is painted in, whatever the file says it is.
     /// </summary>
     /// <remarks>
@@ -152,7 +179,7 @@ internal static class SheetTextLayout
     /// </remarks>
     /// <param name="cell">The neighbouring cell, or null when the sheet has nothing there.</param>
     public static bool IsAvailable(ContentTableCell? cell)
-        => cell is null || (cell.Value is null && cell.GetText().Length == 0);
+        => cell is null || (cell.Value is null && cell.GetOwnText().Length == 0);
 
     /// <summary>Draws one cell's text, or nothing when there is none to draw.</summary>
     /// <param name="sink">Where to draw.</param>
@@ -578,6 +605,13 @@ internal static class SheetTextLayout
             ? cell.Box.Height - (2 * margin)
             : cell.Box.Width - totalMargin;
 
+        // A wrapping cell whose text begins outside its own column draws nothing at all: see
+        // `StartsOutsideItsCell`. A turned cell is left alone — its paper is the cell's height and
+        // nothing was measured there.
+        if (breaks && !IsQuarterTurned(format)
+            && StartsOutsideItsCell(cell.Box.Width, leftTotal))
+            return new Placement([]);
+
         // Between the output area and the shrink, which is where Calc does it
         // (output2.cxx:1853): the fill is measured against the cell's own column and not
         // against the room a neighbour lent, so it must not see the widened area — and
@@ -632,10 +666,18 @@ internal static class SheetTextLayout
         // three times as tall, which moves every row under it. The seat is that Calc replaces the
         // *engine text* with the hash string after the paper has been decided
         // (`output2.cxx:3605`, `:3849`, `:4070`), so there is nothing left to break.
+        // A cell that does not wrap still breaks at its own paragraphs when the importer made
+        // several of them, and then it breaks at those alone: the paper it is formatted against is
+        // unbounded across, so nothing is ever broken for width. See
+        // <see cref="SheetLayout.CellBreaksStartLines"/> for which importer does that and why.
+        bool splitsAtBreaks = !breaks && !hashed && context.BreaksStartLines
+                              && !cell.IsField && HoldsHardBreak(text);
+
         List<int> paragraphStarts = [0];
-        List<SheetTextRun> lines = breaks && !hashed
+        List<SheetTextRun> lines = (breaks && !hashed) || splitsAtBreaks
             ? Wrap(
-                text, portions, face, size, scale, available, ShapeRange, percent,
+                text, portions, face, size, scale,
+                splitsAtBreaks ? UnboundedWidth : available, ShapeRange, percent,
                 out paragraphStarts, cell.IsField)
             : [run];
         if (lines.Count == 0) return new Placement([]);
@@ -669,6 +711,39 @@ internal static class SheetTextLayout
             && format.Vertical is SheetVerticalAlignment.Top or SheetVerticalAlignment.Standard)
         {
             SkipOutsideFormat(lines, paragraphStarts, cell.Box.Height - (2 * margin), Pitch);
+        }
+
+        // A justified cell's lines are stretched to the paper they were broken against, which
+        // happens after the lines are settled and before any of them is placed: Calc maps both
+        // `justify` and `distributed` to `SvxAdjust::Block` and the engine shares the room left
+        // over among each line's blanks (`ImpEditEngine::ImpAdjustBlocks`,
+        // `editeng/source/editeng/impedit3.cxx:1694-1701`). Nothing above moves — the break
+        // positions, the line count and every row height are decided before this and are not
+        // touched by it, which is why a workbook with no justified cell cannot be affected.
+        //
+        // A paragraph's **last** line is not stretched (`!bEOC`, `:1699`), and `distributed` is
+        // exactly the setting that lifts that exemption — `bDistLastLine` is
+        // `GetJustifyMethod(nPara) == SvxCellJustifyMethod::Distribute` (`:1696`), which Calc sets
+        // from `ATTR_HOR_JUSTIFY_METHOD`. A cell that does not wrap has one line, and that line is
+        // its paragraph's last, so only `distributed` reaches this at all without a wrap.
+        //
+        // `format.Horizontal` and not the resolved `horizontal`: `Resolve` has already turned both
+        // of these into `Left`, which is where a justified line *starts*, and the stretch is the
+        // half of the same setting it could not carry.
+        if (format.Horizontal is SheetHorizontalAlignment.Justify
+                or SheetHorizontalAlignment.Distributed
+            && available > Length.Zero)
+        {
+            bool distributesLastLine =
+                format.Horizontal == SheetHorizontalAlignment.Distributed;
+
+            for (int at = 0; at < lines.Count; at++)
+            {
+                bool endsParagraph = at == lines.Count - 1 || paragraphStarts.Contains(at + 1);
+                if (endsParagraph && !distributesLastLine) continue;
+
+                lines[at] = SheetText.Justified(lines[at], available);
+            }
         }
 
         // The block's height is the sum of its lines rather than a pitch times a count, because a
@@ -747,8 +822,9 @@ internal static class SheetTextLayout
                 ? SheetHorizontalAlignment.Right
                 : SheetHorizontalAlignment.Left,
 
-            // Justified and distributed text is placed from the left and stretched; the stretch is
-            // not reproduced, so they place as left. Fill repeats from the left as well.
+            // Justified and distributed text is placed from the left and stretched. Placing is
+            // all this decides — the stretch is `SheetText.Justified`, applied to the lines a
+            // moment after they are broken. Fill repeats from the left as well.
             SheetHorizontalAlignment.Justify or SheetHorizontalAlignment.Distributed
                 or SheetHorizontalAlignment.Fill => SheetHorizontalAlignment.Left,
 
@@ -859,6 +935,57 @@ internal static class SheetTextLayout
 
         return lines;
     }
+
+    /// <summary>
+    /// Whether a wrapping cell's text begins at or past its own column's right edge, in which
+    /// case none of it is drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Only a wrapping cell is clipped to its column at all</strong>, and only a wrapping
+    /// cell is given a paper: <c>DrawEditParam::calcPaperSize</c>
+    /// (<c>sc/source/ui/view/output2.cxx</c>:2684-2700) sets the EditEngine's paper to
+    /// <c>rAlignRect.GetWidth() − nLeftM − nRightM</c> and is called only under
+    /// <c>if (rParam.mbBreak)</c>, while a cell that does not wrap keeps the initial
+    /// <c>Size(1000000, 1000000)</c> and writes across whatever is beside it. The left margin
+    /// carries the indent — <c>calcMargins</c> (<c>:2665-2682</c>) adds <c>ATTR_INDENT</c> to
+    /// whichever side the cell is aligned to — so an indented cell in a column narrower than that
+    /// indent has its whole block laid out beyond the column's right edge, and
+    /// <c>ImpEditEngine::DrawText_ToRectangle</c> then strips its portions against the cell's
+    /// rectangle and returns without emitting one, <c>!aContentRange.overlaps(aClipRange)</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:3408-3440).
+    /// </para>
+    /// <para>
+    /// <strong>The predicate is the block's start against the column's width, and it is not the
+    /// paper's own sign.</strong> A negative paper is not enough: with the indent removed,
+    /// 26.2.4.2 draws every character of the same cell in the same column, one per line, because
+    /// <c>calculateMaxLineWidth</c> clamps the line width to one unit
+    /// (<c>impedit3.cxx</c>:530-545) and the block still begins inside the cell. Measured over
+    /// twelve renderings of <c>075_Idea_planner_tasks</c> — eight column widths at one indent
+    /// level and four one-attribute variants of the indent — the step falls between column widths
+    /// of <strong>5.25 pt and 6.11 pt</strong> against a margin and indent summing to
+    /// <strong>5.70 pt</strong>, and the same file with <c>indent="1"</c> removed is drawn in full
+    /// at every width. <c>features/sheet-narrow-wrap.fods</c> is the other side of it: a 1.42 pt
+    /// column with no indent, where 26.2.4.2 draws <c>N A R R O W</c> on six lines and a rule
+    /// keyed on the paper's sign would draw none of them.
+    /// </para>
+    /// <para>
+    /// Three further one-attribute variants say what does <em>not</em> decide it: removing
+    /// <c>wrapText</c> makes the reference draw the whole string across its neighbours exactly
+    /// where this tree drew it, emptying the occupied neighbour changes nothing on either side,
+    /// and a row twenty times as tall changes nothing either — so it is neither the spill rule nor
+    /// <see cref="SkipOutsideFormat"/>. <c>probes/xlsx-chart-r84/idea-variants.py</c>.
+    /// </para>
+    /// <para>
+    /// A right-aligned cell carries its indent on the other side, and this uses the same magnitude
+    /// for it because <c>calcMargins</c> does; no document in the corpus has one, so that half
+    /// follows from the C++ rather than from a measurement.
+    /// </para>
+    /// </remarks>
+    /// <param name="width">The cell's own column width.</param>
+    /// <param name="leftTotal">Its left margin plus its indent — where the text begins.</param>
+    internal static bool StartsOutsideItsCell(Length width, Length leftTotal)
+        => leftTotal >= width;
 
     /// <summary>
     /// The character ranges a cell in several formats breaks into at a width.
@@ -1248,8 +1375,15 @@ internal static class SheetTextLayout
         //
         // A field takes the shortcut on width alone: its representation is not in the content
         // node, so a break character inside one is a character like any other and starts nothing.
-        if (available <= Length.Zero
-            || (whole.Width <= available && (atomic || !HoldsHardBreak(text))))
+        // No room is not a reason to stop breaking. `ImpEditEngine::calculateMaxLineWidth`
+        // (`editeng/source/editeng/impedit3.cxx`:530-545) ends with
+        // `if (nMaxLineWidth <= 0) nMaxLineWidth = 1;`, so a cell narrower than its own margins is
+        // broken against one unit and takes a character per line rather than being written across
+        // its neighbours in one. Measured on `features/sheet-narrow-wrap.fods`, whose 1.42 pt
+        // column 26.2.4.2 draws as `N A R R O W` on six lines.
+        if (available <= Length.Zero) available = NarrowestWrapWidth;
+
+        if (whole.Width <= available && (atomic || !HoldsHardBreak(text)))
             return [whole];
 
         // Two layouters per face, because the breaker is fixed at construction and the cache is

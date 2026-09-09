@@ -231,6 +231,125 @@ internal static class SheetText
     }
 
     /// <summary>
+    /// The same run with a line's spare width shared out among its blanks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImpEditEngine::ImpAdjustBlocks</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx:2306-2420</c>), which is what a cell whose
+    /// <c>horizontal</c> alignment is <c>justify</c> or <c>distributed</c> reaches: Calc maps both
+    /// to <c>SvxAdjust::Block</c> and the engine calls this for every line with room left over
+    /// (<c>:1694-1701</c>). The space is shared among the line's <em>blanks</em> — one share each,
+    /// with the first few gaps taking a unit of the remainder — and not among its characters.
+    /// </para>
+    /// <para>
+    /// Three of the routine's rules are reproduced and one is not. A blank that is the line's own
+    /// last character is not a gap ("If the last character is a blank, it is rejected", <c>:2361</c>)
+    /// and its width is given back to the space being shared, which is why the measure below is
+    /// <see cref="SheetTextRun.WithoutTrailingBlanks"/>; the correction loop then skips the line's
+    /// final position again (<c>:2400</c>); and a line with no gap at all is left alone
+    /// (<c>:2356</c>). What is <strong>not</strong> reproduced is the CJK arm, which adds a gap at
+    /// every boundary between an Asian character and its neighbour (<c>:2334-2343</c>), and the
+    /// Kashida arm for Arabic (<c>:2350</c>). A justified cell of Asian text therefore keeps its
+    /// Latin spacing here; nothing in the corpus has one.
+    /// </para>
+    /// <para>
+    /// The trailing blanks themselves keep their advances rather than being collapsed. Calc zeroes
+    /// the last one so that the line's own reported width lands on the paper's, and here the line
+    /// is placed from the left in every case a justified cell can take
+    /// (<c>SheetTextLayout.Resolve</c>), so what a trailing blank does is hang past the right edge
+    /// exactly as it already did.
+    /// </para>
+    /// </remarks>
+    /// <param name="run">The line to stretch.</param>
+    /// <param name="available">The paper width the line was broken against.</param>
+    public static SheetTextRun Justified(SheetTextRun run, Length available)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+
+        Length extra = available - run.WithoutTrailingBlanks;
+        if (extra <= Length.Zero) return run;
+
+        // Where the run's visible text stops: a blank past that point is the line's trailing
+        // space, which is not a gap.
+        int lastVisible = -1;
+        int seen = 0;
+
+        foreach (SheetTextSegment segment in run.Segments)
+        {
+            for (int glyph = 0; glyph < segment.Glyphs.Count; glyph++, seen++)
+            {
+                if (!IsBlank(segment, glyph)) lastVisible = seen;
+            }
+        }
+
+        int gaps = 0;
+        seen = 0;
+
+        foreach (SheetTextSegment segment in run.Segments)
+        {
+            for (int glyph = 0; glyph < segment.Glyphs.Count; glyph++, seen++)
+            {
+                if (seen < lastVisible && IsBlank(segment, glyph)) gaps++;
+            }
+        }
+
+        if (gaps == 0) return run;
+
+        long share = extra.Emu / gaps;
+        long remainder = extra.Emu - (share * gaps);
+
+        List<SheetTextSegment> widened = new(run.Segments.Count);
+        Length offset = Length.Zero;
+        int taken = 0;
+        seen = 0;
+
+        foreach (SheetTextSegment segment in run.Segments)
+        {
+            List<PositionedGlyph> glyphs = new(segment.Glyphs.Count);
+
+            // A glyph's own offset is where it is drawn — the advances are bookkeeping, and the
+            // PDF backend positions from `Offset` — so everything after a widened gap has to move
+            // with it. The offsets are relative to the segment, so only the extra added inside
+            // this segment is carried here; what earlier segments added is already in `offset`.
+            Length local = Length.Zero;
+
+            for (int glyph = 0; glyph < segment.Glyphs.Count; glyph++, seen++)
+            {
+                PositionedGlyph positioned = segment.Glyphs[glyph] with
+                {
+                    Offset = new DocPoint(
+                        segment.Glyphs[glyph].Offset.X + local,
+                        segment.Glyphs[glyph].Offset.Y),
+                };
+
+                if (seen < lastVisible && IsBlank(segment, glyph))
+                {
+                    Length add = Length.FromEmu(share + (taken < remainder ? 1 : 0));
+                    taken++;
+                    positioned = positioned with { Advance = positioned.Advance + add };
+                    local += add;
+                }
+
+                glyphs.Add(positioned);
+            }
+
+            Length width = segment.Width + local;
+            widened.Add(segment with { Glyphs = glyphs, Offset = offset, Width = width });
+            offset += width;
+        }
+
+        return new SheetTextRun(widened, offset);
+    }
+
+    /// <summary>Whether one glyph of a segment stands for a space character.</summary>
+    private static bool IsBlank(SheetTextSegment segment, int glyph)
+    {
+        int cluster = glyph < segment.Clusters.Count ? segment.Clusters[glyph] : -1;
+        return cluster >= 0 && cluster < segment.Text.Length && segment.Text[cluster] == ' ';
+    }
+
+    /// <summary>
     /// Shapes a range of a rich cell's text, one segment per portion it crosses.
     /// </summary>
     /// <remarks>
@@ -318,8 +437,14 @@ internal static class SheetText
         bool struckThrough,
         ref Length offset)
     {
+        // What is actually drawn, which is not always what the cell holds: a legacy pi face that
+        // is not installed has its slots recoded into OpenSymbol's, and that has to happen before
+        // anything is itemised or measured — an OpenSymbol circled-times and a DejaVu Sans "Ä" are
+        // not the same picture and not the same width. Every index survives; see SheetSymbolText.
+        string drawn = SheetSymbolText.Recode(text, face);
+
         List<FaceRun> runs = FontItemiser.Split(
-            text, 0, text.Length, face.Face, SheetFonts.Fallback);
+            drawn, 0, drawn.Length, face.Face, SheetFonts.Fallback);
 
         foreach (FaceRun run in runs)
         {
@@ -335,13 +460,15 @@ internal static class SheetText
             // synthetic oblique. See IGlyphFallbackResolver.ReferenceFor(OpenTypeFace, bool).
             bool italic = face.Face.IsItalic || face.Reference.SyntheticOblique;
 
-            SheetFace drawn =
+            SheetFace drawnFace =
                 run.IsFallback && SheetFonts.ForFallback(run.Face, italic) is { } resolved
                     ? resolved
                     : face;
 
             segments.Add(Segment(
-                text.Substring(run.Start, run.Length), drawn, size, colour, offset,
+                drawn.Substring(run.Start, run.Length),
+                text.Substring(run.Start, run.Length),
+                drawnFace, size, colour, offset,
                 underline, struckThrough, out Length width));
             offset += width;
         }
@@ -379,11 +506,19 @@ internal static class SheetText
             : SheetDeviceUnits.SnapFontSize(Length.FromTwips(scaled.Twips * percent / 100));
     }
 
+    /// <summary>Shapes one stretch of one face.</summary>
+    /// <remarks>
+    /// <paramref name="drawn"/> and <paramref name="text"/> differ only for a recoded pi face, and
+    /// then only code point for code point — the shaper is given the slots OpenSymbol actually
+    /// holds while the segment keeps the characters the document does, so the cluster map still
+    /// indexes the text and the PDF's <c>ToUnicode</c> carries what the reference's carries.
+    /// See <see cref="SheetSymbolText"/>.
+    /// </remarks>
     private static SheetTextSegment Segment(
-        string text, SheetFace face, Length size, Colour? colour, Length offset,
+        string drawn, string text, SheetFace face, Length size, Colour? colour, Length offset,
         SheetUnderline underline, bool struckThrough, out Length width)
     {
-        ShapedText shaped = TextShaper.Default.Shape(face.Face, text, NoKerning);
+        ShapedText shaped = TextShaper.Default.Shape(face.Face, drawn, NoKerning);
 
         List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
         List<int> clusters = new(shaped.Glyphs.Count);

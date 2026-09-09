@@ -536,6 +536,32 @@ public class FontResolutionTests
             .FamilyName.ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData("Garamond", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Tahoma", FontFamilyClass.Serif, "DejaVu Serif")]
+    public void WithNoFontconfigTheDeclaredShapeIsWhatRoutes(
+        string requested, FontFamilyClass declared, string expected)
+    {
+        SystemFontIndex index = Index();
+        Assert.SkipUnless(index.Has(expected), $"{expected} is not installed");
+
+        // The declared-class arm has to survive the absence of a fontconfig, and nothing else here
+        // pins that: every other row in this file runs against the machine's own configuration.
+        // Windows and most macOS installations have no pre-match hook at all, so the fontconfig
+        // filing this arm competes with does not exist and only `ImplFontSubstitute` and the
+        // family type are left. These two rows are the ones directly above, answered against
+        // `FontconfigPreferences.None` instead — same answer, different route, which is the claim.
+        //
+        // Written during the round that briefly made this branch conditional on
+        // `IsConfigured`. That change was reverted — 26.2.4.2 is the target and it honours the
+        // declaration — but the guard is worth keeping, because the branch it protects is the one
+        // no reference in this container can measure.
+        SystemFontResolver resolver = new(index, FontconfigPreferences.None);
+
+        resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
+            .FamilyName.ShouldBe(expected);
+    }
+
     // ------------------------------------------------- the shape the document itself declares
 
     [Theory]

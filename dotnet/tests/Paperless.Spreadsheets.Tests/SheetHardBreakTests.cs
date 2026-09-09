@@ -30,15 +30,20 @@ namespace Paperless.Spreadsheets.Tests;
 /// 11.197 pt, so "two pitches apart" below is the empty paragraph in row 3 taking a line.
 /// </para>
 /// <para>
-/// Row 2 of the fixture is deliberately not asserted as correct. It is the same three strings in
-/// a cell that does not wrap, and ODF's importer disagrees with the other two about it: it makes
-/// a multi-paragraph edit cell whatever the wrap option says, so LibreOffice draws three lines,
-/// while BIFF and SpreadsheetML both fold them onto one paragraph
-/// (<c>XclImpStringHelper::SetToDocument</c>, <c>xihelper.cxx:250-256</c>;
-/// <c>SheetDataBuffer::setStringCell</c>, <c>sheetdatabuffer.cxx:120-135</c>, which every string
+/// <strong>Row 2 is the case the two families answer differently, and this fixture is ODF, so it
+/// is asserted as three lines.</strong> It is the same three strings in a cell that does not
+/// wrap. BIFF and SpreadsheetML fold them onto one paragraph, by putting the EditEngine into
+/// single-line mode for a cell whose format does not wrap
+/// (<c>XclImpStringHelper::SetToDocument</c>, <c>xihelper.cxx</c>:246-256;
+/// <c>SheetDataBuffer::setStringCell</c>, <c>sheetdatabuffer.cxx</c>:120-135, which every string
 /// holding U+000A reaches because <c>RichString::extractPlainString</c> refuses it at
-/// <c>richstring.cxx:375</c>). The sheets corpus is entirely <c>.xls</c> and <c>.xlsx</c>, so the
-/// one line we draw is what those two ask for and only the ODF side is outstanding.
+/// <c>richstring.cxx</c>:375) — and under <c>EEControlBits::SINGLELINE</c>
+/// <c>ImpEditEngine::ImpInsertText</c> does not look for a separator at all
+/// (<c>editeng/source/editeng/impedit2.cxx</c>:2876-2877). Calc's ODF filter never calls
+/// <c>SetSingleLine</c>, so the break makes a paragraph whatever the wrap option says. The rule
+/// is <see cref="SheetLayout.CellBreaksStartLines"/>; 26.2.4.2 draws <c>Delta</c> at 92.74,
+/// <c>Echo</c> at 103.93 and <c>Foxtrot</c> at 115.13, which is the same three figures 24.2.7.2
+/// gives.
 /// </para>
 /// </remarks>
 public sealed class SheetHardBreakTests
@@ -165,34 +170,46 @@ public sealed class SheetHardBreakTests
     /// width and put a U+000A into the text a reader can select.
     /// </para>
     /// <para>
-    /// Row 2 is the stated exception and the reason this is not simply asserted over the page:
-    /// its cell does not wrap, so it never reaches the line breaker at all and is still drawn as
-    /// one run with its two breaks in it. That is the unimplemented half described on the class,
-    /// and excluding it here is what keeps this test about the half that is implemented.
+    /// Row 2 is included rather than excluded now that it breaks: no cell on this page keeps a
+    /// break character, whether the line it ends was found by the wrap or by the paragraph.
     /// </para>
     /// </remarks>
     [Fact]
     public void NoBrokenLineHoldsTheBreakItself()
         => Drawn("sheet-cell-hard-break.fods")
-            .Where(r => !r.Text.StartsWith("Delta", StringComparison.Ordinal))
             .ShouldNotContain(r => r.Text.Contains('\n') || r.Text.Contains('\r'));
 
     /// <summary>
-    /// The unimplemented half, named as a measurement rather than asserted as correct.
+    /// A cell that does not wrap still breaks at its own paragraphs, in an ODF sheet.
     /// </summary>
     /// <remarks>
-    /// LibreOffice draws row 2 on three lines — <c>Delta</c> at 92.74, <c>Echo</c> at 103.93 and
-    /// <c>Foxtrot</c> at 115.13 — because ODF makes a multi-paragraph edit cell whatever the
-    /// wrap option says. We draw one run holding all three and both breaks, which is what the
-    /// BIFF and SpreadsheetML importers ask for and what the whole sheets corpus therefore
-    /// wants. This states the gap so that the next change to <see cref="SheetTextLayout"/> has
-    /// to decide about it deliberately, and it is the assertion to delete rather than the one to
-    /// keep passing.
+    /// <para>
+    /// The half this fixture used to record as unimplemented. Row 2 holds the same three strings
+    /// as row 1 in a cell whose format states no wrap, and 26.2.4.2 draws them on three lines at
+    /// 92.74, 103.93 and 115.13 — one pitch apart, left-aligned together, exactly as row 1 —
+    /// because Calc's ODF filter never puts the EditEngine into single-line mode. See the class
+    /// remarks and <see cref="SheetLayout.CellBreaksStartLines"/>.
+    /// </para>
+    /// <para>
+    /// It is the <em>importer</em> being asserted and not the cell, so this is a statement about
+    /// a <c>.fods</c> and says nothing about the same three strings in a <c>.xls</c> or an
+    /// <c>.xlsx</c>, where one line is right and is what the rest of the sheets corpus wants.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void ANonWrappingCellStillLosesItsBreaks()
-        => Drawn("sheet-cell-hard-break.fods")
-            .ShouldContain(r => r.Text == "Delta\nEcho\nFoxtrot");
+    public void ANonWrappingOdfCellBreaksAtItsParagraphs()
+    {
+        List<DrawnGlyphRun> drawn = Drawn("sheet-cell-hard-break.fods");
+
+        DrawnGlyphRun delta = drawn.Single(r => r.Text == "Delta");
+        DrawnGlyphRun echo = drawn.Single(r => r.Text == "Echo");
+        DrawnGlyphRun foxtrot = drawn.Single(r => r.Text == "Foxtrot");
+
+        echo.Origin.X.ShouldBe(delta.Origin.X);
+        foxtrot.Origin.X.ShouldBe(delta.Origin.X);
+        (echo.Origin.Y - delta.Origin.Y).Points.ShouldBe(11.197, 0.05);
+        (foxtrot.Origin.Y - echo.Origin.Y).Points.ShouldBe(11.197, 0.05);
+    }
 
     /// <summary>
     /// The row heights and the drawn lines are computed from one rule.

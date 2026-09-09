@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
+using Paperless.WordProcessing.Layout;
 using Paperless.Core.Units;
 using Paperless.WordProcessing.Model;
 
@@ -136,7 +138,118 @@ internal static class DocxPageGeometry
             IsRightToLeft = Word.IsOn(Word.Child(sectionProperties, "bidi")),
 
             HasMirroredMargins = Word.IsOn(Word.Child(settings, "mirrorMargins")),
+
+            Borders = Borders(Word.Child(sectionProperties, "pgBorders")),
         };
+    }
+
+    /// <summary>
+    /// The border drawn round the page, or null when the section declares none that draws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>w:pgBorders</c> is the same four-sided shape as <c>w:pBdr</c> and <c>w:tblBorders</c> and
+    /// is read the same way — <c>w:sz</c> in eighths of a point through
+    /// <see cref="BorderRules"/> so that Word's style names and its width clamps are applied once,
+    /// and <c>w:color</c> through <see cref="WordThemeColour"/>. What is different is
+    /// <c>w:space</c>: on a paragraph border it is the gap between the line and the text, and here
+    /// it is the gap between the line and whatever <c>w:offsetFrom</c> names, which is the
+    /// <em>paper's edge</em> unless the attribute says <c>text</c>. Word states it in whole points
+    /// and clamps it to 31.
+    /// </para>
+    /// <para>
+    /// No theme is threaded in, so a border stating only <c>w:themeColor</c> falls back to black.
+    /// Nothing in the corpus does: all seven documents that declare a page border state
+    /// <c>w:color</c> outright.
+    /// </para>
+    /// </remarks>
+    private static PageBorders? Borders(XElement? pageBorders)
+    {
+        if (pageBorders is null) return null;
+
+        PageBorders borders = new()
+        {
+            Top = Side(Word.Child(pageBorders, "top")),
+            Left = Side(Word.Child(pageBorders, "left")),
+            Bottom = Side(Word.Child(pageBorders, "bottom")),
+            Right = Side(Word.Child(pageBorders, "right")),
+            // `w:offsetFrom` absent means *text*, which is the opposite of the obvious reading and is
+            // measured: 26.2.4.2 draws a `w:pgBorders` with no `w:offsetFrom` at the text's own inset
+            // and not at `w:space` from the paper. The seat is `PageBordersHandler`'s constructor,
+            // which initialises `m_eOffsetFrom` to `BorderOffsetFrom::Text`
+            // (`sw/source/writerfilter/dmapper/PageBordersHandler.cxx`:34-38), while its `default:`
+            // arm for a *stated* value falls to `page`. All seven corpus documents state `page`, so
+            // this arm is reached only by a fixture — and by RTF, whose `\pgbrdropt` reaches dmapper
+            // through the same handler and states nothing at all for the text case.
+            OffsetFromText = Word.Attribute(pageBorders, "offsetFrom") is not { } offset
+                || !string.Equals(offset, "page", StringComparison.Ordinal),
+            Shadow = Shadow(Word.Child(pageBorders, "right")),
+            // `w:display` is deliberately not read. It reaches `PageBordersHandler::lcl_attribute`,
+            // which turns it into `m_eBorderApply` and hands that to
+            // `SectionPropertyMap::ApplyBorderToPageStyles` — whose signature names the parameter
+            // `BorderApply /*eBorderApply*/` and never touches it
+            // (`sw/source/writerfilter/dmapper/PropertyMap.cxx`:649-721). One page style per section
+            // carries the border, so every page of the section gets it. Measured as well as read: two
+            // four-page fixtures declaring `firstPage` and `notFirstPage` both render on 26.2.4.2 with
+            // the border on all four pages. **The DOC reader is not the same** — `pgbApplyTo` really
+            // is honoured there (`ww8par.cxx`:4303-4306) — so this stays a property of the model and
+            // is simply not stated by this reader.
+            Display = PageBorderDisplay.AllPages,
+        };
+
+        return borders.Draws ? borders : null;
+    }
+
+    /// <summary>One side of a page border, or a side that draws nothing.</summary>
+    private static PageBorderSide Side(XElement? stated)
+    {
+        if (stated is null) return default;
+
+        string? val = Word.Attribute(stated, "val");
+        if (val is null or "none" or "nil") return default;
+
+        Length stateWidth =
+            Word.Integer(Word.Attribute(stated, "sz"), out int eighths) && eighths > 0
+                ? Length.FromPoints(eighths / 8.0)
+                : Length.FromPoints(0.5);
+
+        if (BorderRules.FromWord(BorderRules.WordStyleOf(val), stateWidth) is not { } rule)
+        {
+            return default;
+        }
+
+        Length space =
+            Word.Integer(Word.Attribute(stated, "space"), out int points) && points > 0
+                ? Length.FromPoints(Math.Min(points, 31))
+                : Length.Zero;
+
+        return new PageBorderSide(
+            rule.Width,
+            WordThemeColour.Read(stated, null, "color", "themeColor", "themeTint", "themeShade")
+                ?? Colour.Black,
+            space);
+    }
+
+    /// <summary>
+    /// The shadow the border casts, from the <em>right</em> side alone.
+    /// </summary>
+    /// <remarks>
+    /// <c>w:shadow</c> is an attribute of each side and the shadow is a property of the whole box, so
+    /// a reader has to choose which side decides. Writer reads the right one and only the right one:
+    /// <c>SectionPropertyMap::ApplyBorderToPageStyles</c> tests
+    /// <c>m_bBorderShadows[BORDER_RIGHT]</c> and <c>PropertyMap::getShadowFromBorder</c> takes that
+    /// side's own <c>LineWidth</c> for the offset
+    /// (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:715-734). Reading "any side asks for
+    /// it" agrees on every corpus document — all seven declare the same flag on all four sides — and
+    /// disagrees on a file that shadows one side only, which Word can write.
+    /// </remarks>
+    private static Length Shadow(XElement? right)
+    {
+        if (right is null) return Length.Zero;
+
+        return Word.Attribute(right, "shadow") is "1" or "true" or "on"
+            ? Side(right).Width
+            : Length.Zero;
     }
 
     /// <summary>

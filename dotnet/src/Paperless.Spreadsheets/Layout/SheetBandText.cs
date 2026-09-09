@@ -89,17 +89,25 @@ internal static class SheetBandText
         => metrics with { Grid = MetricGrid.Chart };
 
     /// <summary>
-    /// The same metrics with no device at all — the arithmetic chart text used before round 60,
-    /// kept for the <em>drawing shape</em> text that also asks for it.
+    /// The same metrics with no device at all, which is what a <em>drawing shape's</em> text is
+    /// measured on.
     /// </summary>
     /// <remarks>
-    /// <b>This is a preserved behaviour and not a measured one.</b> A Calc drawing object's text
-    /// is an EditEngine text like a chart's, but it is formatted against the draw layer's own
-    /// reference device rather than <c>chart2</c>'s, and which device that is on 26.2.4.2 has not
-    /// been measured on this project. Round 60 moved chart text onto
-    /// <see cref="MetricGrid.Chart"/> and deliberately left shape text exactly where it was, so
-    /// that a chart fix could not silently move every text box in the corpus. Naming it separately
-    /// is what makes the untested half visible; see <see cref="ShapeLineHeightAt(Length, string?)"/>.
+    /// <para>
+    /// <b>The absent device is now measured and it really is absent.</b> A Calc drawing object's
+    /// text is an EditEngine text like a chart's, but it is formatted against the draw layer's own
+    /// reference device rather than <c>chart2</c>'s — <c>ScDocument::GetVirtualDevice_100th_mm</c>,
+    /// <c>RefDevMode::MSO1</c> at 8640 dpi (<c>sc/source/core/data/documen8.cxx</c>:182-193),
+    /// whose pixel is 0.008 pt and so is indistinguishable from no grid at any size a workbook
+    /// uses. Round 60 moved chart text onto <see cref="MetricGrid.Chart"/> and deliberately left
+    /// shape text ungridded without knowing whether that was right; round 69 scored the two
+    /// against 26.2.4.2 over sixteen text boxes and no grid wins — putting these metrics through
+    /// <see cref="MetricGrid.Spreadsheet"/>, as a <em>cell's</em> go, is four times worse.
+    /// </para>
+    /// <para>
+    /// What was wrong was the leading, not the device; see
+    /// <see cref="ShapeLineHeightAt(Length, string?)"/>, which carries the measurement.
+    /// </para>
     /// </remarks>
     private static LineMetrics Ungridded(LineMetrics metrics) => metrics with { Grid = null };
 
@@ -274,18 +282,62 @@ internal static class SheetBandText
     /// How tall one line of a Calc <em>drawing shape's</em> text is, at a size.
     /// </summary>
     /// <remarks>
-    /// The arithmetic <see cref="ChartLineHeightAt(Length)"/> had before round 60 — the face's own
-    /// <c>ascent + descent + lineGap</c>, on no device — kept under its own name so that the shape
-    /// path is visibly a separate, <b>unmeasured</b> claim rather than an accident of sharing a
-    /// function with the chart path. See the remark on <see cref="Ungridded(LineMetrics)"/> for
-    /// what is and is not known about it.
+    /// <para>
+    /// <strong>Ascent plus descent, on no device, and <em>without</em> the external leading.</strong>
+    /// This carried the leading until round 69, under its own name because that half had never been
+    /// measured — it was the arithmetic <see cref="ChartLineHeightAt(Length)"/> had before round 60,
+    /// kept where it could be seen rather than shared. It is measured now, and the leading is not in
+    /// it: a Calc drawing object's text is an EditEngine text, <c>IsAddExtLeading()</c> is false
+    /// there, and <see cref="MetricGrid"/>'s other EditEngine users have said so all along.
+    /// </para>
+    /// <para>
+    /// Measured on a probe workbook of sixteen wrapping text boxes — four faces × four sizes,
+    /// nothing else on the sheet and no print scale, so a baseline pitch is read straight off the
+    /// reference's own text origins. Against 26.2.4.2, over 19 boxes: <c>ascent + descent</c> is
+    /// right to a mean of <strong>0.008 pt</strong> and a worst case of 0.02, which is the
+    /// hundredth-of-a-millimetre the size itself is quantised to; carrying the leading is out by a
+    /// mean of <strong>0.237 pt</strong> and by <strong>1.02 pt</strong> at 24 pt; and putting the
+    /// metrics through <see cref="MetricGrid.Spreadsheet"/> as a cell's are is out by 0.035 and
+    /// wrong in both directions. So the device is <em>not</em> the missing half here, and the
+    /// leading was.
+    /// </para>
+    /// <para>
+    /// <strong>Why it survived nine rounds: two of the four faces have no line gap.</strong>
+    /// Carlito's is zero and DejaVu Sans' is zero, so the two rules agree exactly on them and
+    /// disagree by 3.8% on both Liberation faces — which is what made this visible on
+    /// <c>070_Equipment_inventory_list…xlsx</c>, whose slicer notices fall back to Liberation Serif,
+    /// and invisible on the Carlito workbooks the shape path was built against.
+    /// </para>
     /// </remarks>
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length ShapeLineHeightAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics
-            ? Ungridded(metrics).ScaledLineHeight(size)
+            ? Height(Ungridded(metrics), size)
             : size * 1.15;
+
+    /// <inheritdoc cref="ShapeLineHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">
+    /// Whether the family's bold face is wanted. A bold face is a different file with its own
+    /// <c>hhea</c>, so a bold line is not always the height of the regular one.
+    /// </param>
+    public static Length ShapeLineHeightAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics
+            ? Height(Ungridded(metrics), size)
+            : size * 1.15;
+
+    /// <summary>Ascent plus descent, each scaled on its own, with no external leading.</summary>
+    /// <remarks>
+    /// Spelled out rather than reached through <c>ScaledLineHeight</c>, because that function's
+    /// ungridded branch is <c>ascent + descent + lineGap</c> and the leading is exactly what an
+    /// EditEngine line does not have. On a grid the two would have to be one call — the device
+    /// rounds the height and the ascent and leaves the descent as the remainder — and no grid is
+    /// what the measurement above says this path takes.
+    /// </remarks>
+    private static Length Height(LineMetrics metrics, Length size)
+        => metrics.ScaledAscent(size) + metrics.ScaledDescent(size);
 
     /// <inheritdoc cref="AscentAt(Length)"/>
     /// <param name="size">The em size.</param>
@@ -318,8 +370,18 @@ internal static class SheetBandText
     /// <strong>Cap height is a proxy for the glyph bounding box</strong>, which is what
     /// drawinglayer actually measures. It is exact for capitals and too high for text that reaches
     /// no further than the x-height, where it makes us draw a little more readily than the
-    /// reference. The alternative is parsing <c>glyf</c> per glyph, which buys nothing on this
-    /// corpus: the nearest case to the boundary is 85 pt clear of it.
+    /// reference. The alternative is parsing <c>glyf</c> per glyph, which buys nothing on
+    /// <em>this</em> clip: the nearest case to the boundary is 85 pt clear of it.
+    /// </para>
+    /// <para>
+    /// <strong>It buys a great deal on the other clip, and that is a correction to the sentence
+    /// above rather than an exception to it.</strong> A shape stating <c>vertOverflow="clip"</c> is
+    /// measured the same way against a rectangle whose margins are a point or two rather than 85,
+    /// and there a proxy is not good enough: 26.2.4.2 draws <c>Icon sets</c> and drops
+    /// <c>Inventory list</c> from two identical 204 x 33 pt buttons, and all that separates them is
+    /// the ink below the baseline. <see cref="GlyphInkExtents"/> reads the boxes for that and
+    /// <see cref="BandRun.Ink"/> is where they arrive. This band clip is deliberately left on the
+    /// proxy, because moving it would change header and footer text for no measured reason.
     /// </para>
     /// </remarks>
     /// <param name="size">The em size.</param>
@@ -421,7 +483,9 @@ internal static class SheetBandText
     {
         if (text.Length == 0) return null;
 
-        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold, italic);
+        (OpenTypeFace? resolved, FontReference reference, LineMetrics? metrics) =
+            FaceFor(family, bold, italic);
+
         if (resolved is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);
@@ -443,7 +507,7 @@ internal static class SheetBandText
             pen += advance;
         }
 
-        return new BandRun(glyphs, clusters, reference, size, text, pen);
+        return new BandRun(glyphs, clusters, reference, size, text, pen, face, metrics);
     }
 
     /// <summary>
@@ -574,6 +638,9 @@ internal sealed class BandRun
     private readonly FontReference _font;
     private readonly Length _size;
     private readonly string _text;
+    private readonly OpenTypeFace? _face;
+    private readonly LineMetrics? _metrics;
+    private (Length Above, Length Below)? _ink;
 
     internal BandRun(
         List<PositionedGlyph> glyphs,
@@ -581,18 +648,77 @@ internal sealed class BandRun
         FontReference font,
         Length size,
         string text,
-        Length width)
+        Length width,
+        OpenTypeFace? face = null,
+        LineMetrics? metrics = null)
     {
         _glyphs = glyphs;
         _clusters = clusters;
         _font = font;
         _size = size;
         _text = text;
+        _face = face;
+        _metrics = metrics;
         Width = width;
     }
 
     /// <summary>How far the run's pen travels.</summary>
     public Length Width { get; }
+
+    /// <summary>
+    /// How far this run's ink reaches above its baseline and how far below it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The <em>ink</em>, not the line box, because that is what LibreOffice clips a shape's text
+    /// against: a portion survives a <c>vertOverflow="clip"</c> body only when its start position
+    /// and both corners of its glyph bounding rectangle lie inside the clip range
+    /// (<c>svx/source/svdraw/svdoutl.cxx</c>:120-160). Two labels of the same size in the same box
+    /// therefore get different answers, and the difference is whether any of their letters
+    /// descends.
+    /// </para>
+    /// <para>
+    /// Measured lazily and once: only the shape painter asks, and it asks per line rather than per
+    /// glyph. A face with no <c>glyf</c> falls back to the declared ascent and descent, which is
+    /// the line box again and clips a little more readily than the reference.
+    /// </para>
+    /// </remarks>
+    public (Length Above, Length Below) Ink => _ink ??= MeasureInk();
+
+    private (Length Above, Length Below) MeasureInk()
+    {
+        Length fallbackAbove = _metrics is { } declared
+            ? declared.ScaledAscent(_size)
+            : _size * 0.9;
+        Length fallbackBelow = _metrics is { } stated
+            ? stated.ScaledDescent(_size)
+            : _size * 0.25;
+
+        if (!GlyphInkExtents.CanMeasure(_face) || _face is not { UnitsPerEm: > 0 } face)
+            return (fallbackAbove, fallbackBelow);
+
+        Length inkAbove = Length.Zero;
+        Length inkBelow = Length.Zero;
+        bool measured = false;
+
+        foreach (PositionedGlyph glyph in _glyphs)
+        {
+            if (GlyphInkExtents.Of(face, glyph.GlyphId) is not { } extent)
+                return (fallbackAbove, fallbackBelow);
+
+            measured = true;
+
+            // The glyph's own offset is in document space, where y grows downward, so it lowers
+            // the ink by exactly as much as it raises the room above it.
+            Length top = (_size * ((double)extent.Above / face.UnitsPerEm)) - glyph.Offset.Y;
+            Length bottom = (_size * ((double)extent.Below / face.UnitsPerEm)) + glyph.Offset.Y;
+
+            if (top > inkAbove) inkAbove = top;
+            if (bottom > inkBelow) inkBelow = bottom;
+        }
+
+        return measured ? (inkAbove, inkBelow) : (Length.Zero, Length.Zero);
+    }
 
     /// <summary>The run placed at a baseline origin.</summary>
     public GlyphRun At(DocPoint origin) => new()

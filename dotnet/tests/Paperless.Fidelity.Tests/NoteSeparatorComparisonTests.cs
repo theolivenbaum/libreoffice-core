@@ -72,7 +72,7 @@ public sealed class NoteSeparatorComparisonTests : IDisposable
     [Fact]
     public void LibreOfficeSetsTheRtfNotesInADifferentFaceFromTheBody()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<PdfTextRun> rtf = PdfTextRuns.Read(
             _libreOffice.ConvertToPdf(Corpus.Require("footnotes.rtf"), _workDirectory));
@@ -101,7 +101,7 @@ public sealed class NoteSeparatorComparisonTests : IDisposable
     [Fact]
     public void TheRtfSeparatorGapIsExactlyTheShorterNoteLines()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("footnotes.rtf");
         string ours = Ours(path);

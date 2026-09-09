@@ -125,13 +125,30 @@ public readonly record struct ChartScaleResult(
 public static class ChartScale
 {
     /// <summary>
-    /// LibreOffice's ceiling on the number of automatic intervals.
+    /// LibreOffice's ceiling on the number of automatic intervals, and the count an axis is
+    /// given before anything about it has been measured.
     /// </summary>
     /// <remarks>
-    /// <c>lcl_getMaximumAutoIncrementCount</c> returns 10 for every axis type but a date axis
-    /// (<c>ScaleAutomatism.cxx:43-49</c>), and <c>ScaleAutomatism::setMaximumAutoMainIncrementCount</c>
-    /// clamps whatever the axis asks for into <c>[2, 10]</c> (<c>:143-151</c>). So ten is the most
-    /// an axis ever gets and two the fewest.
+    /// <para>
+    /// <strong>Ten is a clamp and a first-pass default. It is never the rule, and reading it as
+    /// one draws the densest axis every chart allows.</strong>
+    /// <c>lcl_getMaximumAutoIncrementCount</c> returns 10 for every axis type but a date axis,
+    /// where it is <c>MAXIMUM_MANUAL_INCREMENT_COUNT</c> = 500 (<c>ScaleAutomatism.cxx</c>:43-49
+    /// — see <see cref="ChartDateScale.MaximumAutoIntervalCount"/>), and
+    /// <c>ScaleAutomatism::setMaximumAutoMainIncrementCount</c> clamps its argument into
+    /// <c>[2, that]</c> (<c>:143-151</c>). The <em>argument</em> is where the answer comes from:
+    /// <c>VCoordinateSystem::prepareAutomaticAxisScaling</c> passes
+    /// <c>pVAxis-&gt;estimateMaximumAutoMainIncrementCount()</c> for every axis but a date X one
+    /// (<c>VCoordinateSystem.cxx</c>:412-417), and that estimate is the axis' own drawn length
+    /// over the tallest label it has measured (<c>VCartesianAxis.cxx</c>:1559-1618). It returns
+    /// this constant only while nothing has been measured, which is exactly LibreOffice's first
+    /// pass: <c>ChartView.cxx</c>:538 scales the axes, <c>:589</c> lays the labels out to measure
+    /// them, and <c>:601</c> scales them again with the count the measurement gives.
+    /// </para>
+    /// <para>
+    /// <see cref="ChartLayout"/> is that second pass — <c>IntervalsThatFit</c> — so a caller with
+    /// geometry passes what it derived and a caller with none passes nothing and gets ten.
+    /// </para>
     /// </remarks>
     public const int MaximumAutoIntervalCount = 10;
 

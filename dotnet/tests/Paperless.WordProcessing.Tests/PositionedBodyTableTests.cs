@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using Paperless.Core.Documents;
+using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 using Paperless.WordProcessing.Layout;
 using Shouldly;
@@ -40,6 +41,15 @@ public sealed class PositionedBodyTableTests
 {
     /// <summary>A4 top margin, in points: <c>w:top="1440"</c>.</summary>
     private static readonly Length TopMargin = Length.FromPoints(72);
+
+    /// <summary>And its left margin, which is the same inch: <c>w:left="1440"</c>.</summary>
+    private static readonly Length LeftMargin = Length.FromPoints(72);
+
+    /// <summary>A table half the column's width, so that a fly of it leaves room beside itself.</summary>
+    private const int NarrowGrid = 5000;
+
+    /// <summary>And one as wide as the column, so that it does not: 11906 − 1440 − 1440.</summary>
+    private const int WideGrid = 9026;
 
     /// <summary>
     /// A page-anchored table is drawn <c>w:tblpY</c> below the sheet's top edge, not at the margin.
@@ -116,6 +126,179 @@ public sealed class PositionedBodyTableTests
         line.Top.ShouldBeGreaterThan(Length.FromPoints(300));
     }
 
+    /// <summary>
+    /// A fly that fills the column pushes the flow under itself rather than staying in the flow.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The other side of <see cref="AFlyOverTheFlowDoesNotSwallowATextBearingLine"/>. Writer's body
+    /// flies take the parallel surround, so the flow is pushed clear of one — <em>beside</em> it where
+    /// there is room and <em>below</em> it where there is not. Nothing here can wrap into a strip beside
+    /// a fly, which is why the narrow case refuses to float at all; the full-width case needs no
+    /// wrapping, only a position.
+    /// </para>
+    /// <para>
+    /// Measured against 24.2.7.2 on two authored probes differing only in the table's width. A 200 pt
+    /// table in a 451.3 pt column puts the following <c>AFTER</c> at <b>x = 266.25 pt</b>, level with
+    /// the table's first row and hard against its right edge; a table as wide as the column puts it at
+    /// <b>y = 133.03 pt</b>, under the table's last row and at the column's own left edge. Both are in
+    /// <c>dotnet/probes/words-floating-table/</c>.
+    /// </para>
+    /// <para>
+    /// Here the table is anchored 36 pt above the top margin and is 400 pt tall, so the line after it
+    /// would have landed inside it. Floated, the line goes to the table's bottom edge — 36 + 400 = 436
+    /// pt down the page, which is 364 pt below the margin the narrow case leaves it at.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AFlyFillingTheColumnPushesTheFlowUnderItself()
+    {
+        WordProcessingPages pages = Lay(
+            vertAnchor: "page", tblpY: 720, after: "<w:r><w:t>After</w:t></w:r>", grid: WideGrid);
+
+        PlacedTable table = pages.Pages[0].Tables.ShouldHaveSingleItem();
+        table.Area.Y.ShouldBe(Length.FromTwips(720));
+
+        PlacedLine line = pages.Pages[0].Lines.ShouldHaveSingleItem();
+        line.Top.ShouldBe(Length.FromTwips(720) + Length.FromTwips(8000) - TopMargin);
+    }
+
+    /// <summary>
+    /// Every paragraph after the fly is pushed under it, an empty one included — but the displacement
+    /// is recorded on the paragraph it lands on, because a frame anchored there does not move with it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer positions a paragraph's anchored objects when the paragraph is <em>first</em> formatted,
+    /// which is before a fly above it has pushed the paragraph clear of itself, and it does not position
+    /// them again afterwards. So the flow moves and the object stays. Only the paragraph the
+    /// displacement actually lands on is affected: the one after it is formatted below an already-moved
+    /// predecessor, so its own objects are placed where it really is.
+    /// </para>
+    /// <para>
+    /// Measured on 21 authored documents in <c>probes/words-fly-clearance/</c> and confirmed on
+    /// <c>HC-Bulletin-template.docx</c>, whose masthead logo and photograph hang off the paragraph
+    /// directly after a full-width fly: moving them with the flow put both at the bottom of page one
+    /// where the reference has them at the top. First-page ink, <b>38.41 before and 10.96 after</b>.
+    /// </para>
+    /// <para>
+    /// The two halves are asserted together because either alone is satisfied by a wrong rule: leaving
+    /// the flow where it was would also leave the frame, and moving both would also move neither.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AFlyMovesTheFlowUnderItselfAndLeavesTheAnchoredFrameBehind()
+    {
+        WordProcessingPages pages = Lay(
+            vertAnchor: "page", tblpY: 720, after: "<w:r><w:t>After</w:t></w:r>",
+            grid: WideGrid, empties: 1);
+
+        Length under = Length.FromTwips(720) + Length.FromTwips(8000) - TopMargin;
+        List<PlacedLine> lines = [.. pages.Pages[0].Lines];
+
+        lines.Count.ShouldBe(2);
+
+        // The empty paragraph takes the displacement, and the inked one follows it a line lower.
+        lines[0].Top.ShouldBe(under);
+        lines[1].Top.ShouldBe(under + lines[0].Box.Height);
+
+        // But a frame anchored to the displaced paragraph measures from where the flow was.
+        lines[0].ParagraphTop.ShouldBe(Length.Zero);
+        lines[1].ParagraphTop.ShouldBe(lines[1].Top);
+    }
+
+    /// <summary>
+    /// <c>w:tblpX</c> moves a positioned table across, by exactly what it says.
+    /// </summary>
+    /// <remarks>
+    /// It was not read at all: a positioned table took <c>w:tblInd</c>, which these files do not state,
+    /// and sat at the margin. <c>087_Printable_Graph_Paper_Template_Green_Theme</c> states
+    /// <c>w:tblpX="-594"</c> and the reference draws its grid from x = 35.3 pt where we drew it from
+    /// 70.6 — a dense grid a whole page across, so every line of it landed between two of the
+    /// reference's. The two corrections that go with it are in
+    /// <c>DocxLayoutSource.PositionedLeftEdge</c>; asserted here as a difference so that this test says
+    /// only that the offset itself arrives, whole.
+    /// </remarks>
+    [Fact]
+    public void AStatedHorizontalOffsetMovesAPositionedTable()
+    {
+        DocRect at(int? tblpX) => Lay(
+            vertAnchor: "page", tblpY: 2880, after: "", tblpX: tblpX)
+            .Pages[0].Tables.ShouldHaveSingleItem().Area;
+
+        (at(0).X - at(-594).X).ShouldBe(Length.FromTwips(594));
+        (at(720).X - at(0).X).ShouldBe(Length.FromTwips(720));
+    }
+
+    /// <summary>
+    /// <c>w:horzAnchor="page"</c> measures <c>w:tblpX</c> from the sheet's edge, not from the margin,
+    /// so the same offset lands a whole left margin further left.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asserted as the difference between the two anchors rather than against an absolute x, so that
+    /// the cell margin and half-border the two share — <c>DocxLayoutSource.PositionedLeftEdge</c> — cannot
+    /// make it pass for the wrong reason.
+    /// </para>
+    /// <para>
+    /// Measured on authored fixtures against <em>both</em> installed references, which agree to a tenth
+    /// of a point: <c>w:tblpX="705"</c> draws its first cell's text at x = 35.1 anchored to the page and
+    /// at 107.1 anchored to the margin, 72 pt apart on a 72 pt margin. It is worth 37 pt on
+    /// <c>Case-Study-Heathrow-Airport.docx</c>, whose whole first page is one such table. See
+    /// <c>probes/words-page-anchored-table/</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APageAnchoredOffsetIsMeasuredFromTheSheetRatherThanTheMargin()
+    {
+        DocRect at(string horzAnchor) => Lay(
+            vertAnchor: "page", tblpY: 2880, after: "", tblpX: 1440, horzAnchor: horzAnchor)
+            .Pages[0].Tables.ShouldHaveSingleItem().Area;
+
+        (at("margin").X - at("page").X).ShouldBe(LeftMargin);
+    }
+
+    /// <summary>
+    /// A positioned table taller than the page splits like any other fly, and its continuation starts
+    /// at the top of the next page's body rather than at <c>w:tblpY</c> a second time.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer marks every DOCX floating table's frame splittable without exception
+    /// (<c>DomainMapperTableHandler.cxx</c>:1765) and <c>SwFrame::GetNextFlyLeaf</c> gives the fly a
+    /// follow. A guard used to leave such a table in the flow instead, which dropped <c>w:tblpY</c>
+    /// along with the fly treatment — worth 33 pt on <c>Case-Study-Heathrow-Airport.docx</c>, whose
+    /// whole first page is a three-page fly.
+    /// </para>
+    /// <para>
+    /// Measured on authored fixtures against <em>both</em> installed references, which agree to a tenth
+    /// of a point: a 90-row table at <c>w:tblpY="662"</c> puts its first row at y = 105.6 and its
+    /// thirty-third at <b>72.5 on page two</b> — the body's own top, with the same x. See
+    /// <c>probes/words-page-anchored-table/</c>. Two 400 pt rows do the same thing here: one goes below
+    /// the offset and the other starts the next page. A third would make it three pages, not two — an
+    /// exact row does not split, so each page takes one and no more.
+    /// </para>
+    /// <para>
+    /// The offset is 144 pt rather than the 72 pt top margin on purpose. A table left in the flow also
+    /// splits across two pages and also resumes at the margin, so page counts and the follow's position
+    /// cannot tell the two apart; only the <em>first</em> part's own y can, and it is the thing the
+    /// guard used to throw away.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APositionedTableTallerThanThePageSplitsAndResumesAtTheTop()
+    {
+        WordProcessingPages pages = Lay(
+            vertAnchor: "page", tblpY: 2880, after: "", grid: WideGrid, rows: 2);
+
+        pages.Pages.Count.ShouldBe(2);
+
+        // The first part goes where `w:tblpY` says — 144 pt, deliberately not the 72 pt top margin, so
+        // that a table left in the flow instead cannot satisfy this — and the follow at the body's top.
+        pages.Pages[0].Tables.ShouldHaveSingleItem().Area.Y.ShouldBe(Length.FromTwips(2880));
+        pages.Pages[1].Tables.ShouldHaveSingleItem().Area.Y.ShouldBe(TopMargin);
+    }
+
     /// <summary>An ordinary table is unaffected: it stacks and the flow follows it down.</summary>
     [Fact]
     public void AnUnpositionedTableStillStacks()
@@ -131,26 +314,39 @@ public sealed class PositionedBodyTableTests
         line.Top.ShouldBeGreaterThan(Length.FromPoints(300));
     }
 
-    private static WordProcessingPages Lay(string? vertAnchor, int tblpY, string after)
+    private static WordProcessingPages Lay(
+        string? vertAnchor,
+        int tblpY,
+        string after,
+        int? tblpX = null,
+        int grid = NarrowGrid,
+        int empties = 0,
+        string horzAnchor = "margin",
+        int rows = 1)
     {
         string anchor = vertAnchor is null ? "" : $""" w:vertAnchor="{vertAnchor}" """.Trim() + " ";
-        return LayRaw($"""<w:tblpPr {anchor}w:horzAnchor="margin" w:tblpY="{tblpY}"/>""", after);
+        string across = tblpX is null ? "" : $""" w:tblpX="{tblpX}" """.Trim() + " ";
+        return LayRaw(
+            $"""<w:tblpPr {anchor}{across}w:horzAnchor="{horzAnchor}" w:tblpY="{tblpY}"/>""",
+            after, grid, empties, rows);
     }
 
-    private static WordProcessingPages LayRaw(string tablePosition, string after)
+    private static WordProcessingPages LayRaw(
+        string tablePosition, string after, int grid = NarrowGrid, int empties = 0, int rows = 1)
     {
-        using IDocument document = Open(tablePosition, after);
+        using IDocument document = Open(tablePosition, after, grid, empties, rows);
         return (WordProcessingPages)((IPaginatedDocument)document).Layout();
     }
 
-    private static IDocument Open(string tablePosition, string after)
+    private static IDocument Open(string tablePosition, string after, int grid, int empties, int rows)
     {
-        MemoryStream package = BuildPackage(tablePosition, after);
+        MemoryStream package = BuildPackage(tablePosition, after, grid, empties, rows);
         using DocumentSource source = DocumentSource.FromStream(package, "positioned-table.docx");
         return new WordProcessingReader().Read(source);
     }
 
-    private static MemoryStream BuildPackage(string tablePosition, string after)
+    private static MemoryStream BuildPackage(
+        string tablePosition, string after, int grid, int empties, int rows)
     {
         const string ContentTypes = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -205,15 +401,18 @@ public sealed class PositionedBodyTableTests
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
               <w:body>
                 <w:tbl>
-                  <w:tblPr>{tablePosition}<w:tblW w:w="5000" w:type="dxa"/></w:tblPr>
-                  <w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid>
-                  <w:tr>
-                    <w:trPr><w:trHeight w:val="8000" w:hRule="exact"/></w:trPr>
-                    <w:tc><w:tcPr><w:tcW w:w="5000" w:type="dxa"/></w:tcPr>
-                      <w:p><w:pPr><w:rPr><w:sz w:val="4"/></w:rPr></w:pPr></w:p>
-                    </w:tc>
-                  </w:tr>
+                  <w:tblPr>{tablePosition}<w:tblW w:w="{grid}" w:type="dxa"/></w:tblPr>
+                  <w:tblGrid><w:gridCol w:w="{grid}"/></w:tblGrid>
+                  {string.Concat(Enumerable.Repeat($"""
+                    <w:tr>
+                      <w:trPr><w:trHeight w:val="8000" w:hRule="exact"/></w:trPr>
+                      <w:tc><w:tcPr><w:tcW w:w="{grid}" w:type="dxa"/></w:tcPr>
+                        <w:p><w:pPr><w:rPr><w:sz w:val="4"/></w:rPr></w:pPr></w:p>
+                      </w:tc>
+                    </w:tr>
+                    """, rows))}
                 </w:tbl>
+                {string.Concat(Enumerable.Repeat("<w:p/>", empties))}
                 <w:p>{after}</w:p>
                 <w:sectPr>
                   <w:pgSz w:w="11906" w:h="16838"/>

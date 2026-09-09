@@ -195,6 +195,69 @@ public sealed class TableRowSplitSpacingTests
         throw new InvalidOperationException("no room leaves exactly one line over");
     }
 
+    /// <summary>
+    /// A collapsing document's follow part is charged the paragraph's <em>own</em> space-before,
+    /// not the gap the flow was laid out with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two differ only when the paragraph above states a space-after — which is why every test
+    /// above, laid out with collapsing off, could not see this. With collapsing on, the paragraph
+    /// that opens the follow part was laid out with <c>max(before − after, 0)</c> above it, and
+    /// re-applying <em>that</em> gives it nothing at all when the two figures are equal, which is
+    /// the commonest shape a Word style has.
+    /// </para>
+    /// <para>
+    /// Writer never collapses here, because it never finds a frame to collapse against: the
+    /// paragraph above is in the master cell frame on the previous page, so
+    /// <c>SwFlowFrame::CalcUpperSpace</c> falls to its no-previous-frame branch and takes
+    /// <c>pAttrs-&gt;GetULSpace().GetUpper()</c> whole
+    /// (<c>sw/source/core/layout/flowfrm.cxx:1744-1748</c>). Measured against both installed
+    /// references in <c>dotnet/probes/words-clip-rowsplit/</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ACollapsingDocumentsFollowPartStillCarriesTheWholeSpaceBefore()
+    {
+        // Equal figures, so collapsing takes the space-before away entirely inside the flow.
+        PageTable table = TwoParagraphs(Before, Before);
+
+        (List<PlacedTableCell> cells, List<Length> heights) =
+            TableLayouter.LayOut(
+                table, new DocPoint(Length.Zero, Length.Zero), collapsesSpacing: true);
+
+        PlacedFlow flow = cells[0].Content!;
+        flow.Lines.Count.ShouldBe(2, "one line each");
+        flow.Lines[1].UpperSpace.ShouldBe(
+            Length.Zero, "collapsing took the second paragraph's space-before away");
+
+        Length line = flow.Lines[1].Top - flow.Lines[0].Top;
+        RowSlice follow = FollowPart(table, cells, heights[0], line);
+
+        follow.Height.ShouldBe(
+            Before + line, "the follow part re-applies the whole space-before above its line");
+    }
+
+    /// <summary>The second part of a row cut so that its first part holds all but the last line.</summary>
+    private static RowSlice FollowPart(
+        PageTable table, List<PlacedTableCell> cells, Length row, Length line)
+    {
+        for (Length room = row; room > line; room -= Length.FromTwips(5))
+        {
+            if (TableLayouter.SliceRow(table.Rows[0], cells, Length.Zero, room) is not { } first)
+                continue;
+            if (Lines(first) != 1) continue;
+
+            RowSlice? follow = TableLayouter.SliceRow(
+                table.Rows[0], cells, first.Cut, Length.FromPoints(10_000));
+            follow.ShouldNotBeNull("the rest of the row has to be placeable");
+
+            return follow.Value;
+        }
+
+        throw new InvalidOperationException("no room leaves exactly one line over");
+    }
+
     /// <summary>One paragraph long enough to wrap several times in the column.</summary>
     private static PageTable OneParagraph(Length before, Length after)
         => Table([Paragraph(

@@ -18,12 +18,13 @@ public class NumberFormatterTests
 
     [Theory]
     // Digit placeholders differ only in what they do when there is no digit: 0 writes a zero,
-    // ? a space so columns line up, # nothing at all.
+    // ? a figure space so columns line up on a digit's width, # nothing at all. The figure space
+    // is 26.2.4.2's answer and 24.2.7.2 writes a blank there; see NumberFormatter.BlankDigit.
     [InlineData("0", 5, "5")]
     [InlineData("0000", 5, "0005")]
     [InlineData("#", 0, "")]
     [InlineData("0", 0, "0")]
-    [InlineData("??0", 5, "  5")]
+    [InlineData("??0", 5, "\u2007\u20075")]
     [InlineData("0.00", 1234.5, "1234.50")]
     [InlineData("#,##0.00", 1234567.891, "1,234,567.89")]
     [InlineData("#,##0", 999, "999")]
@@ -78,9 +79,9 @@ public class NumberFormatterTests
 
     [Theory]
     [InlineData("0 ?/?", 2.25, "2 1/4")]
-    // "?" pads with a space so a column of fractions lines up on its bar, so a one-digit
+    // "?" pads with a figure space so a column of fractions lines up on its bar, so a one-digit
     // numerator under "??" is preceded by one.
-    [InlineData("# ??/??", 2.7, "2  7/10")]
+    [InlineData("# ??/??", 2.7, "2 \u20077/10")]
     // A fixed denominator is written as literal digits rather than placeholders.
     [InlineData("# ?/8", 2.25, "2 2/8")]
     [InlineData("# ?/8", 2.37, "2 3/8")]
@@ -88,7 +89,7 @@ public class NumberFormatterTests
     // closest fraction below a hundred rather than a digit walk. Measured against
     // LibreOffice's own rendering of sc/qa/unit/data/xls/formats.xls, which shows 25 31/82.
     [InlineData("# ??/??", 25.378, "25 31/82")]
-    [InlineData("# ??/??", 0.389, "  7/18")]
+    [InlineData("# ??/??", 0.389, " \u20077/18")]
     [InlineData("# ?/?", 0.25, " 1/4")]
     [InlineData("# ?/?", 2.5, "2 1/2")]
     public void FractionsApproximateWithinTheDenominatorsWidth(
@@ -102,17 +103,20 @@ public class NumberFormatterTests
         // denominator alone and calls it "left alignment of denominator"
         // (svl/source/numbers/zformat.cxx, ImpNumberFill). That is what lines a column up on
         // its bars — "1/4 " under "??", never "1/ 4".
-        Format("# ??/??", 1.25).ShouldBe("1  1/4 ");
-        Format("# ??/??", -1.25).ShouldBe("-1  1/4 ");
+        Format("# ??/??", 1.25).ShouldBe("1 \u20071/4\u2007");
+        Format("# ??/??", -1.25).ShouldBe("-1 \u20071/4\u2007");
     }
 
     [Fact]
     public void AWholeNumberInAFractionFormatShowsNoFraction()
     {
         // Excel blanks the fraction rather than writing "2 0/1", and the placeholders still
-        // reserve their width so the column keeps its shape.
-        Format("0 ?/?", 2.0).TrimEnd().ShouldBe("2");
-        Format("# ?/?", 3.0).ShouldBe("3    ");
+        // reserve their width so the column keeps its shape. What they reserve it with is the
+        // figure space, not the blank: 26.2.4.2 renders "# ?/?" on 3 as a 3, a blank, a figure
+        // space, a blank and a figure space — the two blanks being the format's own literal and
+        // the bar that a blanked fraction writes in place of its slash.
+        Format("0 ?/?", 2.0).TrimEnd('\u2007', ' ').ShouldBe("2");
+        Format("# ?/?", 3.0).ShouldBe("3 \u2007 \u2007");
     }
 
     [Theory]
@@ -300,7 +304,12 @@ public class NumberFormatterTests
     // shows — so that a change to the fill cannot quietly change the number beside it.
     [InlineData(1234.5, " $", "1,234.50 ")]
     [InlineData(-1234.5, " $", "(1,234.50)")]
-    [InlineData(0.0, " $", "-   ")]
+    // The zero subformat's two `?` are what hold the column's decimal places open, so they are
+    // figure spaces and the `_)` after them is an ordinary blank. Drawn on a chart's value axis
+    // this is the whole difference between a tick that reads "$-" against its own decimals and
+    // one that reads "$" with the dash pushed off the end of the label; see
+    // ChartAccountingAxisLabelTests.
+    [InlineData(0.0, " $", "-\u2007\u2007 ")]
     public void AFillDirectiveMarksWhereItExpands(double value, string before, string after)
     {
         const string Accounting =

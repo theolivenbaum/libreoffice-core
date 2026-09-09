@@ -237,13 +237,20 @@ internal static class SheetOptimalRowHeights
         SheetCellFormats formats = sheet.Formats;
         int minimum = (int)grid.OptimalMinimumRowHeight.Twips;
 
+        // The columns a row is measured across are the *allocated* ones and not the print area's:
+        // `GetOptimalHeightsInColumn` walks `aCol` (`table1.cxx:88-127`), so a column a formatted
+        // blank cell brought into existence is measured for every row of the sheet even though no
+        // page ever reaches it. See `SheetCellFormats.LastAllocatedColumn`.
+        int measuredLastColumn = Math.Max(lastColumn, formats.LastAllocatedColumn);
+
         // The columns a cell states nothing about resolve to the column's format, then to the
         // sheet's. Neither depends on the row, so both are folded once rather than per row.
         int baseline = AttributeHeight(formats.SheetDefault, minimum);
-        foreach (SheetCellFormat column in formats.ColumnDefaults(firstColumn, lastColumn))
+        foreach (SheetCellFormat column in formats.ColumnDefaults(firstColumn, measuredLastColumn))
             baseline = Math.Max(baseline, AttributeHeight(column, minimum));
 
-        Dictionary<int, RowState> rows = CollectRows(sheet, formats, range, grid.Columns, minimum);
+        Dictionary<int, RowState> rows =
+            CollectRows(sheet, formats, range, grid.Columns, minimum, measuredLastColumn);
 
         SheetAxis axis = grid.Rows;
         Dictionary<int, int> changes = [];
@@ -376,10 +383,9 @@ internal static class SheetOptimalRowHeights
 
     private static Dictionary<int, RowState> CollectRows(
         SheetLayout sheet, SheetCellFormats formats, SheetRange range, SheetAxis columns,
-        int minimum)
+        int minimum, int measuredLastColumn)
     {
         Dictionary<int, RowState> rows = [];
-        Dictionary<int, int> stated = [];
 
         // `bStdAllowed` (`column2.cxx:925`) is the cell's *orientation* being Standard, not its
         // angle being zero — so a cell turned by anything other than a quarter turn still writes
@@ -399,25 +405,25 @@ internal static class SheetOptimalRowHeights
 
         IReadOnlyList<SheetRange> merges = sheet.MergedRanges;
 
-        foreach ((int row, int column, SheetCellFormat format) in formats.Cells)
+        // Bounded by the range rather than filtered down to it, because a repeated element is
+        // held as a rectangle and unfolding one whole would be the sheet's full extent. See
+        // SheetCellFormats.CellsIn.
+        foreach ((int row, int column, SheetCellFormat format)
+                 in formats.CellsIn(range with { FirstRow = 0 }))
         {
-            if (row < 0 || row > range.LastRow) continue;
-            if (column < range.FirstColumn || column > range.LastColumn) continue;
-
             // Calc skips a cell that a merge covers and a merge anchor that spans rows, and takes
             // only the anchor of a purely horizontal one — `ScColumn::GetOptimalHeight`,
             // `sc/source/core/data/column2.cxx:917-925`.
             if (IsExcludedByMerge(merges, row, column)) continue;
 
             Contribute(row, format);
-            stated[row] = stated.GetValueOrDefault(row) + 1;
         }
 
-        int width = range.LastColumn - range.FirstColumn + 1;
-        foreach ((int row, int count) in stated)
+        foreach (int row in RowsStatingEveryColumn(
+                     formats, merges, range.FirstColumn, measuredLastColumn, range.LastRow))
         {
-            if (count < width) continue;
-            rows[row] = rows[row] with { CoversEveryColumn = true };
+            rows.TryGetValue(row, out RowState covered);
+            rows[row] = covered with { CoversEveryColumn = true };
         }
 
         for (int row = 0; row <= range.LastRow; row++)
@@ -436,7 +442,7 @@ internal static class SheetOptimalRowHeights
                 if (cell.Column < range.FirstColumn || cell.Column > range.LastColumn) continue;
                 if (IsExcludedByMerge(merges, cell.Row, cell.Column)) continue;
 
-                string text = cell.GetText();
+                string text = cell.GetOwnText();
                 if (text.Length == 0) continue;
 
                 SheetCellFormat format = formats.At(cell.Row, cell.Column);
@@ -477,10 +483,23 @@ internal static class SheetOptimalRowHeights
                 // states 285.1 twips for the row — one line — and its PDF holds
                 // `19090-105 (SCD604-85001-23)` as a single run with no space in it.
                 //
-                // ODF is the one importer that disagrees: `ScXMLImport` makes a cell of several
-                // `text:p` a multi-paragraph edit cell whatever the wrap says. The sheets track
-                // holds no `.ods`, so this is an unmeasured deviation rather than a measured one,
-                // and `SheetHardBreakTests` records the same gap on the drawing side.
+                // ODF disagrees, and it disagrees about the height as well as about the drawing.
+                // `ScXMLImport` makes a cell of several `text:p` — or of one holding a raw
+                // newline — a multi-paragraph edit cell whatever the wrap says (`PushParagraphEnd`,
+                // `xmlcelli.cxx`:610-636), `SheetLayout.CellBreaksStartLines` draws every one of
+                // those paragraphs, and `GetNeededSize`'s height branch is
+                // `pEngine->GetTextHeight()` (`column2.cxx:571-577`) — so N paragraphs are N lines
+                // of row. See `StandingEditLine`.
+                //
+                // **That half only became implementable once the 200-row rule was.** Giving every
+                // such row the paragraphs' height on its own made
+                // `Capability_List…unsorted.ods` 150 pages against the reference's 147, because
+                // 26.2.4.2 draws its fifteen two-paragraph cells as two lines each inside rows it
+                // leaves 14.23 pt tall — page 11 has `19090-105 (SCD` at 239.26 and
+                // `604-85001-23)` at 252.75 in a row spanning 238.52 to 252.75, so the second line
+                // is painted over the row beneath. Those rows are past row 200 and keep their
+                // stored height; the rule that says so is `OdsPrintSetup.RecalculatedRowLimit`,
+                // and it reaches this routine as the rows' optimal flag being false.
                 bool breaks =
                     SheetTextLayout.Breaks(format, cell.Value is not null and not string)
                     && !sheet.HoldsField(cell.Row, cell.Column);
@@ -516,7 +535,9 @@ internal static class SheetOptimalRowHeights
                     : direct
                         ? RotatedHeight(format, text, breaks)
                         : standing
-                            ? StandingEditLine(format, portions)
+                            ? StandingEditLine(
+                                format, portions,
+                                ParagraphsOf(text, sheet.CellBreaksStartLines))
                             : WrappedHeight(
                                 cell, format, text, portions, columns, sheet.MergedRanges);
 
@@ -780,12 +801,23 @@ internal static class SheetOptimalRowHeights
     /// <c>EditTextObject</c> by both importers, and <c>ScColumn::GetOptimalHeight</c> clears
     /// <c>bStdOnly</c> for one (<c>column2.cxx:930-935</c>), so it is measured through
     /// <c>GetNeededSize</c>'s EditEngine branch whatever its wrap flag says. Nothing is broken
-    /// there — the cell is in single-line mode, which is why a hard break inside it starts no
-    /// line — so the answer is one EditEngine line: the largest ascent and the largest descent
-    /// over its portions, each quantised to whole device pixels, plus a pixel of margin either
-    /// side. That is <see cref="RichPixels"/> over a single range, written out here rather than
-    /// routed through <see cref="WrappedHeight"/> because there is no paper to compute and no
-    /// line to find.
+    /// for <em>width</em> there — the paper is a million units across — so the answer is one
+    /// EditEngine line per paragraph: the largest ascent and the largest descent over its
+    /// portions, each quantised to whole device pixels, plus a pixel of margin either side. That
+    /// is <see cref="RichPixels"/> over a single range, written out here rather than routed
+    /// through <see cref="WrappedHeight"/> because there is no paper to compute and no line to
+    /// find.
+    /// </para>
+    /// <para>
+    /// <strong>How many paragraphs there are is the importer's answer and not the string's.</strong>
+    /// The BIFF and SpreadsheetML filters set <c>SetSingleLine</c> for a cell that does not wrap,
+    /// so its hard break stays inside one paragraph and the height is one line; Calc's ODF filter
+    /// never calls it, so the same characters are several paragraphs and
+    /// <c>pEngine-&gt;GetTextHeight()</c> is that many lines. Measured on
+    /// <c>dotnet/tests/corpus/features/sheet-cell-break-height.fods</c>, whose row 2 holds three
+    /// paragraphs in a 6 cm non-wrapping cell: 26.2.4.2 starts row 3 <strong>34.61 pt</strong>
+    /// below row 2 — three lines of 11.197 pt and a margin — against the 12.39 pt a single line
+    /// gives.
     /// </para>
     /// <para>
     /// It is not the arithmetic height and the gap is not small. Measured on
@@ -810,8 +842,13 @@ internal static class SheetOptimalRowHeights
     /// </remarks>
     /// <param name="format">The cell's format, for its face, size and margins.</param>
     /// <param name="portions">Its formatting runs, or null when the break alone made it an edit cell.</param>
+    /// <param name="paragraphs">
+    /// How many paragraphs the importer made of the cell. One for the two Excel families, whose
+    /// filters put the engine into single-line mode, and one per hard break for ODF — see
+    /// <see cref="SheetLayout.CellBreaksStartLines"/>.
+    /// </param>
     private static int StandingEditLine(
-        SheetCellFormat format, IReadOnlyList<SheetTextPortion>? portions)
+        SheetCellFormat format, IReadOnlyList<SheetTextPortion>? portions, int paragraphs)
     {
         MetricGrid grid = new(ScreenDpi);
         long ascent = 0;
@@ -830,8 +867,27 @@ internal static class SheetOptimalRowHeights
                 descent, grid.ToPixels(face.Metrics.Descent, face.Metrics.UnitsPerEm, size));
         }
 
-        long pixels = ascent + descent;
+        long pixels = (ascent + descent) * Math.Max(1, paragraphs);
         return pixels <= 0 ? 0 : (int)((pixels + (2 * MarginPixelsOf(format))) / PixelsPerTwip);
+    }
+
+    /// <summary>How many paragraphs the importer made of a cell's text.</summary>
+    /// <remarks>
+    /// The same <c>\n</c>/<c>\r\n</c>/<c>\r</c> split every other count of a cell's paragraphs
+    /// makes, and it answers one whenever the importer left the engine in single-line mode.
+    /// </remarks>
+    private static int ParagraphsOf(string text, bool breaksStartLines)
+    {
+        if (!breaksStartLines) return 1;
+
+        int count = 1;
+        for (int at = 0; at < text.Length; at++)
+        {
+            if (text[at] == '\n') count++;
+            else if (text[at] == '\r') { count++; if (at + 1 < text.Length && text[at + 1] == '\n') at++; }
+        }
+
+        return count;
     }
 
     /// <summary>
@@ -877,6 +933,79 @@ internal static class SheetOptimalRowHeights
             bool anchor = row == merge.FirstRow && column == merge.FirstColumn;
             if (anchor && merge.FirstRow == merge.LastRow) continue;
             return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The rows that state a format for every column of a span, so nothing in them falls through
+    /// to a column or sheet default.
+    /// </summary>
+    /// <remarks>
+    /// Asked as intervals rather than as a count of cells, because the span reaches every
+    /// allocated column and a repeated rectangle covering most of them must not be unfolded to
+    /// answer it. A row's intervals are merged in place; a row Calc would find one uncovered
+    /// column in is one whose default pattern's arithmetic height is a floor for it.
+    /// </remarks>
+    private static IEnumerable<int> RowsStatingEveryColumn(
+        SheetCellFormats formats, IReadOnlyList<SheetRange> merges,
+        int firstColumn, int lastColumn, int lastRow)
+    {
+        if (lastColumn < firstColumn) yield break;
+
+        Dictionary<int, List<(int First, int Last)>> spans = [];
+        foreach ((int row, int first, int last)
+                 in formats.StatedSpans(0, lastRow, firstColumn, lastColumn))
+        {
+            if (!spans.TryGetValue(row, out List<(int, int)>? runs)) spans[row] = runs = [];
+            runs.Add((first, last));
+        }
+
+        foreach ((int row, List<(int First, int Last)> runs) in spans)
+        {
+            runs.Sort(static (left, right) => left.First.CompareTo(right.First));
+
+            int reached = firstColumn - 1;
+            foreach ((int first, int last) in runs)
+            {
+                if (first > reached + 1) break;
+                reached = Math.Max(reached, last);
+            }
+
+            if (reached >= lastColumn && !IsMergeCoveredInSpan(merges, row, firstColumn, lastColumn))
+                yield return row;
+        }
+    }
+
+    /// <summary>
+    /// Whether any column of a span is one a merge takes out of the row-height walk.
+    /// </summary>
+    /// <remarks>
+    /// Kept deliberately, and it is <em>not</em> what Calc does. A pattern a merge covers is
+    /// skipped whole by <c>ScColumn::GetOptimalHeight</c> (`column2.cxx`:917-925) — neither its own
+    /// height nor the default's is written from that column — so a row whose remaining columns all
+    /// state a format is, in Calc's terms, covered. Treating it that way is *shorter*, and measured
+    /// over the original corpus it takes `093_Volunteer_Sign_Up_Sheet_Template_Customizable_Format`
+    /// from 2 pages to 1 against 26.2.4.2's 2. That workbook is 81 merges over 139 rows, and
+    /// something else in how a merged row is measured is evidently leaning on the taller answer, so
+    /// the conservative reading is kept until that is found: a merge-covered column keeps the
+    /// sheet default in play exactly as it did before this walk replaced the cell count.
+    /// </remarks>
+    private static bool IsMergeCoveredInSpan(
+        IReadOnlyList<SheetRange> merges, int row, int firstColumn, int lastColumn)
+    {
+        foreach (SheetRange merge in merges)
+        {
+            if (row < merge.FirstRow || row > merge.LastRow) continue;
+            if (merge.LastColumn < firstColumn || merge.FirstColumn > lastColumn) continue;
+
+            for (int column = Math.Max(merge.FirstColumn, firstColumn);
+                 column <= Math.Min(merge.LastColumn, lastColumn);
+                 column++)
+            {
+                if (IsExcludedByMerge(merges, row, column)) return true;
+            }
         }
 
         return false;

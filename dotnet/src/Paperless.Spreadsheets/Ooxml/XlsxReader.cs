@@ -68,7 +68,7 @@ public static class XlsxReader
             // The workbook's cell formats, read once. Only layout looks at them, and only the
             // fonts-and-alignment half of styles.xml is read here — the number formats extraction
             // needs are already resolved on file.Styles.
-            XlsxCellFormatTable cellFormats = XlsxCellFormats.Read(file.StyleSheet, file.Styles);
+            XlsxCellFormatTable cellFormats = XlsxCellFormats.Read(file.StyleSheet, file.Styles, file.ThemeRoot);
 
             // The workbook's theme, read once. A chart part that states an a:schemeClr needs it
             // and every other drawing does not, which is why it was missing: nothing in a
@@ -80,6 +80,11 @@ public static class XlsxReader
             // live here rather than in the colour scheme.
             DrawingFontScheme? themeFonts = DrawingFontScheme.Read(
                 Drawing.Child(Drawing.Child(file.ThemeRoot, "themeElements"), "fontScheme"));
+
+            // And its third: the format matrix a worksheet shape's `xdr:style` indexes for its
+            // fill and its outline. 583 of the corpus's 644 worksheet shapes state one, and
+            // without this the 86 of them that state no fill of their own draw nothing at all.
+            DrawingStyleMatrix? themeStyles = DrawingStyleMatrix.Read(file.ThemeRoot);
 
             // What lets a chart's c:f name a cell rather than a cache. It is handed the same
             // reader this loop uses, and the loop hands it each sheet as it parses one, so a
@@ -118,7 +123,7 @@ public static class XlsxReader
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
                 // cover whatever they overlap.
                 SheetDrawings drawings = XlsxDrawings.Read(
-                    file.Package, entry.PartName, theme, themeFonts, ranges.Resolve);
+                    file.Package, entry.PartName, theme, themeFonts, ranges, themeStyles);
 
                 // The legacy VML drawing beside it, which holds the camera-tool pictures and OLE
                 // previews Calc draws and the DrawingML part does not reach — its `a14` twin is
@@ -159,7 +164,7 @@ public static class XlsxReader
                 // sheet section holds exactly one table, and a chart is another one. The ODS
                 // path puts it in the same place.
                 foreach (ContentSection chart in XlsxCharts.Read(
-                             file.Package, entry.PartName, ranges.Resolve))
+                             file.Package, entry.PartName, ranges))
                     content.Children.Add(chart);
             }
 

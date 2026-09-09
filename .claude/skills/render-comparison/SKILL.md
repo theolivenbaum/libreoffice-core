@@ -133,6 +133,58 @@ the failure modes.
 | `ink_delta` strongly positive | Paperless drew something extra: a debug artefact, a wrongly-visible element, or a fill that should have been transparent |
 | Everything huge, page 1 included | Not a detail bug. Wrong page size, wrong background, or a failed load |
 
+### The metric set is vertical-only, and that has caused a wrong call
+
+`shifted_tiles` and `row_profile_shift` both look for **vertical** displacement. A purely
+horizontal shift therefore comes out as `LOCALISED DIFFERENCE` — high `max_tile_error`, low
+`mean_abs_error`, `shifted_tiles` zero — which reads as "one small region is badly wrong" and
+sends you looking for a colour or a border.
+
+Measured 2026-09-05 on page 7 of `WordArt_Shapes_Arrows_Catalog1.docx`. A hand-rolled 30 dpi
+mean-absolute-difference scored it **0.38** and it was published as an example of *agreement*;
+`compare-images.py` scored it `LOCALISED` at `worst_tile=0.2649`; and the page is in fact
+**23 px to the left at 150 dpi — 11.04 pt**, which is the corpus-wide `wp:effectExtent`
+horizontal defect arrived at from the other end. The reading that found it was a *look at the
+worst tile*, not a number.
+
+`verdict.py` closes the gap with a column-profile shift, asked only when the vertical detector
+has already said no. Until that metric moves into `compare-images.py`, treat a `LOCALISED`
+verdict with `shifted_tiles == 0` as "possibly a horizontal shift" and check before believing it.
+
+## Deciding what a divergence *means*: `verdict.py`
+
+`compare-images.py` answers "how do these two page images differ". It does not answer "is this
+ours, and can a number settle it" — and four things sit above it that each cost a round to
+learn. `verdict.py` adds exactly those and re-uses everything else by importing it.
+
+```sh
+export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
+python3 .claude/skills/render-comparison/scripts/verdict.py <document> [--dpi 150] [--pages 7,18,48]
+```
+
+**1. Comparability before scoring.** It reads the faces out of both PDFs with `pdffonts` and
+refuses to score a *swap* — each side drawing with a family the other never uses. The 26.2
+tarball ships its own `NotoSans`/`NotoSerif`, so any document naming a family the system lacks
+is a void comparison against it, and two agents burned hours on
+`2017-04-27-Lease-Transition-Records-Checklist` before one read the faces. An extra family on
+**one** side only is a fallback, not a swap: it is noted and still scored. That distinction was
+added after the blunt rule called `033_Event_planning_tracker` unscoreable on one fallback face.
+
+**2. Both references, one verdict.** `24.2.7.2` is what the gate measures against and `26.2.4.2`
+is what the tree targets. `matches-26.2-only` and `references-disagree` are verdicts the tool
+emits, not conclusions you reach afterwards.
+
+**3. Words per page, never per document.** `033_Event_planning_tracker` was short on page 1 and
+long on page 3 and its total looked nearly right; fixing page 1 "broke" the gate. Per-page counts
+show the compensating pair immediately.
+
+**4. A page may ask for eyes.** Where the signals disagree the honest output is a request for a
+reading. `verdict.py` prints the pages and the `pair.sh` line to raise them.
+
+Its first run found a defect nobody had recorded: `2017-04-27-Lease-Transition…` resolves
+**DejaVu Serif where even 24.2.7.2 resolves DejaVu Sans**, so a document filed under *overlap and
+clipping* and scored by ink for two rounds is a font-resolution bug.
+
 ### Do not gate on exact pixel equality
 
 Two correct rasterisers disagree on antialiasing and sub-pixel rounding. Strict equality

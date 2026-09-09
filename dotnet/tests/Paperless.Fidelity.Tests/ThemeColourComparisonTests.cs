@@ -54,7 +54,7 @@ public sealed class ThemeColourComparisonTests : IDisposable
     [Fact]
     public void EveryThemedShapeFillIsTheColourLibreOfficePaints()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("theme-colours.docx");
 

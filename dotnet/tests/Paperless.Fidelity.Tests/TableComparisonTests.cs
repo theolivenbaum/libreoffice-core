@@ -107,7 +107,7 @@ public sealed class TableComparisonTests : IDisposable
     [InlineData("table-nested.doc")]
     public void EveryCellHoldsItsTextWhereLibreOfficeDoes(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<DrawnWord>> drawnPages = Drawn(path);
@@ -203,7 +203,7 @@ public sealed class TableComparisonTests : IDisposable
     [InlineData("table-shading.doc")]
     public void AShadedCellIsFilledWhereLibreOfficeFillsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         // Distinct rectangles, because a reference can paint one twice: LibreOffice's own DOCX render fills
@@ -271,7 +271,7 @@ public sealed class TableComparisonTests : IDisposable
     // Word formats where ODF's run 56.45 to 538.85. See `PageTable.JoinsBordersLikeWord`.
     public void ABorderIsStrokedAsOneLinePerGridLine(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfStroke> reference =

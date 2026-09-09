@@ -83,6 +83,51 @@ public class FontconfigPreferenceTests
     }
 
     [Fact]
+    public void EachGenericKeepsItsOwnOrderAsWellAsTheMergedOne()
+    {
+        // The merged order answers "what does this machine prefer overall"; a *pattern* carries one
+        // generic, and `FcConfigSubstitute` expands only that generic's <prefer> list into it. So a
+        // face on the sans-serif list scores no better than an unnamed one against a serif pattern,
+        // which is what separates DejaVu Sans from FreeSerif on a glyph fallback.
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Alias("serif", "Some Serif"));
+        tree.Write("conf.d/61-latin.conf", Alias("sans-serif", "Some Sans"));
+
+        FontconfigPreferences preferences = FontconfigPreferences.Read([tree.Root]);
+
+        preferences.InOrderFor("serif").ShouldBe(["someserif"]);
+        preferences.InOrderFor("sans-serif").ShouldBe(["somesans"]);
+        preferences.RankOf("Some Sans", "serif").ShouldBe(int.MaxValue);
+        preferences.RankOf("Some Serif", "sans-serif").ShouldBe(int.MaxValue);
+        preferences.RankOf("Some Sans", "sans-serif").ShouldBe(0);
+
+        // And the merged order still ranks both, which is what breaks a tie between two faces
+        // neither of the pattern's own list names.
+        preferences.RankOf("Some Serif").ShouldBe(0);
+        preferences.RankOf("Some Sans").ShouldBe(1);
+    }
+
+    [Fact]
+    public void AGenericsShortSpellingSharesItsList()
+    {
+        // LibreOffice appends the short spelling — `"sans"` for FAMILY_SWISS,
+        // `vcl/unx/generic/font/fontconfig.cxx`:1082 — and the configuration files its lists under
+        // the long one. Reading them apart would leave the swiss case with an empty list.
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Alias("sans-serif", "Some Sans"));
+        tree.Write("conf.d/61-latin.conf", Alias("monospace", "Some Mono"));
+
+        FontconfigPreferences preferences = FontconfigPreferences.Read([tree.Root]);
+
+        preferences.RankOf("Some Sans", "sans").ShouldBe(0);
+        preferences.RankOf("Some Mono", "mono").ShouldBe(0);
+    }
+
+    [Fact]
+    public void AGenericNothingPrefersHasAnEmptyList()
+        => FontconfigPreferences.None.InOrderFor("serif").ShouldBeEmpty();
+
+    [Fact]
     public void AnUnnamedFamilyHasNoRank()
         => FontconfigPreferences.None.RankOf("Anything").ShouldBe(int.MaxValue);
 

@@ -120,6 +120,50 @@ public static class OdfChartPlot
             ]
             : [ChartStockRole.Low, ChartStockRole.High, ChartStockRole.Close];
 
+        // ODF states an axis' *index* nowhere: SchXMLAxisContext counts how many axes of the same
+        // chart:dimension have already been read and takes the count as this axis' index
+        // (xmloff/source/chart/SchXMLAxisContext.cxx:266-274). So the first chart:dimension="y" is
+        // the primary value axis and the second is the secondary, and the same rule decides which
+        // x axis is the category one.
+        //
+        // <strong>Defaulting rather than assigning is the whole of it.</strong> This used to take
+        // the *last* x axis, and LibreOffice writes a combination chart's invisible
+        // <c>secondary-x</c> after the primary — so a chart's category labels were read off an
+        // axis carrying chart:visible="false" and drawn nowhere at all.
+        List<XElement> across = [];
+        List<XElement> up = [];
+
+        foreach (XElement axis in Children(plotArea, OdfNamespaces.Chart, "axis"))
+        {
+            switch (Attribute(axis, OdfNamespaces.Chart, "dimension"))
+            {
+                case "x": across.Add(axis); break;
+                case "y": up.Add(axis); break;
+                default: break;
+            }
+        }
+
+        XElement? categoryAxis = across.Count > 0 ? across[0] : null;
+        XElement? valueAxis = up.Count > 0 ? up[0] : null;
+        XElement? secondaryAxis = up.Count > 1 ? up[1] : null;
+
+        XElement? categories = null;
+        foreach (XElement axis in across)
+            categories ??= Child(axis, OdfNamespaces.Chart, "categories");
+
+        // chart:attached-axis names a *y* axis by its chart:name, and a series is measured against
+        // the secondary one exactly when that axis' index is above zero
+        // (SchXMLSeries2Context.cxx:333-345 and :388-394). The name is the only link ODF states,
+        // so a file whose axes carry no chart:name puts every series on the primary — which is
+        // what LibreOffice's own importer does with it too.
+        string? secondaryName = Attribute(secondaryAxis, OdfNamespaces.Chart, "name");
+
+        // A scatter or bubble chart's x axis is a *value* axis. Both dimensions are numeric, so
+        // ODF spells it chart:dimension="x" exactly as a category axis is spelt and the chart's
+        // own chart:class is what tells the two apart. Its scale is ChartPlot.DomainScale, which
+        // ChartLayout.AddDomainAxis draws; without it a scatter chart's x axis carries no labels.
+        bool numericAcross = kind is ChartPlotKind.Scatter or ChartPlotKind.Bubble;
+
         int stockRole = 0;
 
         List<ChartSeries> plotted = [];
@@ -156,18 +200,23 @@ public static class OdfChartPlot
                 PointLabels = PointLabelsOf(element, values.Count, styles, own, areaLabel),
                 Trendlines = TrendlinesOf(element, styles),
                 StockRole = role,
+
+                // chart:domain is a scatter or bubble series' X sequence, stated as a range into
+                // the same local table the values come from. Without it ChartLayout.DomainScaleOf
+                // finds no numbers and draws no X axis, and every point sits at its own index.
+                XValues = numericAcross
+                    ? table.ValuesOf(Attribute(
+                        Child(element, OdfNamespaces.Chart, "domain"),
+                        OdfNamespaces.Table,
+                        "cell-range-address"))
+                    : null,
+
+                AxisIndex =
+                    secondaryName is { Length: > 0 }
+                    && Attribute(element, OdfNamespaces.Chart, "attached-axis") == secondaryName
+                        ? 1
+                        : 0,
             });
-        }
-
-        XElement? categories = null;
-        XElement? categoryAxis = null;
-        XElement? valueAxis = null;
-
-        foreach (XElement axis in Children(plotArea, OdfNamespaces.Chart, "axis"))
-        {
-            string? dimension = Attribute(axis, OdfNamespaces.Chart, "dimension");
-            if (dimension == "x") { categoryAxis = axis; categories ??= Child(axis, OdfNamespaces.Chart, "categories"); }
-            else if (dimension == "y") valueAxis ??= axis;
         }
 
         string? plotStyle = Attribute(plotArea, OdfNamespaces.Chart, "style-name");
@@ -198,8 +247,35 @@ public static class OdfChartPlot
             // baseline and overlaps them.
             IsPercentStacked = styles.Flag(plotStyle, "percentage") ?? false,
             ValueScale = ScaleOf(valueAxis, styles),
+
+            // The same chart:reverse-direction ScaleOf reads off the value axis, asked of the
+            // category one — where there is no scale to carry it. See
+            // ChartPlot.CategoriesReversed.
+            CategoriesReversed = styles.Flag(
+                Attribute(categoryAxis, OdfNamespaces.Chart, "style-name"),
+                "reverse-direction") ?? false,
             ValueFormat = styles.Format(Attribute(valueAxis, OdfNamespaces.Chart, "style-name")),
             CategoryFormat = styles.Format(Attribute(categoryAxis, OdfNamespaces.Chart, "style-name")),
+
+            // The secondary value axis, when the plot area states a second chart:dimension="y".
+            // ChartPlot.HasSecondaryAxis wants this *and* a series attached to it, so a file that
+            // states the axis and attaches nothing to it still draws one scale.
+            SecondaryValueScale = secondaryAxis is null ? null : ScaleOf(secondaryAxis, styles),
+            SecondaryValueFormat = styles.Format(
+                Attribute(secondaryAxis, OdfNamespaces.Chart, "style-name")),
+            SecondaryValueAxisTitle = TextOf(Child(secondaryAxis, OdfNamespaces.Chart, "title")),
+            SecondaryValueAxisText = AxisTextOf(
+                Attribute(secondaryAxis, OdfNamespaces.Chart, "style-name"), styles),
+            SecondaryAxisVisible = Visible(secondaryAxis, styles),
+            SecondaryLabelsVisible = Labelled(secondaryAxis, styles),
+
+            // A scatter chart's X axis carries its own scale and its own number format.
+            DomainScale = numericAcross
+                ? ScaleOf(categoryAxis, styles)
+                : new ChartScaleRequest(null, null, null, false),
+            DomainFormat = numericAcross
+                ? styles.Format(Attribute(categoryAxis, OdfNamespaces.Chart, "style-name"))
+                : null,
             CategoryAxisText = AxisTextOf(
                 Attribute(categoryAxis, OdfNamespaces.Chart, "style-name"), styles),
 
@@ -374,15 +450,32 @@ public static class OdfChartPlot
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ODF folds the four OOXML flags into two attributes: <c>chart:data-label-number</c>, whose
-    /// values are <c>none</c>, <c>value</c>, <c>percentage</c> and <c>value-and-percentage</c>,
-    /// and <c>chart:data-label-text</c>, a boolean meaning the category name
-    /// (<c>xmloff/source/chart/SchXMLSeriesHelper</c> and <c>PropertyMap.hxx</c>'s
-    /// <c>Label</c> mapping). There is no separate "series name" flag, which is why nothing here
-    /// sets <see cref="ChartDataLabel.ShowSeries"/>.
+    /// ODF spends <strong>four</strong> attributes on the one <c>DataCaption</c> bit field, not
+    /// two, and all four are merged into it by the same <c>MID_FLAG_MERGE_PROPERTY</c> rows of
+    /// <c>xmloff/source/chart/PropertyMaps.cxx</c>:247-250 —
+    /// <c>chart:data-label-number</c> (<c>none</c>, <c>value</c>, <c>percentage</c>,
+    /// <c>value-and-percentage</c>), <c>chart:data-label-text</c> for the category name,
+    /// <c>chart:data-label-symbol</c> for the legend key, and <c>chart:data-label-series</c> for
+    /// the <em>series</em> name. The last is <c>MAP_SPECIAL_ODF13</c>, so it is newer than the
+    /// other three, and <c>handleSpecialItem</c> sets
+    /// <c>ChartDataCaption::DATA_SERIES</c> and <c>::SYMBOL</c> from them
+    /// (<c>PropertyMaps.cxx</c>:975-991), which
+    /// <c>WrappedDataCaptionProperties</c>' <c>lcl_CaptionToLabel</c> turns into
+    /// <c>DataPointLabel::ShowSeriesName</c> and <c>::ShowLegendSymbol</c>
+    /// (<c>chart2/source/controller/chartapiwrapper/WrappedDataCaptionProperties.cxx</c>:74-90).
     /// </para>
     /// <para>
-    /// A style that states neither attribute inherits the level above rather than defaulting to
+    /// <strong>This remark used to say "there is no separate series name flag", and that was a
+    /// claim about an attribute nobody had grepped for.</strong> It is stated
+    /// <c>chart:data-label-series="true"</c> 25 times in 8 of the 307 converted <c>.ods</c> and
+    /// 11 times in one of the 302 <c>.odp</c>, and it is what puts <c>Actual</c> into every wedge
+    /// label of the four <c>advanced_excel_pie</c> workbooks. <c>chart:data-label-symbol</c> sits
+    /// beside it in the same styles and was equally unread; see
+    /// <see cref="ChartDataLabel.ShowLegendKey"/>, whose own measurements were taken on one of
+    /// those four documents' reference rendering.
+    /// </para>
+    /// <para>
+    /// A style that states none of them inherits the level above rather than defaulting to
     /// showing nothing, which is how a plot area saying <c>chart:data-label-number="value"</c>
     /// labels every series under it.
     /// </para>
@@ -392,9 +485,14 @@ public static class OdfChartPlot
     {
         string? number = styles.Text(style, "data-label-number");
         bool? text = styles.Flag(style, "data-label-text");
+        bool? name = styles.Flag(style, "data-label-series");
+        bool? symbol = styles.Flag(style, "data-label-symbol");
         string? position = styles.Text(style, "label-position");
 
-        if (number is null && text is null && position is null) return inherited;
+        if (number is null && text is null && name is null && symbol is null && position is null)
+        {
+            return inherited;
+        }
 
         bool value = number switch
         {
@@ -415,6 +513,8 @@ public static class OdfChartPlot
             ShowValue = value,
             ShowPercent = percent,
             ShowCategory = text ?? inherited?.ShowCategory ?? false,
+            ShowSeries = name ?? inherited?.ShowSeries ?? false,
+            ShowLegendKey = symbol ?? inherited?.ShowLegendKey ?? false,
             ValueFormat = styles.Format(style) ?? inherited?.ValueFormat,
             Separator = percent && !value ? "\n" : inherited?.Separator ?? "; ",
             Placement = PlacementOf(position) ?? inherited?.Placement,
@@ -450,6 +550,15 @@ public static class OdfChartPlot
 
             string? style = Attribute(point, OdfNamespaces.Chart, "style-name");
             ChartDataLabel? own = LabelOf(style, styles, kind, inherited);
+
+            // A chart:data-point may state the label's words itself, in a chart:data-label holding
+            // text:p children. SchXMLSeries2Context turns those into CustomLabelFields of type
+            // TEXT and sets DataCaption to CUSTOM (SchXMLSeries2Context.cxx:1245-1290), so the
+            // stated string replaces every field rather than joining them — which is exactly what
+            // ChartDataLabel.Text means. Nothing else in ODF puts a point's own words on a chart,
+            // and a scatter chart's per-point names are written this way and no other.
+            if (TextOf(Child(point, OdfNamespaces.Chart, "data-label")) is { Length: > 0 } custom)
+                own = (own ?? inherited ?? new ChartDataLabel()) with { Text = custom };
 
             for (int copy = 0; copy < repeat && at < MaxPoints; copy++, at++)
             {
@@ -513,13 +622,22 @@ public static class OdfChartPlot
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ODF states three of the four and defaults the fourth. <c>chart:text-overlap</c> and
-    /// <c>chart:label-arrangement</c> are chart properties; the rotation is
-    /// <c>style:rotation-angle</c> on the axis' <em>text</em> properties, in whole degrees
-    /// anticlockwise, which is the direction ODF and this model already agree on and OOXML does
-    /// not. Line breaking has no ODF attribute at all, so it stays at chart2's own model default
-    /// of false (<c>Axis.cxx:239</c>) — which is the opposite of what OOXML's importer sets, and
-    /// it is why an ODF axis can reach the rotation path without a label having to wrap first.
+    /// ODF states all four. <c>chart:text-overlap</c> and <c>chart:label-arrangement</c> are
+    /// chart properties; the rotation is <c>style:rotation-angle</c> on the axis' <em>text</em>
+    /// properties, in whole degrees anticlockwise, which is the direction ODF and this model
+    /// already agree on and OOXML does not.
+    /// </para>
+    /// <para>
+    /// <strong>Line breaking is <c>text:line-break</c>, in the <c>text</c> namespace, and this
+    /// used to say ODF had no attribute for it at all.</strong> It is mapped to
+    /// <c>PROP_TextBreak</c> at <c>xmloff/source/chart/PropertyMaps.cxx</c>:188 and becomes
+    /// <c>AxisLabelProperties::m_bLineBreakAllowed</c>. Missing it is not a detail: while line
+    /// breaking is on, <c>canAutoAdjustLabelPlacement</c> refuses outright
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:544-545), so an axis whose labels
+    /// collide <em>wraps</em> them rather than turning them 45°. Read as false, every crowded ODF
+    /// category axis reached the rotation instead. It appears <strong>379 times in 92 of the
+    /// converted corpus's 302 <c>.odp</c></strong> — 160 <c>true</c> in 60 documents and 219
+    /// <c>false</c> in 65 — so it decides something on nearly a third of the column.
     /// </para>
     /// <para>
     /// The arrangement defaults to <c>ChartAxisArrangeOrderType_AUTO</c> (<c>Axis.cxx:242</c>),
@@ -536,7 +654,11 @@ public static class OdfChartPlot
         return new ChartAxisText(
             degrees * Math.PI / 180.0,
             OverlapAllowed: styles.Flag(style, "text-overlap") ?? false,
-            LineBreakAllowed: false,
+
+            // text:line-break, not chart:line-break: the attribute is in the text namespace
+            // (PropertyMaps.cxx:188). chart2's own model default is false (Axis.cxx:239), which
+            // is what an axis stating nothing gets.
+            LineBreakAllowed: styles.Flag(style, "line-break", OdfNamespaces.Text) ?? false,
             Stagger: styles.Text(style, "label-arrangement") switch
             {
                 "side-by-side" => ChartLabelStagger.SideBySide,

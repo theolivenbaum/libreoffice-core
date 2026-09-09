@@ -91,6 +91,39 @@ public sealed class SheetLayout
     /// <summary>The sheet's cells, or null when it holds none.</summary>
     public ContentTable? Cells { get; init; }
 
+    /// <summary>
+    /// Whether a hard break inside a cell starts a line even when the cell does not wrap.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It is the importer that decides this, not the cell and not its format.</strong> A
+    /// cell holding <c>U+000A</c> is an <c>EditTextObject</c> in every format, and one paragraph
+    /// of an <c>EditTextObject</c> is one drawn line — so the whole question is how many
+    /// paragraphs the importer made of the string. The BIFF and SpreadsheetML filters put the
+    /// EditEngine into single-line mode for a cell whose format does not wrap
+    /// (<c>bSingleLine = !pXF-&gt;GetLineBreak()</c>, <c>sc/source/filter/excel/xihelper.cxx</c>:246-256;
+    /// <c>rEE.SetSingleLine(bSingleLine)</c>, <c>sc/source/filter/oox/worksheethelper.cxx</c>:1607-1611),
+    /// and under <c>EEControlBits::SINGLELINE</c> <c>ImpEditEngine::ImpInsertText</c> never looks
+    /// for a separator at all — <c>nEnd = !maStatus.IsSingleLine() ? aText.indexOf(LINE_SEP, …) : -1</c>
+    /// (<c>editeng/source/editeng/impedit2.cxx</c>:2876-2877) — so the break stays in the string as
+    /// a character and starts nothing.
+    /// </para>
+    /// <para>
+    /// <strong>Calc's own ODF filter never calls it.</strong>
+    /// <c>ScXMLTableRowCellContext::PushParagraphEnd</c> hands a multi-line paragraph to the
+    /// engine with the flag off (<c>sc/source/filter/xml/xmlcelli.cxx</c>:610-636), so an ODF
+    /// cell's break makes a paragraph whatever the wrap option says. Measured on 26.2.4.2 with a
+    /// flat ODF sheet of eight one-cell rows, none of them wrapping: <c>ABC\nDEF</c> and
+    /// <c>ABC\r\nDEF</c> are each drawn on two lines, and the bottom-aligned block moves up by a
+    /// line to make room. <c>dotnet/probes/ods-page-r77/ws.fods</c>.
+    /// </para>
+    /// <para>
+    /// Only the ODF reader sets this. Left false, the three Excel-family readers keep the rule the
+    /// whole original corpus was fitted against.
+    /// </para>
+    /// </remarks>
+    public bool CellBreaksStartLines { get; init; }
+
     /// <summary>The merged blocks the file states, as it states them.</summary>
     /// <remarks>
     /// Beside the cells rather than derived from them. Every format states its merges once, as a
@@ -243,7 +276,12 @@ public sealed class SheetLayout
                     // search does count formatted-but-empty cells; the content tree does not
                     // record formatting, so this is the narrower of the two answers and is
                     // recorded in the module's TODO as a known difference.
-                    if (cell.Value is null && cell.GetText().Length == 0) continue;
+                    //
+                    // A shape anchored in the cell is not content either: `ScTable::GetCellArea`
+                    // walks the columns' cell storage and an object is in the drawing layer, which
+                    // reaches the page through `ScDrawLayer::GetPrintArea` instead. Hence
+                    // GetOwnText rather than GetText, here and at every other cell question.
+                    if (cell.Value is null && cell.GetOwnText().Length == 0) continue;
 
                     int columnEnd = cell.Column + Math.Max(1, cell.ColumnSpan) - 1;
                     int rowEnd = cell.Row + Math.Max(1, cell.RowSpan) - 1;
@@ -292,7 +330,7 @@ public sealed class SheetLayout
                 foreach (ContentTableCell cell in row.Children.OfType<ContentTableCell>())
                 {
                     // The same "is this content" test UsedRange makes, for the same reason.
-                    if (cell.Value is null && cell.GetText().Length == 0) continue;
+                    if (cell.Value is null && cell.GetOwnText().Length == 0) continue;
 
                     int rowEnd = cell.Row + Math.Max(1, cell.RowSpan) - 1;
                     int columnEnd = cell.Column + Math.Max(1, cell.ColumnSpan) - 1;

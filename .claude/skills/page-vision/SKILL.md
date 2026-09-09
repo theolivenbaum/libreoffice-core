@@ -191,6 +191,23 @@ colour; the *direction* of a difference; the *kind* of element involved.
 equal lengths are equal; font identity; and anything that requires knowing what *should* be
 there.
 
+### Independent readers agreeing does not make a detail true
+
+Corroboration across uncontaminated readers is the strongest signal this method produces, and it
+is still only evidence about *direction and kind*, never about a detail one of them measured by
+eye.
+
+Measured: five reviewers read five unrelated `.odp` pages blind. Four independently reported that
+the body text "wraps at the same words in both halves" and used it to argue that text measurement
+was correct and only paragraph spacing was wrong. **The wrap claim was false** on at least one of
+the pages — the reference breaks a hyperlink at any character, because a `text:a` in slide text is
+an EditEngine field, and fits a URL segment onto a line we end early. Their *conclusion* was right;
+their stated reason was not.
+
+So: take the class from the agreement, then measure the detail the argument rests on. Four readers
+agreeing that a thing looks identical is a good reason to go and check whether it is, and a bad
+reason to record that it is.
+
 **Never available from an image: cause.** An image cannot separate a picture bullet from a
 character bullet in a substituted symbol font from an autonumber. The discipline is to *name
 the candidates the image cannot decide between* and then go and measure. A reading that

@@ -44,6 +44,51 @@ public class SyntheticObliqueResolutionTests
         resolver.Resolve(new FontRequest(family)).SyntheticOblique.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// The same rule, over a font set the test controls, so that it cannot be skipped away.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three cases above are guarded on what the machine has installed, and once
+    /// <see cref="BundledFonts"/> began shipping a complete DejaVu and Liberation set every one
+    /// of them started skipping — the families they name all have a real italic now, and
+    /// <c>Verdana</c> substitutes onto one that does. Three green skips, and the rule they exist
+    /// to check covered by nothing.
+    /// </para>
+    /// <para>
+    /// So this one builds an index over a directory holding exactly one roman face and no italic
+    /// at all. It asserts the same two things and depends on no font outside its own temporary
+    /// directory, which is the property the others lack: a test whose premise is "this is not
+    /// installed" is a test that a later change to what ships can silently empty.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ARomanOnlyFamilyHasItsSlantDrawn()
+    {
+        string roman = SystemFontResolver.Build()
+            .Resolve(new FontRequest("DejaVu Serif")).FaceKey.Split('#')[0];
+        Assert.SkipWhen(!File.Exists(roman), "no DejaVu Serif to copy");
+
+        string directory = Path.Combine(Path.GetTempPath(), $"pl-oblique-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.Copy(roman, Path.Combine(directory, Path.GetFileName(roman)));
+
+            SystemFontResolver resolver = new(SystemFontIndex.Build([directory]));
+            FontReference italic =
+                resolver.Resolve(new FontRequest("DejaVu Serif") { IsItalic = true });
+
+            italic.IsItalic.ShouldBeFalse("the directory holds no italic face");
+            italic.SyntheticOblique.ShouldBeTrue();
+            resolver.Resolve(new FontRequest("DejaVu Serif")).SyntheticOblique.ShouldBeFalse();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("Liberation Sans")]
     [InlineData("Liberation Serif")]

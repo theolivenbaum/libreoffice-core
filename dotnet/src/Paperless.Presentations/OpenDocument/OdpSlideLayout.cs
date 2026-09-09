@@ -7,6 +7,7 @@ using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
+using Paperless.Presentations.Ooxml;
 using Paperless.Text.Layout;
 using Paperless.Vector;
 
@@ -44,7 +45,22 @@ internal sealed partial class OdpSlideLayout
         _file = file;
         _fonts = fonts;
         _fills = new OdpFills(file);
+        _fonts.EmbeddedFaces = EmbeddedFaceOf;
     }
+
+    /// <summary>
+    /// The document's own face for a request, from <c>svg:font-face-uri</c>.
+    /// </summary>
+    /// <remarks>
+    /// Lazily and once: the declarations are in <c>office:font-face-decls</c>, a document that
+    /// never draws with an embedded family never opens one of the parts, and a document that
+    /// embeds nothing pays a dictionary miss. See <see cref="OdfEmbeddedFonts"/> for which name
+    /// is the key and why the style comes out of the face rather than off the declaration.
+    /// </remarks>
+    private string? EmbeddedFaceOf(string family, int weight, bool isItalic)
+        => (_embeddedFonts ??= OdfEmbeddedFonts.Read(_file)).FaceKeyFor(family, weight, isItalic);
+
+    private OdfEmbeddedFonts? _embeddedFonts;
 
     /// <summary>Lays out every <c>draw:page</c> in the document body.</summary>
     public List<LaidOutSlide> Layout()
@@ -66,8 +82,11 @@ internal sealed partial class OdpSlideLayout
         OdfMasterPage? master = _file.Styles.FindMasterPage(
             Attribute(page, OdfNamespaces.Draw, "master-page-name"));
 
+        OdpRunningObjects fields = OdpRunningObjects.ForPage(_file.Styles, page, index);
+
         List<PlacedShape> shapes = [];
-        Walk(page, AffineTransform.Identity, shapes, depth: 0);
+        InheritedShapes(page, master, shapes, fields);
+        Walk(page, AffineTransform.Identity, shapes, depth: 0, fields);
 
         DocSize size = SlideSize(master);
 
@@ -82,6 +101,112 @@ internal sealed partial class OdpSlideLayout
         };
     }
 
+    /// <summary>
+    /// The master page's own shapes, drawn beneath the slide's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An ODF master page is drawn under every slide that names it, and this reader drew
+    /// none of it for nine rounds.</strong> The corpus could not see the gap — the slides track
+    /// held no ODF presentation at all until the whole corpus was converted through 26.2.4.2 —
+    /// and the OOXML path has done the same thing since round 40
+    /// (<see cref="Ooxml.PptxSlideLayout"/>'s <c>InheritedShapes</c>), so the two readers gave the
+    /// same deck different pages. Measured on the converted corpus, this is the largest single
+    /// cause in the `.odp` column: 102 of the 182 non-matching rows are explained by it to within
+    /// the gate's own floor, and a further 49 have it as one of their components.
+    /// </para>
+    /// <para>
+    /// <strong>Presentation objects are excluded and background objects are not — with one
+    /// family of exceptions, which is the whole of <see cref="OdpRunningObjects"/>.</strong> A
+    /// frame carrying <c>presentation:class</c> is a placeholder, and Impress draws a master's
+    /// title, outline, subtitle, notes body and page thumbnail nowhere but on the master itself:
+    /// the slide's matching placeholder supplies the text. Everything else on the master — a
+    /// logo, a strapline, a rule, a background picture — is a background object and is drawn.
+    /// This is the same split <c>PptxSlideLayout.InheritedShapes</c> makes, and it has to be,
+    /// because an Impress master page <em>is</em> a PPTX master and a PPTX layout merged into
+    /// one.
+    /// </para>
+    /// <para>
+    /// The exception is the <em>running objects</em> — header, footer, date-time and slide
+    /// number. Those four <strong>are</strong> drawn from the master, on exactly the slides whose
+    /// own drawing-page style switches each one on, and the earlier form of this remark had that
+    /// backwards: it read the page's <c>presentation:display-*</c> declarations as governing the
+    /// slide's own copy of the frame, when what they govern is the <em>master's</em>. Reaching
+    /// only the slides that happen to carry a copy of their own left 23 of the converted corpus's
+    /// 302 <c>.odp</c> short by some 16 300 characters. <see cref="OdpRunningObjects"/> carries
+    /// the mechanism and the citations.
+    /// </para>
+    /// <para>
+    /// <strong>A master shape parked off the page needs no rule.</strong> The template family that
+    /// makes this measurable carries three such shapes on every master — a copyright line 0.28 cm
+    /// below the sheet, a credit group at negative <c>svg:x</c>, and an instruction block 0.8 cm
+    /// past the right edge — and 26.2.4.2 emits none of their text into its PDF. Neither do we:
+    /// the media box is the cull, exactly as it is on the OOXML side, so the reference and this
+    /// reader agree on which of a master's shapes reach the page without either of them deciding
+    /// it. Reading the layer or the position as a visibility rule and implementing one would be
+    /// the <c>slide-sections.pptx</c> mistake in ODF spelling.
+    /// </para>
+    /// <para>
+    /// <c>presentation:background-objects-visible</c> is the one real switch, and it is a property
+    /// of the <em>slide's</em> drawing-page style rather than an attribute on the page — the same
+    /// shape as <see cref="IsHidden"/>, and resolved the same way. LibreOffice stores it as the
+    /// <c>backgroundobjects</c> bit of the slide's master-page visible-layer set
+    /// (<c>sd/source/ui/unoidl/unopage.cxx</c>:794-809), which is why it reads as a page property
+    /// and not as a master one. Absent means visible.
+    /// </para>
+    /// </remarks>
+    private void InheritedShapes(
+        XElement page, OdfMasterPage? master, List<PlacedShape> shapes, OdpRunningObjects fields)
+    {
+        if (master is null || master.Shapes.Count == 0) return;
+
+        OdfProperty visible = _file.Styles.ResolveProperty(
+            Attribute(page, OdfNamespaces.Draw, "style-name"),
+            OdfStyleFamily.DrawingPage,
+            OdfPropertyKind.DrawingPage,
+            OdfNamespaces.Presentation,
+            "background-objects-visible");
+
+        if (visible.HasValue && !visible.Is("true")) return;
+
+        Walk(master.Element, AffineTransform.Identity, shapes, depth: 0, fields, background: true);
+    }
+
+    /// <summary>
+    /// <strong>A slide's own header, footer, date-time and page-number frames are drawn as they
+    /// stand, and <c>presentation:display-*</c> does not suppress them.</strong>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is written down because it is a plausible rule that a round implemented, measured and
+    /// withdrew. The reasoning that led to it: <c>SdPage::checkVisibility</c> answers a
+    /// footer/header/date-time/slide-number text object from the visualised page's
+    /// <c>HeaderFooterSettings</c> (<c>sd/source/core/sdpage.cxx</c>:2957-2984), ODF states those
+    /// settings as <c>presentation:display-header</c>, <c>-footer</c>, <c>-date-time</c> and
+    /// <c>-page-number</c> on the page's drawing-page style, and across the converted corpus's 302
+    /// <c>.odp</c> <strong>all 1630 slide-level frames of those four kinds state one explicitly and
+    /// every single one states <c>false</c></strong> — 464 footer, 781 page-number, 385 date-time,
+    /// no header, and not one <c>true</c> anywhere. It reads like a switch nobody has honoured.
+    /// </para>
+    /// <para>
+    /// <strong>It is not.</strong> That branch of <c>checkVisibility</c> is guarded by
+    /// <c>bSubContentProcessing</c> — it fires while the <em>master's</em> content is being drawn
+    /// as a slide's background, which is the only place those settings decide anything. A slide's
+    /// own copy of the frame is an ordinary shape by then. Measured two ways before the rule was
+    /// withdrawn: 26.2.4.2 draws the footer of a page stating <c>display-footer="false"</c> in
+    /// <c>odp-master-background.fodp</c>, and of the 42 corpus documents that would have been
+    /// affected <strong>24 already match</strong> without the suppression while the largest of the
+    /// rest is 2318 glyphs <em>short</em> of the reference rather than long. Suppressing would have
+    /// moved them the wrong way.
+    /// </para>
+    /// <para>
+    /// <strong>The master's own copies are a different question and the answer there is yes.</strong>
+    /// That is exactly what <c>bSubContentProcessing</c> guards, and it is
+    /// <see cref="OdpRunningObjects"/> — so the same four declarations decide nothing for the
+    /// slide's frame and everything for the master's. Do not read the two as one rule; a round
+    /// that did implemented the suppression on the wrong side and had to withdraw it.
+    /// </para>
+    /// </remarks>
     /// <summary>
     /// The slide's size, from the master page's <c>style:page-layout</c>.
     /// </summary>
@@ -204,11 +329,29 @@ internal sealed partial class OdpSlideLayout
             style, OdfStyleFamily.DrawingPage, OdfPropertyKind.DrawingPage,
             OdfNamespaces.Draw, name);
 
-    private void Walk(XElement parent, AffineTransform space, List<PlacedShape> shapes, int depth)
+    // `background` is true while walking a master page, where every `presentation:class` frame is
+    // a presentation object and none of them is drawn on a slide. See InheritedShapes.
+    private void Walk(
+        XElement parent,
+        AffineTransform space,
+        List<PlacedShape> shapes,
+        int depth,
+        OdpRunningObjects fields,
+        bool background = false)
     {
         foreach (XElement element in parent.Elements())
         {
             if (element.Name.NamespaceName != OdfNamespaces.Draw) continue;
+
+            if (background
+                && element.Attribute(XName.Get("class", OdfNamespaces.Presentation))
+                    is { Value: { } presentationClass }
+                && !fields.Inherits(presentationClass))
+            {
+                continue;
+            }
+
+            if (!IsPrinted(element)) continue;
 
             switch (element.Name.LocalName)
             {
@@ -216,12 +359,12 @@ internal sealed partial class OdpSlideLayout
                     // A group states no coordinate space of its own in ODF, so descending is a
                     // plain recursion; only a draw:transform on the group changes anything, and
                     // LibreOffice writes none.
-                    Walk(element, Space(element, space), shapes, depth + 1);
+                    Walk(element, Space(element, space), shapes, depth + 1, fields, background);
                     break;
 
                 case "frame"
                     when element.Element(XName.Get("table", OdfNamespaces.Table)) is { } table:
-                    shapes.AddRange(Table(element, table, space));
+                    shapes.AddRange(Table(element, table, space, fields));
                     break;
 
                 // A frame holding an embedded chart draws the chart rather than the frame. It is
@@ -239,7 +382,7 @@ internal sealed partial class OdpSlideLayout
                 case "frame":
                 case "polygon":
                 case "line":
-                    if (Shape(element, space) is { } placed) shapes.Add(placed);
+                    if (Shape(element, space, fields) is { } placed) shapes.Add(placed);
                     break;
 
                 // draw:page-thumbnail is a live preview of another slide, not a picture, and
@@ -248,6 +391,44 @@ internal sealed partial class OdpSlideLayout
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Whether a shape reaches paper, from <c>draw:display</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The attribute has four values and they set <em>two</em> flags:
+    /// <c>Visible = always | screen</c> and <c>Printable = always | printer</c>
+    /// (<c>xmloff/source/draw/ximpshap.cxx</c>:840-844, mirrored on export at
+    /// <c>shapeexport.cxx</c>:805-816). Rendering a slide to PDF is printing, so the flag that
+    /// decides here is <c>Printable</c> — a shape marked <c>none</c> or <c>screen</c> is laid out
+    /// by Impress and drawn nowhere we can see.
+    /// </para>
+    /// <para>
+    /// <strong>It is not a curiosity of hand-written files: it is how PowerPoint's master
+    /// placeholders survive a round trip.</strong> LibreOffice's own ODP export writes a
+    /// PPTX master's <c>Slide Number</c>, <c>Footer</c> and <c>Date</c> placeholders out as
+    /// ordinary <c>draw:custom-shape</c> carrying their prompt text and
+    /// <c>drawooo:display="none"</c>, because Impress can hold only one presentation object of
+    /// each kind per master. Read without the attribute they are ordinary background objects, so
+    /// a reader that starts drawing master shapes starts drawing <c>&lt;#&gt; Footer Date</c>
+    /// under every slide of the deck. That is exactly what happened here: teaching this reader
+    /// master pages moved 122 of the converted corpus's 302 <c>.odp</c> to <c>match</c> and moved
+    /// <strong>four</strong> the other way, and all four were this.
+    /// </para>
+    /// <para>
+    /// 887 occurrences in 49 of the 302, 885 of them on a master page — see
+    /// <see cref="OdfNamespaces.DrawExtension"/> for why only the extension spelling appears.
+    /// </para>
+    /// </remarks>
+    private static bool IsPrinted(XElement element)
+    {
+        string? display =
+            element.Attribute(XName.Get("display", OdfNamespaces.DrawExtension))?.Value
+            ?? element.Attribute(XName.Get("display", OdfNamespaces.Draw))?.Value;
+
+        return display is null or "always" or "printer";
     }
 
     private static AffineTransform Space(XElement group, AffineTransform space)
@@ -271,7 +452,8 @@ internal sealed partial class OdpSlideLayout
     /// so the frame's own shape is not placed at all when it holds a table.
     /// </para>
     /// </remarks>
-    private List<PlacedShape> Table(XElement frame, XElement table, AffineTransform space)
+    private List<PlacedShape> Table(
+        XElement frame, XElement table, AffineTransform space, OdpRunningObjects fields)
     {
         DocSize size = new(
             Measure(frame, OdfNamespaces.SvgCompatible, "width"),
@@ -283,7 +465,7 @@ internal sealed partial class OdpSlideLayout
             OdfTableGeometry.Read(_file, table),
             size,
             AffineTransform.Concat(Placement(frame), space),
-            cell => CellBody(cell),
+            cell => CellBody(cell, fields),
             _fonts,
             Attribute(frame, OdfNamespaces.Draw, "name"));
     }
@@ -329,7 +511,7 @@ internal sealed partial class OdpSlideLayout
     /// the second in both cases. probes/slides-r55/odp-cell-baseline.py]
     /// </para>
     /// </remarks>
-    private SlideTextBody? CellBody(DrawingTableCellBox cell)
+    private SlideTextBody? CellBody(DrawingTableCellBox cell, OdpRunningObjects fields)
     {
         if (cell.TextBody is not { } element) return null;
 
@@ -340,7 +522,7 @@ internal sealed partial class OdpSlideLayout
         ];
 
         SlideTextBody body = OdfTextBody.Read(
-            _file, element.Descendants(XName.Get("p", OdfNamespaces.Text)), cascade);
+            _file, element.Descendants(XName.Get("p", OdfNamespaces.Text)), cascade, fields);
 
         if (body.Paragraphs.Count == 0) return null;
 
@@ -357,7 +539,7 @@ internal sealed partial class OdpSlideLayout
         };
     }
 
-    private PlacedShape? Shape(XElement element, AffineTransform space)
+    private PlacedShape? Shape(XElement element, AffineTransform space, OdpRunningObjects fields)
     {
         DocSize size = new(
             Measure(element, OdfNamespaces.SvgCompatible, "width"),
@@ -370,7 +552,27 @@ internal sealed partial class OdpSlideLayout
         XElement? geometry = element.Element(XName.Get("enhanced-geometry", OdfNamespaces.Draw));
         CustomShapeGeometry.Geometry outline = Geometry(element, geometry, size);
 
+        // What is filled, what is stroked and what is shaded, all of which a subpath states for
+        // itself. Split before the mirror, because a subpath has to be mirrored too. Only the
+        // preset fallback reports subpaths today — `OdfEnhancedGeometry` skips the `F` and `S`
+        // commands — so a stated `draw:enhanced-path` is painted whole, exactly as before.
+        PaintedGeometry painted =
+            SlidePresetGeometry.Painted(outline, AffineTransform.Identity, outline.Outline);
+
         GraphicsPath local = Mirrored(outline.Outline, geometry, size);
+        GraphicsPath localFill = ReferenceEquals(painted.Fill, outline.Outline)
+            ? local
+            : Mirrored(painted.Fill, geometry, size);
+        GraphicsPath localStroke = ReferenceEquals(painted.Stroke, outline.Outline)
+            ? local
+            : Mirrored(painted.Stroke, geometry, size);
+        IReadOnlyList<SlideShadedPart> shaded =
+        [
+            .. painted.ShadedParts.Select(part => part with
+            {
+                Outline = ShapeTransform.Apply(placement, Mirrored(part.Outline, geometry, size)),
+            }),
+        ];
         IReadOnlyList<OdfStyleReference> cascade = StyleCascade(element);
         DocRect bounds = ShapeTransform.PlacedBounds(placement, size);
 
@@ -386,17 +588,77 @@ internal sealed partial class OdpSlideLayout
         Paint? fill = Fill(cascade, box);
         if (!upright && fill is GradientPaint gradient) fill = gradient with { Transform = placement };
 
+        // WordArt replaces the whole shape, exactly as it does on the PPTX side: the curves become
+        // the outline, the shape's own path, pen and shadow go, and the words leave the text layer.
+        // `EnhancedCustomShapeEngine::render2` does not care which filter built the shape — a
+        // `draw:custom-shape` in text-path mode is the same `SdrObjCustomShape` a warped
+        // `p:sp` becomes — so the two paths have to answer the same way. See `OdfFontwork`.
+        //
+        // The fill is the shape's here and the first run's there, and that is not an inconsistency:
+        // ODF is the format the model is native to and states the Fontwork's fill as a shape
+        // property, while `lcl_copyCharPropsToShape` (`oox/source/drawingml/shape.cxx:721-905`) is
+        // what puts a DrawingML run's fill onto the shape in the first place. On a deck LibreOffice
+        // converted from `pptx`, the `draw:fill-color` it wrote *is* that copied run colour.
+        if (Warped(element, geometry, size, cascade, fields) is { } warped)
+        {
+            return new PlacedShape
+            {
+                Name = Attribute(element, OdfNamespaces.Draw, "name"),
+                Outline = ShapeTransform.Apply(placement, warped),
+                Bounds = bounds,
+                Fill = fill,
+                Picture = Picture(element, bounds),
+            };
+        }
+
         return new PlacedShape
         {
             Name = Attribute(element, OdfNamespaces.Draw, "name"),
             Outline = ShapeTransform.Apply(placement, local),
+            FillOutline = ShapeTransform.Apply(placement, localFill),
+            StrokeOutline = ShapeTransform.Apply(placement, localStroke),
+            ShadedParts = shaded,
             Bounds = bounds,
             Fill = fill,
             Picture = Picture(element, bounds),
             Line = Line(cascade),
-            Text = Text(element, outline.TextRectangle, placement, cascade),
+            Text = Text(element, geometry, outline.TextRectangle, placement, cascade, fields),
             Shadow = Shadow(cascade),
         };
+    }
+
+    /// <summary>
+    /// The warped glyph outlines of a shape in text-path mode, in the shape's own coordinates.
+    /// </summary>
+    /// <remarks>
+    /// Null for the overwhelming majority of shapes, which state no <c>draw:text-path</c>, and also
+    /// for a warp whose face carries no <c>glyf</c> outlines — in which case the shape draws nothing
+    /// at all rather than falling back to unwarped text, because the reference has already replaced
+    /// it by then. That is the same fallback both OOXML families take.
+    /// </remarks>
+    private GraphicsPath? Warped(
+        XElement element,
+        XElement? geometry,
+        DocSize size,
+        IReadOnlyList<OdfStyleReference> cascade,
+        OdpRunningObjects fields)
+    {
+        if (OdfFontwork.Read(geometry) is not { } warp) return null;
+
+        SlideTextBody body = OdfTextBody.Read(
+            _file, Paragraphs(element), [.. cascade, TextStyle(element)], fields);
+
+        if (body.Paragraphs.Count == 0) return null;
+
+        return SlideFontwork.Read(
+            body with
+            {
+                WarpFontworkType = warp.FontworkType,
+                WarpAdjustmentValues = warp.Adjustments,
+                WarpKeepsFontSize = warp.KeepsFontSize,
+            },
+            size,
+            _fonts).Outline;
     }
 
     /// <summary>
@@ -414,6 +676,22 @@ internal sealed partial class OdpSlideLayout
     /// <c>draw:shadow-opacity</c> is an opacity and not a transparency, and defaults to fully
     /// opaque; <c>draw:shadow-color</c> defaults to the grey a binary file's shadow takes when
     /// it states none.
+    /// </para>
+    /// <para>
+    /// <strong>The blur radius is the fifth attribute and it is not in the <c>draw</c>
+    /// namespace.</strong> <c>PROP_ShadowBlur</c> is mapped at
+    /// <c>xmloff/source/draw/sdpropls.cxx</c>:169 to <c>XML_NAMESPACE_LO_EXT</c> and to nothing
+    /// else, so a reader that looks for <c>draw:shadow-blur</c> finds the attribute nowhere and
+    /// concludes every shadow is hard-edged. It matters far more than a radius usually would,
+    /// because <see cref="SlideShadow.CarriesText"/> keys on it: LibreOffice rasterises a blurred
+    /// shadow (<c>shadowprimitive2d.cxx</c>:91-140) and its PDF holds a picture with
+    /// <em>no text</em>, while a hard shadow stays vector and its text is real. Read without the
+    /// extension namespace, every blurred shadow in the file put a second, offset copy of its
+    /// shape's words into the text layer. <strong>1252 non-zero <c>loext:shadow-blur</c> in 120
+    /// of the converted corpus's 302 <c>.odp</c>, and not one <c>draw:shadow-blur</c>
+    /// anywhere</strong> — the same trap <see cref="IsPrinted"/> records for
+    /// <c>drawooo:display</c> and <c>OdfNamespaces.ChartExtension</c> for
+    /// <c>coordinate-region</c>.
     /// </para>
     /// </remarks>
     private SlideShadow? Shadow(IReadOnlyList<OdfStyleReference> cascade)
@@ -436,8 +714,16 @@ internal sealed partial class OdpSlideLayout
             y,
             colour.WithAlpha(255),
             Math.Clamp(opacity, 0, 1),
-            Graphic(cascade, OdfNamespaces.Draw, "shadow-blur").AsLength() ?? Core.Units.Length.Zero);
+            Blur(cascade));
     }
+
+    /// <summary>
+    /// A shadow's blur radius, from whichever namespace the file spells it in.
+    /// </summary>
+    private Core.Units.Length Blur(IReadOnlyList<OdfStyleReference> cascade)
+        => Graphic(cascade, OdfNamespaces.LoExt, "shadow-blur").AsLength()
+           ?? Graphic(cascade, OdfNamespaces.Draw, "shadow-blur").AsLength()
+           ?? Core.Units.Length.Zero;
 
     /// <summary>
     /// A shape's outline and text rectangle: its own <c>draw:enhanced-path</c> first.
@@ -466,11 +752,7 @@ internal sealed partial class OdpSlideLayout
             return stated;
         }
 
-        string? preset = Preset(element, geometry);
-
-        return new CustomShapeGeometry.Geometry(
-            SlidePresetGeometry.Outline(preset, size),
-            SlidePresetGeometry.TextRectangle(preset, size));
+        return SlidePresetGeometry.Of(Preset(element, geometry), size);
     }
 
     /// <summary>
@@ -493,118 +775,13 @@ internal sealed partial class OdpSlideLayout
     /// Parses a <c>draw:transform</c> into a matrix.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <strong>ODF's rotation runs the other way from OOXML's.</strong> The angle is in radians
-    /// and counter-clockwise in a y-up reading, which in the y-down space everything here works in
-    /// means the matrix is <c>[cos, sin; −sin, cos]</c> — the transpose of what a naive reading
-    /// gives. Measured on <c>shape-geometry.odp</c>, which LibreOffice wrote by converting a deck
-    /// whose rectangle is rotated 30° clockwise: it comes out as
-    /// <c>rotate (-0.523598775598299) translate (3.515cm 10.33cm)</c>, and only this reading puts
-    /// the shape's centre back at the 5.0795 cm, 12.6995 cm the OOXML original states.
-    /// </para>
-    /// <para>
-    /// The operations compose right to left, as they do in SVG: the last one written is applied
-    /// last. Only <c>rotate</c>, <c>translate</c>, <c>scale</c> and <c>skewX</c> are read;
-    /// <c>matrix</c> is rare enough in real files that leaving it out is honest about coverage
-    /// rather than a gap worth filling blind.
-    /// </para>
+    /// The parser is <see cref="OdfTransform"/>, in <c>Paperless.OpenDocument</c>: a spreadsheet's
+    /// grouped watermark states the same attribute with the same meaning, and a reader of ODF that
+    /// serves more than one family belongs one layer above Core rather than inside a family. Moved
+    /// there verbatim, so the reading it records — that ODF's rotation runs the other way from
+    /// OOXML's — is unchanged.
     /// </remarks>
-    private static AffineTransform? Transform(XElement element)
-    {
-        string? text = Attribute(element, OdfNamespaces.Draw, "transform");
-        if (string.IsNullOrWhiteSpace(text)) return null;
-
-        AffineTransform result = AffineTransform.Identity;
-        bool any = false;
-
-        foreach ((string name, string[] arguments) in Operations(text))
-        {
-            AffineTransform step = name switch
-            {
-                "translate" when arguments.Length >= 1 => AffineTransform.Translation(
-                    Emu(arguments[0]), arguments.Length > 1 ? Emu(arguments[1]) : 0),
-                "rotate" when arguments.Length >= 1 => Rotation(Number(arguments[0])),
-                "scale" when arguments.Length >= 1 => AffineTransform.Scale(
-                    Number(arguments[0]),
-                    arguments.Length > 1 ? Number(arguments[1]) : Number(arguments[0])),
-                "skewX" when arguments.Length >= 1 => new AffineTransform(
-                    1, 0, Math.Tan(Number(arguments[0])), 1, 0, 0),
-                _ => AffineTransform.Identity,
-            };
-
-            result = AffineTransform.Concat(result, step);
-            any = true;
-        }
-
-        return any ? result : null;
-    }
-
-    /// <summary>
-    /// A transform argument that is a length, in EMUs.
-    /// </summary>
-    /// <remarks>
-    /// A bare number is a hundredth of a millimetre, which is ODF's unitless default and what
-    /// <see cref="OdfValue.ParseLength"/> already assumes.
-    /// </remarks>
-    private static double Emu(string token)
-        => OdfValue.ParseLength(token) is { } length ? length.Emu : 0;
-
-    /// <summary>
-    /// A transform argument that is a plain number: an angle in radians, or a scale factor.
-    /// </summary>
-    /// <remarks>
-    /// Read as a number and never as a length, which is the whole reason the two are separate.
-    /// <see cref="OdfValue.ParseLength"/> takes a unitless value for hundredths of a millimetre,
-    /// so putting <c>rotate (-0.5236)</c> through it rounds the angle to −1 and then treats it as
-    /// −360 radians — a rotation of about −106 degrees once wrapped, which lands the shape in a
-    /// plausible-looking wrong place rather than an obviously wrong one.
-    /// </remarks>
-    private static double Number(string token)
-        => double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
-            ? value
-            : 0;
-
-    /// <summary>ODF's rotation, expressed in a y-down space.</summary>
-    private static AffineTransform Rotation(double radians)
-    {
-        double cos = Math.Cos(radians);
-        double sin = Math.Sin(radians);
-        return new AffineTransform(cos, -sin, sin, cos, 0, 0);
-    }
-
-    /// <summary>
-    /// The operations in a <c>draw:transform</c>, with their arguments still as written.
-    /// </summary>
-    /// <remarks>
-    /// Unparsed, because what an argument means depends on the operation: <c>translate</c> takes
-    /// lengths and <c>rotate</c> takes a bare number of radians, and the two readings are not
-    /// interchangeable.
-    /// </remarks>
-    private static IEnumerable<(string Name, string[] Arguments)> Operations(string text)
-    {
-        int at = 0;
-        while (at < text.Length)
-        {
-            while (at < text.Length && (char.IsWhiteSpace(text[at]) || text[at] == ',')) at++;
-
-            int nameStart = at;
-            while (at < text.Length && char.IsLetter(text[at])) at++;
-            if (at == nameStart) yield break;
-
-            string name = text[nameStart..at];
-
-            while (at < text.Length && text[at] != '(') at++;
-            int open = at + 1;
-            int close = text.IndexOf(')', open);
-            if (close < 0) yield break;
-
-            string[] arguments = text[open..close].Split(
-                [' ', ',', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
-
-            at = close + 1;
-            yield return (name, arguments);
-        }
-    }
+    private static AffineTransform? Transform(XElement element) => OdfTransform.Read(element);
 
     /// <summary>
     /// The preset a shape draws, mapped onto the DrawingML names the expander knows.
@@ -749,7 +926,7 @@ internal sealed partial class OdpSlideLayout
     /// <para>
     /// An <c>axial</c> gradient is a linear one measured from the middle outwards, so it becomes
     /// three stops on an ordinary ramp — exactly, not approximately; see
-    /// <see cref="SlideGradients.Axial"/>.
+    /// <see cref="GradientGeometry.Axial"/>.
     /// </para>
     /// </remarks>
     private static GradientPaint? Gradient(OdpGradient? definition, DocRect box)
@@ -765,9 +942,9 @@ internal sealed partial class OdpSlideLayout
         switch (gradient.Style)
         {
             case "axial":
-                return SlideGradients.Linear(
+                return GradientGeometry.Linear(
                     box, dx, dy,
-                    SlideGradients.Axial(gradient.StartColour, gradient.EndColour, gradient.Border));
+                    GradientGeometry.Axial(gradient.StartColour, gradient.EndColour, gradient.Border));
 
             case "radial":
             case "ellipsoid":
@@ -781,7 +958,7 @@ internal sealed partial class OdpSlideLayout
                     _ => GradientKind.Rectangular,
                 };
 
-                IReadOnlyList<GradientStop> stops = SlideGradients.WithBorder(
+                IReadOnlyList<GradientStop> stops = GradientGeometry.WithBorder(
                     [
                         new GradientStop(0, gradient.EndColour),
                         new GradientStop(1, gradient.StartColour),
@@ -793,13 +970,13 @@ internal sealed partial class OdpSlideLayout
                     box.Left + (box.Width * gradient.CentreX),
                     box.Top + (box.Height * gradient.CentreY));
 
-                return SlideGradients.Centred(kind, box, centre, stops);
+                return GradientGeometry.Centred(kind, box, centre, stops);
             }
 
             default:
-                return SlideGradients.Linear(
+                return GradientGeometry.Linear(
                     box, dx, dy,
-                    SlideGradients.WithBorder(
+                    GradientGeometry.WithBorder(
                         [
                             new GradientStop(0, gradient.StartColour),
                             new GradientStop(1, gradient.EndColour),
@@ -931,24 +1108,92 @@ internal sealed partial class OdpSlideLayout
 
     private PlacedText? Text(
         XElement element,
+        XElement? geometry,
         DocRect rectangle,
         AffineTransform placement,
-        IReadOnlyList<OdfStyleReference> cascade)
+        IReadOnlyList<OdfStyleReference> cascade,
+        OdpRunningObjects fields)
     {
         SlideTextBody body = OdfTextBody.Read(
-            _file, Paragraphs(element), [.. cascade, TextStyle(element)]);
+            _file, Paragraphs(element), [.. cascade, TextStyle(element)], fields);
         if (body.Paragraphs.Count == 0) return null;
 
-        bool upright = placement.A == 1 && placement.B == 0 && placement.C == 0 && placement.D == 1;
+        double turn = TextRotation(geometry);
 
+        bool upright = turn == 0.0
+                       && placement.A == 1 && placement.B == 0
+                       && placement.C == 0 && placement.D == 1;
+
+        // The box the text is laid out in is the shape's text rectangle as it stands, turned or
+        // not. <strong>A quarter turn does not swap its two dimensions</strong>, which is the
+        // reading this cost a measurement to get right: the padding does the swapping. LibreOffice
+        // writes a turned shape's insets in the text's *own* orientation, so
+        // `schematicplaymar21.odp`'s 2.469 cm by 29.821 cm body carries fo:padding-left="-13.52cm"
+        // and fo:padding-top="13.701cm" — and `SdrTextObj::AdjustRectToTextDistance`
+        // (svx/source/svdraw/svdotext.cxx:577-618, called from
+        // SdrObjCustomShape::TakeTextAnchorRect at svdoashp.cxx:2628-2643) adds them to the
+        // anchor rectangle before `TakeTextRect` takes its width as the wrapping limit. 63.15 pt
+        // plus 383.3 plus 387.0 is 833.45, which is the width 26.2.4.2 wraps that body at, to a
+        // twentieth of a point.
         DocRect area = upright
             ? new DocRect(ShapeTransform.Apply(placement, rectangle.Origin), rectangle.Size)
-            : rectangle;
+            : new DocRect(DocPoint.Origin, rectangle.Size);
 
         List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts);
         if (runs.Count == 0) return null;
 
-        return new PlacedText(runs, upright ? AffineTransform.Identity : placement);
+        if (upright) return new PlacedText(runs, AffineTransform.Identity);
+
+        // Turn the laid-out box about the text rectangle's centre and then place the shape, which
+        // is the order `ViewContactOfSdrObjCustomShape` composes them in: the text box is rotated
+        // by the extra angle inside the shape's own space and the shape's matrix is applied after
+        // it (svx/source/sdr/contact/viewcontactofsdrobjcustomshape.cxx:171-191).
+        AffineTransform inside = AffineTransform.Concat(
+            AffineTransform.Concat(
+                AffineTransform.Translation(
+                    -rectangle.Width.Emu / 2.0, -rectangle.Height.Emu / 2.0),
+                OdfTransform.Rotation(turn)),
+            AffineTransform.Translation(
+                rectangle.X.Emu + (rectangle.Width.Emu / 2.0),
+                rectangle.Y.Emu + (rectangle.Height.Emu / 2.0)));
+
+        return new PlacedText(runs, AffineTransform.Concat(inside, placement));
+    }
+
+    /// <summary>
+    /// The angle a custom shape turns its own text through, in radians, ODF's sense.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>draw:text-rotate-angle</c> on the <c>draw:enhanced-geometry</c>, in whole degrees and
+    /// anticlockwise exactly as <c>draw:transform</c>'s own <c>rotate</c> is. It becomes the
+    /// geometry item's <c>TextRotateAngle</c> (<c>xmloff/source/draw/ximpcustomshape.cxx</c>:917),
+    /// which <c>SdrObjCustomShape::GetExtraTextRotation</c> (<c>svx/source/svdraw/svdoashp.cxx</c>
+    /// :486-514) answers and <c>ViewContactOfSdrObjCustomShape</c> applies to the text box before
+    /// the shape's own rotation.
+    /// </para>
+    /// <para>
+    /// <strong>It is what a converted deck states instead of turning the text itself.</strong>
+    /// LibreOffice writes a shape whose text runs across a tall narrow box as a tall narrow shape
+    /// turned a quarter turn with its text turned the other way, so a reader that applies the
+    /// shape's rotation and not the text's draws every such body on its side and wraps it at the
+    /// shape's *width*. Reach on the converted corpus: 38 statements in 7 documents — 90 in three
+    /// decks and ±180 in four more, all of them written by 26.2.4.2's own exporter.
+    /// </para>
+    /// </remarks>
+    private static double TextRotation(XElement? geometry)
+    {
+        string? stated = Attribute(geometry, OdfNamespaces.Draw, "text-rotate-angle");
+        if (stated is null) return 0.0;
+
+        if (!double.TryParse(stated, NumberStyles.Float, CultureInfo.InvariantCulture,
+                out double degrees))
+        {
+            return 0.0;
+        }
+
+        degrees %= 360.0;
+        return degrees == 0.0 ? 0.0 : degrees * Math.PI / 180.0;
     }
 
     /// <summary>

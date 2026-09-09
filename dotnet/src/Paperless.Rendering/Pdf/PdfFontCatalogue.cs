@@ -29,7 +29,7 @@ namespace Paperless.Rendering.Pdf;
 /// document uses more than 255 of its glyphs. LibreOffice pays the same cost the same way.
 /// </para>
 /// </remarks>
-internal sealed class PdfFontCatalogue(IPdfFontProvider provider, bool embed)
+internal sealed class PdfFontCatalogue(IPdfFontProvider provider, bool embed, PdfRenderOptions options)
 {
     /// <summary>
     /// How many codes one PDF font can hold: 1 to 255, with 0 kept for <c>.notdef</c>.
@@ -264,6 +264,16 @@ internal sealed class PdfFontCatalogue(IPdfFontProvider provider, bool embed)
         int toUnicode = writer.Reserve();
         writer.SetStream(toUnicode, string.Empty, Encoding.Latin1.GetBytes(ToUnicode(subset)), compress: false);
 
+        // A colour bitmap face has no outline to embed and could not be drawn from one if it had:
+        // its glyphs are whole PNGs in `CBDT`, so they reach the page as images inside Type 3 char
+        // procs. Tried first because the ordinary path below would otherwise embed a `glyf`-less
+        // program and announce it as a TrueType font — which is what drew nothing.
+        if (catalogue.Type3(writer, subset, name, baseName, upem, last, widths.ToString(), toUnicode)
+            is { } type3)
+        {
+            return type3;
+        }
+
         byte[]? embedded = Embed(subset);
 
         // A CFF-flavoured face is named and not embedded. Everything else here writes a simple
@@ -296,6 +306,134 @@ internal sealed class PdfFontCatalogue(IPdfFontProvider provider, bool embed)
         return writer.Add(
             $"<</Type/Font/Subtype/TrueType/BaseFont/{name}/FirstChar 0/LastChar {last}"
             + $"/Widths{widths}/FontDescriptor {descriptor} 0 R/ToUnicode {toUnicode} 0 R>>");
+    }
+
+    /// <summary>
+    /// Writes a colour bitmap face as a Type 3 font, or null when the face is not one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A colour bitmap glyph cannot be a glyph of a simple font, and this is the shape
+    /// LibreOffice itself puts it in.</strong> Measured on 26.2.4.2's own PDF of a <c>U+2714</c>
+    /// probe: <c>pdffonts</c> reports <c>BAAAAA+NotoColorEmoji</c> as <em>Type 3, Custom encoding,
+    /// embedded, with a ToUnicode</em>, and inside it each char proc is
+    /// <c>1245.1171875 0 d0</c> followed by <c>q … cm /Im12 Do Q</c> over a <c>/DeviceRGB</c> image
+    /// with an <c>/SMask</c>. Everything written here is that file's shape, including the
+    /// <c>/FontMatrix[0.001 …]</c> that makes glyph space thousandths of an em — which is the space
+    /// <c>/Widths</c> is already stated in, so the widths array is the ordinary one unchanged.
+    /// </para>
+    /// <para>
+    /// <strong>The text stays extractable, and that is the point of doing it this way rather than
+    /// drawing an image on the page.</strong> The page's content stream is untouched: the run is
+    /// still <c>&lt;01&gt; Tj</c> against a font resource, so the pen positions, the word breaks and
+    /// the <c>ToUnicode</c> map are the same objects the ordinary path writes. An image drawn beside
+    /// a text layer would have had to keep those two in step by hand.
+    /// </para>
+    /// <para>
+    /// <c>d0</c> rather than <c>d1</c>: <c>d1</c> promises a shape-only glyph whose colour comes from
+    /// the page, and the whole content of one of these is its own colour. The reference writes
+    /// <c>d0</c> for the same reason.
+    /// </para>
+    /// <para>
+    /// No font program is embedded, which is not a gap: a Type 3 font <em>is</em> its char procs.
+    /// The descriptor is still written, without a <c>/FontFile</c>, because that is where the
+    /// subset-tagged name lives — <c>/Name</c> on the font dictionary is the bare one.
+    /// </para>
+    /// </remarks>
+    private int? Type3(
+        PdfDocumentWriter writer,
+        Subset subset,
+        string name,
+        string baseName,
+        int upem,
+        int last,
+        string widths,
+        int toUnicode)
+    {
+        if (!ColourBitmaps.Has(subset.Face.OpenType)) return null;
+
+        OpenTypeFace opentype = subset.Face.OpenType!;
+        double scale = 1000.0 / (upem > 0 ? upem : 1000);
+
+        Dictionary<ushort, string> procs = [];
+        List<(string Name, int Id)> images = [];
+        StringBuilder charProcs = new();
+        StringBuilder differences = new("[1");
+        bool painted = false;
+
+        for (int code = 1; code <= last; code++)
+        {
+            ushort glyph = subset.GlyphsByCode[code];
+
+            if (!procs.TryGetValue(glyph, out string? proc))
+            {
+                proc = $"gid{glyph}";
+                int id = writer.Reserve();
+
+                // The strike is chosen without a size, which asks for the largest the face carries:
+                // a char proc is drawn at every size the document uses it at, so there is no one
+                // size to choose it for and the best resolution is the only defensible answer.
+                ColourBitmap? bitmap = ColourBitmaps.Of(opentype, glyph);
+                string body = $"{PdfSyntax.Number(Width(subset.Face.Reference, glyph))} 0 d0\n";
+
+                if (bitmap is not null)
+                {
+                    (int left, int bottom, int width, int height) = bitmap.PlacementIn(upem);
+                    string resource = PdfImages.Write(
+                        writer,
+                        RasterImage.Encoded(bitmap.Image, bitmap.MediaType),
+                        options,
+                        images);
+
+                    if (resource.Length > 0)
+                    {
+                        body += $"q {PdfSyntax.Number(width * scale)} 0 0 {PdfSyntax.Number(height * scale)} "
+                                + $"{PdfSyntax.Number(left * scale)} {PdfSyntax.Number(bottom * scale)} cm "
+                                + $"/{resource} Do Q\n";
+                        painted = true;
+                    }
+                }
+
+                writer.SetStream(id, string.Empty, Encoding.Latin1.GetBytes(body), compress: false);
+                charProcs.Append(CultureInfo.InvariantCulture, $"/{proc} {id} 0 R");
+                procs[glyph] = proc;
+            }
+
+            differences.Append(CultureInfo.InvariantCulture, $"/{proc}");
+        }
+
+        // A face carrying the tables but no strike this subset can use is not a colour font as far
+        // as this document is concerned, and the ordinary path — which may still have outlines to
+        // embed — is the better answer for it. The reserved objects are left unfilled, which the
+        // writer emits as `null`.
+        if (!painted) return null;
+
+        differences.Append(']');
+
+        StringBuilder resources = new("<</ProcSet[/PDF/ImageC/ImageB]");
+        if (images.Count > 0)
+        {
+            resources.Append("/XObject<<");
+            foreach ((string image, int id) in images)
+            {
+                resources.Append(CultureInfo.InvariantCulture, $"/{image} {id} 0 R");
+            }
+
+            resources.Append(">>");
+        }
+
+        int fontResources = writer.Add(resources.Append(">>").ToString());
+        int descriptor = WriteDescriptor(writer, subset, name, upem, embedded: null);
+        (int xMin, int yMin, int xMax, int yMax) = BoundingBox(subset.Face);
+
+        return writer.Add(
+            $"<</Type/Font/Subtype/Type3/Name/{baseName}"
+            + $"/FontBBox[{xMin} {yMin} {xMax} {yMax}]/FontMatrix[0.001 0 0 0.001 0 0]"
+            + $"/CharProcs<<{charProcs}>>"
+            + $"/Encoding<</Type/Encoding/Differences{differences}>>"
+            + $"/FirstChar 0/LastChar {last}/Widths{widths}"
+            + $"/FontDescriptor {descriptor} 0 R/Resources {fontResources} 0 R"
+            + $"/ToUnicode {toUnicode} 0 R>>");
     }
 
     private static int WriteDescriptor(

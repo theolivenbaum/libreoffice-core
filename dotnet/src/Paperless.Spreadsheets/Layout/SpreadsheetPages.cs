@@ -367,10 +367,10 @@ internal readonly record struct RowBand(Length Top, int FirstVisible);
 /// </remarks>
 internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement placement)
 {
-    private readonly double _scale = Math.Max(1, placement.ZoomPercentage) / 100.0;
+    private readonly double _scale = placement.Scale;
     private readonly SheetPageDecoration _decoration = new(sheet, placement);
     private readonly SheetPageGraphics _graphics =
-        new(sheet, Math.Max(1, placement.ZoomPercentage) / 100.0);
+        new(sheet, placement.Scale);
 
     /// <summary>
     /// Draws the page: what is painted behind the cells, their text, and the page's furniture.
@@ -418,7 +418,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
                         continue;
                     }
 
-                    string text = cell.GetText();
+                    string text = cell.GetOwnText();
                     if (text.Length == 0) continue;
 
                     DrawCell(text, cell, column, row, sink, BandOf(bands, column));
@@ -478,10 +478,33 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
     /// Where the page's cell block starts, centring included.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Centring is measured against what this page holds rather than against the sheet, which is
     /// what makes the last page of a sheet sit differently from the ones before it: Calc sums the
     /// widths of the columns on <em>this</em> page and halves the remainder
     /// (<c>ScPrintFunc::PrintPage</c>, <c>printfun.cxx:2150</c>).
+    /// </para>
+    /// <para>
+    /// <strong>The remainder is halved whatever its sign, so a block wider than the page is
+    /// centred <em>off both edges</em> rather than left alone.</strong> Calc writes
+    /// <c>nLeftSpace += ( aPageRect.GetWidth() - nDataWidth ) / 2</c> with no clamp
+    /// (<c>printfun.cxx</c>:2165) and <c>nTopSpace</c> the same way (<c>:2188</c>), so the offset
+    /// goes negative exactly when the columns do not fit and the block loses text at the left
+    /// margin as well as at the right. Guarding the addition on a positive remainder — which this
+    /// did — turns centring into left-alignment on precisely the sheets where the flag is most
+    /// visible. Measured on <c>048_Expense_trends_budget</c>, whose <c>tips</c> sheet is one
+    /// 152-character column under <c>printOptions/@horizontalCentered</c>: every line of page 1
+    /// sits <strong>167.3 pt</strong> left of ours in 26.2.4.2, the same constant on all nineteen.
+    /// </para>
+    /// <para>
+    /// The heading strip belongs to the block being centred, not to the margin: Calc adds
+    /// <c>PRINT_HEADER_WIDTH</c> to <c>nDataWidth</c> before halving (<c>printfun.cxx</c>:2156)
+    /// and only then lays the strip at <c>nStartX</c> with the body at
+    /// <c>nStartX + nHeaderWidth</c> (<c>:2219</c>, <c>:2252</c>). Adding the strip to the origin
+    /// and leaving it out of the extent, as this did, puts the body half a strip too far in. No
+    /// corpus sheet prints headings <em>and</em> centres, so this half is transcribed from the
+    /// source rather than measured.
+    /// </para>
     /// </remarks>
     private DocPoint BodyOrigin
     {
@@ -505,14 +528,14 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
 
             if (setup.CentresHorizontally)
             {
-                Length spare = area.Width - Extent(Columns(x).Select(c => c.Width));
-                if (spare > Length.Zero) x += spare / 2;
+                Length block = Extent(Columns(x).Select(c => c.Width)) + HeadingStrip.X;
+                x += (area.Width - block) / 2;
             }
 
             if (setup.CentresVertically)
             {
-                Length spare = area.Height - Extent(Rows(y).Select(r => r.Height));
-                if (spare > Length.Zero) y += spare / 2;
+                Length block = Extent(Rows(y).Select(r => r.Height)) + HeadingStrip.Y;
+                y += (area.Height - block) / 2;
             }
 
             return new DocPoint(x, y);
@@ -644,7 +667,8 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
                          && !sheet.IsMerged(row, column),
         column => SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(column)) * _scale,
         band.Left,
-        band.Right);
+        band.Right,
+        sheet.CellBreaksStartLines);
 
     /// <summary>Which band a placed column belongs to, by where it sits on the paper.</summary>
     /// <remarks>
@@ -736,7 +760,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         if (cell is null || SheetTextLayout.IsAvailable(cell)) return;
         if (sheet.Grid.Columns.IsHidden(at)) return;
 
-        string text = cell.GetText();
+        string text = cell.GetOwnText();
         if (text.Length == 0) return;
 
         // A merge anywhere between the two suppresses the trail-in: Calc asks
@@ -850,7 +874,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         // was dropped as trailing padding — has no text to draw and no cell to draw it as.
         if (sheet.CellAt(merge.FirstRow, merge.FirstColumn) is not { } origin) return;
 
-        string text = origin.GetText();
+        string text = origin.GetOwnText();
         if (text.Length == 0) return;
 
         DrawCell(

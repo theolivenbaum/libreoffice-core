@@ -62,7 +62,7 @@ public sealed class LineHeightComparisonTests : IDisposable
     [InlineData("Liberation Mono", "LiberationMono-Regular.ttf")]
     public void TheDerivedLineHeightIsTheOneLibreOfficeRenders(string familyName, string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string? fontPath = FindFont(fileName);
         Assert.SkipWhen(fontPath is null, $"{fileName} is not installed; see check-env.sh");

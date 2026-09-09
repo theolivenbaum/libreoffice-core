@@ -128,7 +128,7 @@ public sealed partial class Ww8DocumentReader
 
                 case Special.FieldBegin:
                     state.FieldDepth++;
-                    state.InFieldInstruction = true;
+                    state.FieldInstructions.Push(true);
                     state.Instruction.Clear();
                     // A hyperlink around a nested field keeps its target for the inner field's
                     // result too, so the outer target is stacked rather than overwritten.
@@ -136,7 +136,11 @@ public sealed partial class Ww8DocumentReader
                     continue;
 
                 case Special.FieldSeparator:
-                    state.InFieldInstruction = false;
+                    // This field's instruction ends here; an enclosing field's does not. Popping and
+                    // pushing rather than clearing a single flag is the whole of the fix — see
+                    // <see cref="WalkState.FieldInstructions"/>.
+                    if (state.FieldInstructions.Count > 0) state.FieldInstructions.Pop();
+                    state.FieldInstructions.Push(false);
                     // Where the cached result begins, which is the half of a field a reader saw.
                     state.FieldResultOffset = OffsetIn(state);
                     state.FieldResultStart = _marks.At(state.FieldResultOffset);
@@ -152,7 +156,9 @@ public sealed partial class Ww8DocumentReader
 
                 case Special.FieldEnd:
                     if (state.FieldDepth > 0) state.FieldDepth--;
-                    state.InFieldInstruction = false;
+                    // Restores the enclosing field's half rather than declaring the walk out of every
+                    // instruction: a TC field's instruction resumes after each nested SEQ closes.
+                    if (state.FieldInstructions.Count > 0) state.FieldInstructions.Pop();
                     FlushRun(state);
                     RecordField(state);
                     state.CurrentHyperlink = state.Hyperlinks.Count > 0 ? state.Hyperlinks.Pop() : null;
@@ -710,7 +716,37 @@ public sealed partial class Ww8DocumentReader
         public Ww8ParagraphFormat ParagraphFormat { get; set; }
 
         public int FieldDepth { get; set; }
-        public bool InFieldInstruction { get; set; }
+
+        /// <summary>
+        /// One entry per open field, innermost last: true while that field is still in its
+        /// instruction.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A single flag was wrong and the corpus says how. <c>150_5300_13_chg8.doc</c> writes each of
+        /// its headings as a <c>TC</c> field with no separator of its own and five <c>SEQ</c> fields
+        /// nested inside its instruction, each of which <em>has</em> one:
+        /// <c>U+0013 tc  \l 2 "  U+0013 seq level0 \r307 \*arabic U+0014 307 U+0015 . … U+0015</c>.
+        /// Clearing one flag at the inner field's <c>U+0015</c> declared the walk out of the outer
+        /// field's instruction too, so the rest of the <c>TC</c>'s code — <c>. RUNWAY OBJECT FREE
+        /// AREA"</c>, quotation mark and all — was emitted as body text on every numbered heading in
+        /// the document.
+        /// </para>
+        /// <para>
+        /// The innermost field decides, not "any enclosing field is in its instruction". A nested
+        /// field's cached result <em>is</em> drawn inside an outer instruction, because LibreOffice
+        /// inserts it through the field machinery rather than through the character reader that
+        /// <c>m_bIgnoreText</c> gates (<c>SwWW8ImplReader::ReadChars</c>,
+        /// <c>sw/source/filter/ww8/ww8par.cxx</c>:3395, against <c>Read_Field</c>'s own insertion).
+        /// It is what puts the second <c>307</c> in the reference's <c>307. OBJECT FREE AREA307.</c>
+        /// </para>
+        /// </remarks>
+        public Stack<bool> FieldInstructions { get; } = new();
+
+        /// <summary>Whether the innermost open field is still in its instruction.</summary>
+        public bool InFieldInstruction
+            => FieldInstructions.Count > 0 && FieldInstructions.Peek();
+
         public StringBuilder Instruction { get; } = new();
         public string? CurrentHyperlink { get; set; }
         public Stack<string?> Hyperlinks { get; } = new();

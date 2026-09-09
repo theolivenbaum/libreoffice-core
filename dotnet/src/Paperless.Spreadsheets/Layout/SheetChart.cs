@@ -91,6 +91,9 @@ internal static class SheetChart
             ? plot
             : plot with
             {
+                // What was multiplied in, so the one measurement that is not proportional to the
+                // type size can be taken at the size the chart states: ChartPlot.TypeScale.
+                TypeScale = plot.TypeScale * scale,
                 TitleSize = plot.TitleSize * scale,
                 AxisTitleSize = plot.AxisTitleSize * scale,
                 LabelSize = plot.LabelSize * scale,

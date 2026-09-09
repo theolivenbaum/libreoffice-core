@@ -101,7 +101,7 @@ public sealed class ParagraphLeadingComparisonTests : IDisposable
     [InlineData("page-top-line-gap.docx")]
     public void EveryBaselineIsWhereLibreOfficePutsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         (List<PdfTextRun> ours, List<PdfTextRun> theirs) = Rendered(fileName);
 
@@ -135,7 +135,7 @@ public sealed class ParagraphLeadingComparisonTests : IDisposable
     [InlineData("paginated.rtf")]
     public void ASizeChangeSplitsTheBlockWhereWriterSplitsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         (List<PdfTextRun> ours, List<PdfTextRun> theirs) = Rendered(fileName);
         ours.Count.ShouldBe(theirs.Count, $"{fileName}: number of drawn lines");

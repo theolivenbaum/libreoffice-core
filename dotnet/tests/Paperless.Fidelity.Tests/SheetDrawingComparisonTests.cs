@@ -25,6 +25,36 @@ namespace Paperless.Fidelity.Tests;
 /// <c>Paperless.Rendering</c>'s business and is tested there.
 /// </para>
 /// </remarks>
+// [26.2.4.2 clamps a full-cell anchor offset, classified as LibreOffice's, not closed]
+// APictureIsDrawnWhereLibreOfficeDrawsIt fails on `sheet-rich-text.xlsx`, picture 1 on page 3, on
+// width and height. The previous note here blamed the derived grid — "the span is a sum of grid
+// extents and the grid's own units are character widths and font-derived row heights" — and that
+// is **refuted**: the picture's height is `rowOff` 640080 less `rowOff` 45720 *within one row*, so
+// it is 46.800 pt of pure EMU arithmetic with no font in it, and it moves by the same amount as
+// the width. Both binaries also compute the same grid; their flat-ODF exports of this workbook
+// agree column for column and row for row.
+//
+// What 26.2.4.2 does, measured over 34 probe renderings in `probes/sheets-anchor-clamp`: it clamps
+// an in-cell anchor offset to `cellSize - 5` (1/100 mm), on both axes, and 24.2.7.2 clamps nothing
+// at all — its drawn offset is `round(EMU / 360) - 1` even at 1.4x the cell's own width. The
+// clamp is `ShapeAnchor::calcCellAnchorEmu` (`sc/source/filter/oox/drawingbase.cxx`), whose stated
+// intent is "reduce cell's right edge by a full twip"; a full twip is 635 EMU and would give
+// `cellSize - 3`, so the magnitude the binary applies is not the one its own source describes.
+//
+// [2026-09-06] And it is not the advance divergence either — `CLAUDE.md` listed this method under
+// rule 3's reach and that was stale when it was written; rule 3 is now withdrawn outright. See
+// `probes/advance-ppem/results.md`.
+//
+// Classified as LibreOffice's rather than ours, and deliberately not reproduced. It fires on a
+// valid anchor — `colOff` equal to the cell extent is how a picture snapped to a column edge is
+// written — and shrinks the picture below the size its own `a:ext cx="1207080" cy="594360"`
+// states; 26.2.4.2 draws the *same picture* at the full 95.046 x 46.800 pt from the FODS spelling,
+// 24.2.7.2 draws the XLSX at 95.017 x 46.772, and the tree's own C++ would give a third answer
+// again. We draw 95.074 x 46.800, which is the anchor arithmetic the file states.
+//
+// Reach of the gap: 0.113 pt on a far edge, on an XLSX drawing whose `to` offset reaches the last
+// 5/100 mm of its end cell. It moves no gate column and clears every other comparison's tolerance;
+// this one asserts at 0.1 pt and misses by 0.070 pt across and 0.042 pt down.
 public sealed class SheetDrawingComparisonTests : IDisposable
 {
     /// <summary>A tenth of a point, two twips, as everywhere else in this project.</summary>
@@ -52,7 +82,7 @@ public sealed class SheetDrawingComparisonTests : IDisposable
     [InlineData("sheet-rich-text.xlsx")]
     public void APictureIsDrawnWhereLibreOfficeDrawsIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfImageDraw> ours = PdfPaints.ReadImageDraws(Ours(path));

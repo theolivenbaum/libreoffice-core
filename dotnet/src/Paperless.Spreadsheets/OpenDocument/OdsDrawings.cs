@@ -11,7 +11,8 @@ using Paperless.Vector;
 namespace Paperless.Spreadsheets.OpenDocument;
 
 /// <summary>
-/// The pictures anchored on one ODF sheet: <c>draw:frame</c> inside a <c>table:table-cell</c>.
+/// The drawings anchored on one ODF sheet: any <c>draw:</c> element inside a
+/// <c>table:table-cell</c> or a <c>table:shapes</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -105,9 +106,9 @@ internal static class OdsDrawings
         XElement? shapes = table.Element(XName.Get("shapes", OdfNamespaces.Table));
         if (shapes is null) return;
 
-        foreach (XElement frame in shapes.Elements(XName.Get("frame", OdfNamespaces.Draw)))
+        foreach (XElement shape in Shapes(shapes))
         {
-            if (Read(file, frame, 0, 0, sheetAnchored: true) is { } drawing) drawings.Add(drawing);
+            if (Read(file, shape, 0, 0, sheetAnchored: true) is { } drawing) drawings.Add(drawing);
         }
     }
 
@@ -123,9 +124,9 @@ internal static class OdsDrawings
 
             int repeat = Repeat(cell, "number-columns-repeated");
 
-            foreach (XElement frame in cell.Elements(XName.Get("frame", OdfNamespaces.Draw)))
+            foreach (XElement shape in Shapes(cell))
             {
-                if (Read(file, frame, row, column) is { } drawing) drawings.Add(drawing);
+                if (Read(file, shape, row, column) is { } drawing) drawings.Add(drawing);
             }
 
             column += Math.Min(repeat, MaxRepeat);
@@ -134,30 +135,163 @@ internal static class OdsDrawings
         }
     }
 
+    /// <summary>
+    /// The drawing elements a cell or a <c>table:shapes</c> holds, however they are wrapped.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Two wrappers stand between a cell and its pictures, and reading only the cell's own
+    /// children misses both.</strong> A <c>draw:g</c> is a group — a sheet's watermark is usually
+    /// one — and a <c>draw:a</c> is a hyperlink around a shape, which ODF states as a wrapper
+    /// element rather than as an attribute (ODF 1.3 §10.4.14). Both are transparent to placement:
+    /// neither carries a rectangle of its own, and a child's <c>svg:x</c> or <c>draw:transform</c>
+    /// is measured from the same origin whether or not it is inside one.
+    /// </para>
+    /// <para>
+    /// Censused over the 307 converted <c>.ods</c>: <strong>89 frames sit inside a
+    /// <c>draw:g</c></strong> — 72 of them in <c>SIL_TDB648.ods</c>, whose 74 frames are all but
+    /// two of the pictures that make it 88 pages against our 60 — and <strong>33 inside a
+    /// <c>draw:a</c></strong>, across thirteen documents. So this is where that document's missing
+    /// pictures went, and the <c>draw:transform</c> below is the second gate rather than the first:
+    /// a grouped frame stating a plain <c>svg:x</c> was missed too.
+    /// </para>
+    /// <para>
+    /// The group is <em>not</em> read as a drawing of its own. ODF gives a group no rectangle: its
+    /// children carry absolute coordinates in the anchor's own space, so each child is its own
+    /// one-cell-anchored drawing and the union of them is what
+    /// <see cref="Layout.SheetDrawingArea"/> and <see cref="Layout.SheetEmptyPages"/> already take.
+    /// The <c>table:end-cell-address</c> LibreOffice writes on the group is its cached bounding
+    /// anchor for that same union.
+    /// </para>
+    /// <para>
+    /// <strong>Every drawing element is yielded, not only <c>draw:frame</c>.</strong> A frame is
+    /// ODF's wrapper for an <em>embedded</em> thing — a picture, a chart, an OLE object — and a
+    /// shape drawn on the sheet is not embedded in anything: a text box is a
+    /// <c>draw:custom-shape</c>, and rectangles, ellipses, lines, connectors and form controls are
+    /// each their own element. Calc reads all of them through one shape context
+    /// (<c>ScXMLTableRowCellContext</c> hands any <c>draw:</c> child to
+    /// <c>XMLShapeImportHelper</c>) and prints them all through <c>PrintDrawingLayer</c>.
+    /// Censused over the 307 converted <c>.ods</c>: <strong>604 <c>draw:custom-shape</c> in 54
+    /// documents</strong> sit in cells, of which 137 in 32 documents carry text, against 495
+    /// frames of which none does. <see cref="Read(OdfFile, XElement, int, int, bool)"/> decides
+    /// what each of them is worth drawing.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<XElement> Shapes(XElement container)
+    {
+        foreach (XElement child in container.Elements())
+        {
+            if (child.Name.NamespaceName != OdfNamespaces.Draw) continue;
+
+            if (child.Name.LocalName is "g" or "a")
+            {
+                foreach (XElement nested in Shapes(child)) yield return nested;
+            }
+            else
+            {
+                yield return child;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads one drawing element into the drawing it puts on the sheet, or null when it puts
+    /// nothing there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Four kinds of element reach this: a frame holding a picture, a frame holding an embedded
+    /// object, a shape carrying text, and — since round 84 — a shape carrying nothing but a fill
+    /// or an outline. That last one is the largest of the four: censused over the 307 converted
+    /// <c>.ods</c>, <b>444 custom shapes in 26 documents carry ink and no text</b>, against 198
+    /// that carry both.
+    /// </para>
+    /// <para>
+    /// <strong>Answering null for one of those cost a page count as well as a picture</strong>,
+    /// because a drawing reaches the printed block through a different route from every cell
+    /// question: <c>ScDrawLayer::GetPrintArea</c> takes the bounding rectangle of <em>every</em>
+    /// object on the sheet's draw page — its only exclusion is the hidden-comment layer, and the
+    /// line above the layer test reads <c>//TODO: test Flags (hidden?)</c>
+    /// (<c>sc/source/core/data/drwlayer.cxx</c>:1397-1414) — and
+    /// <c>ScDocument::GetPrintArea</c> maxes that into the cells' answer
+    /// (<c>documen2.cxx</c>:644-664). So a shape the reader drops narrows the print area of every
+    /// sheet carrying one, which is what <see cref="Layout.SheetDrawingArea"/> already says and
+    /// this reader was quietly defeating.
+    /// </para>
+    /// <para>
+    /// A shape carrying <em>none</em> of the four is still answered null, and that remains a
+    /// deliberate under-count of the same rule: a <c>draw:control</c>, and any shape whose style
+    /// states <c>draw:fill="none"</c> and <c>draw:stroke="none"</c>, is an object on Calc's draw
+    /// page and widens its block. Counting them is a change of a different size — 78 controls and
+    /// 630 unfilled shapes in the column — and it is measured rather than assumed in
+    /// <c>probes/sheet-fill-r84</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="file">The document, for its package and its styles.</param>
+    /// <param name="frame">The <c>draw:</c> element.</param>
+    /// <param name="row">The zero-based row of the anchoring cell.</param>
+    /// <param name="column">Its zero-based column.</param>
+    /// <param name="sheetAnchored">True for a <c>table:shapes</c> child, which names no cell.</param>
     private static SheetDrawing? Read(
         OdfFile file, XElement frame, int row, int column, bool sheetAnchored = false)
     {
         XElement? image = frame.Element(XName.Get("image", OdfNamespaces.Draw));
         XElement? objectFrame = frame.Element(XName.Get("object", OdfNamespaces.Draw));
 
+        Length width =
+            OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "width")) ?? Length.Zero;
+        Length height =
+            OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "height")) ?? Length.Zero;
+
         Length x = OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "x")) ?? Length.Zero;
         Length y = OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "y")) ?? Length.Zero;
+
+        // A turned frame states no coordinate pair at all; its rectangle is the transform's.
+        Turned? turned = Placement(frame, width, height);
+        if (turned is { } placed)
+        {
+            x = placed.X;
+            y = placed.Y;
+            width = placed.Width;
+            height = placed.Height;
+        }
+
+        // Read before the branches below because a shape's ink is the same question whatever
+        // else it holds, and because the fill of a frame that turns out to hold a picture is
+        // simply unused rather than wrong.
+        OdsShapeInk.Ink ink = OdsShapeInk.Read(file.Styles, frame);
 
         SheetDrawing drawing = new()
         {
             Anchor = sheetAnchored ? SheetAnchorKind.Absolute : SheetAnchorKind.OneCell,
             From = new SheetCellPoint(column, x, row, y),
             Position = new DocPoint(x, y),
-            Extent = new DocSize(
-                OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "width")) ?? Length.Zero,
-                OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "height")) ?? Length.Zero),
+            Extent = new DocSize(width, height),
             Name = Attribute(frame, OdfNamespaces.Draw, "name"),
             Description = Description(frame),
         };
 
         // A sheet-anchored frame states no end cell — it is not fastened to the grid at all — so
         // the two-cell reading below is not even attempted for one.
+        //
+        // **Nor is it attempted for a shape whose rectangle came from a `draw:transform`, because
+        // the two are the same rectangle stated twice and combining them is a union of both.**
+        // A turned shape states no `svg:x`, so its top-left corner is the transform's — which may
+        // be well to the *left* of the anchor cell — while `table:end-cell-address` is Calc's
+        // cached far corner for the same object. Taking one from each gives a box neither of them
+        // describes. Measured on `Foreign_SA-CAT-I_and_CAT-II-III_Pub_0.ods`, whose `TextBox 1` is
+        // turned a half turn and states an end cell of AS3: the columns to AS are 47.73 inches
+        // where the shape's own `svg:width` is 23.66, and the union widened the printed block far
+        // enough to cost **four pages against 26.2.4.2's sixteen**. 26.2.4.2 prints sixteen with
+        // the end cell present and sixteen with it deleted, so the end cell decides nothing there.
+        //
+        // The end cell does decide the box of a shape that states `svg:x`, and that is measured
+        // rather than assumed — `probes/ods-draw-r82/endcell.py` puts a right-aligned text box
+        // 1 inch wide at A2 with an end cell of E2 and 26.2.4.2 draws its line at x 289.644
+        // against 73.644 without the end cell, which is the four inches the end cell states.
+        // **Reach: 2 shapes in 2 of the 307 converted `.ods` state both.**
         if (!sheetAnchored
+            && turned is null
             && EndCell(Attribute(frame, OdfNamespaces.Table, "end-cell-address")) is { } end)
         {
             drawing = drawing with
@@ -195,11 +329,171 @@ internal static class OdsDrawings
             return chart with { Image = fallback, Vector = drawn };
         }
 
-        if (image is null) return null;
+        // A shape that embeds nothing may still carry text, and a text box is exactly that: an
+        // `mso-spt202` or `ooxml-rect` custom shape whose `text:p` children are its body. That
+        // text is the shape's, not the anchoring cell's — see OdsShapeText.
+        //
+        // And it may carry ink instead of, or as well as, that text: 444 of the column's custom
+        // shapes are inked and textless.
+        //
+        // **A shape with neither is still a drawing**, and answering null for one was costing a
+        // page. Every object on Calc's draw page widens the printed block —
+        // `ScDrawLayer::GetPrintArea` skips only `SC_LAYER_HIDDEN`
+        // (`sc/source/core/data/drwlayer.cxx`:1397-1414) — so a rectangle stating
+        // `draw:fill="none" draw:stroke="none"` past the last cell keeps a page alive with
+        // nothing on it. Measured on `features/sheet-shape-ink.ods`, whose fifth shape is exactly
+        // that: 26.2.4.2 prints **two** pages, the second of them empty, and this reader printed
+        // one until it stopped dropping the shape. The SpreadsheetML reader has always kept
+        // one — an `xdr:sp` produces a drawing whatever it holds — which is why the same fixture
+        // as `.xlsx` was already two pages of two.
+        if (image is null)
+        {
+            SheetShapeText? shapeText = OdsShapeText.Read(file.Styles, frame);
+
+            // **A turned shape's ink goes on a part, for the reason a turned picture's does.**
+            // `Placement` answers the *bounding* box of the transform, which is what the print
+            // area and the empty-page test want and what a rotated star does not fill: painting
+            // the geometry into it draws a star as much as 20% too large and squared up.
+            // `SheetDrawingPart` is the only thing that carries an angle, so the shape's own
+            // untuned rectangle is centred in the box and turned there — the same arithmetic the
+            // picture branch below does. **Reach: 255 turned `draw:custom-shape` in 8 of the 307
+            // converted `.ods`**, 242 of them the reward-chart template's own stamps.
+            if (turned is { Degrees: not 0 } inked && ink.HasInk)
+            {
+                return drawing with
+                {
+                    Text = shapeText,
+                    Parts =
+                    [
+                        new SheetDrawingPart(
+                            Fraction(inked.Width - inked.Shape.Width, 2 * inked.Width),
+                            Fraction(inked.Height - inked.Shape.Height, 2 * inked.Height),
+                            Fraction(inked.Shape.Width, inked.Width),
+                            Fraction(inked.Shape.Height, inked.Height),
+                            inked.Degrees)
+                        {
+                            Fill = ink.Fill,
+                            Stroke = ink.Stroke,
+                            StrokeWidth = ink.StrokeWidth,
+                            Preset = ink.Preset,
+                        },
+                    ],
+                };
+            }
+
+            return drawing with
+            {
+                Text = shapeText,
+                Fill = ink.Fill,
+                Stroke = ink.Stroke,
+                StrokeWidth = ink.StrokeWidth,
+                Preset = ink.Preset,
+            };
+        }
 
         (RasterImage? raster, Lazy<VectorImage>? vector) = Load(file, image);
+
+        // A turned picture is carried as a part rather than on the drawing, because a part is the
+        // one thing that has an angle: the drawing's own rectangle is the *bounding* box, which is
+        // what the print area and the empty-page test want, and the part inside it is the picture's
+        // own box, which is what gets painted and turned. See <see cref="SheetDrawingPart"/>.
+        if (turned is { Degrees: not 0 } box && (raster is not null || vector is not null))
+        {
+            return drawing with
+            {
+                Parts =
+                [
+                    new SheetDrawingPart(
+                        Fraction(box.Width - box.Shape.Width, 2 * box.Width),
+                        Fraction(box.Height - box.Shape.Height, 2 * box.Height),
+                        Fraction(box.Shape.Width, box.Width),
+                        Fraction(box.Shape.Height, box.Height),
+                        box.Degrees)
+                    {
+                        Image = raster,
+                        Vector = vector,
+                    },
+                ],
+            };
+        }
+
         return drawing with { Image = raster, Vector = vector };
     }
+
+    /// <summary>The rectangle a <c>draw:transform</c> puts a frame in, and how far it is turned.</summary>
+    /// <param name="X">The bounding box's left edge, in the anchor's own space.</param>
+    /// <param name="Y">Its top edge.</param>
+    /// <param name="Width">The bounding box's width.</param>
+    /// <param name="Height">Its height.</param>
+    /// <param name="Degrees">How far the frame is turned clockwise, in degrees.</param>
+    /// <param name="Shape">The frame's own untuned size, which the box encloses.</param>
+    private readonly record struct Turned(
+        Length X, Length Y, Length Width, Length Height, double Degrees, DocSize Shape);
+
+    /// <summary>
+    /// Where a <c>draw:transform</c> puts a frame that states no <c>svg:x</c> or <c>svg:y</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice writes a turned or sheared object with a transform instead of a coordinate pair
+    /// — <c>skewX (0.0222) rotate (0.4824) translate (0.4622in 2.9827in)</c> is
+    /// <c>SIL_TDB648.ods</c>'s watermark — and leaves <c>svg:width</c> and <c>svg:height</c> on the
+    /// element as the shape's own, untuned size. So a reader that takes the two lengths and no
+    /// transform places every such frame on the anchor cell's corner, and one that takes neither
+    /// drops it entirely.
+    /// </para>
+    /// <para>
+    /// <strong>What is returned is the bounding box, because that is the rectangle Calc's two
+    /// page-deciding questions ask for.</strong> <c>ScDrawLayer::GetPrintArea</c> widens the
+    /// printed block to cover every object and <c>ScDocument::HasAnyDraw</c> keeps a page an object
+    /// overlaps; both go through <c>GetCurrentBoundRect</c>, which is the turned box rather than
+    /// the shape's own. The picture inside it keeps its own size and angle as a
+    /// <see cref="SheetDrawingPart"/> — the same shape the SpreadsheetML reader already produces
+    /// for a grouped, turned watermark, and the reason <see cref="SheetDrawingBounds"/> exists.
+    /// </para>
+    /// <para>
+    /// Checked against 26.2.4.2's own PDF of <c>SIL_TDB648.ods</c>: its page 4 draws three copies
+    /// of that watermark 439.2 × 283.3 pt, against the 440.7 × 282.5 this computes from a
+    /// 455.5 × 80.3 pt frame turned 27.64°, and the vertical distance between two of them is
+    /// 325.4 pt against the 325.4 pt the two <c>translate</c> pairs state.
+    /// </para>
+    /// </remarks>
+    private static Turned? Placement(XElement frame, Length width, Length height)
+    {
+        if (Attribute(frame, OdfNamespaces.SvgCompatible, "x") is not null) return null;
+        if (OdfTransform.Read(frame) is not { } transform) return null;
+
+        (double x, double y) = (transform.E, transform.F);
+        double right = (width.Emu * transform.A) + x;
+        double bottom = (width.Emu * transform.B) + y;
+        double downX = (height.Emu * transform.C) + x;
+        double downY = (height.Emu * transform.D) + y;
+        double farX = (width.Emu * transform.A) + (height.Emu * transform.C) + x;
+        double farY = (width.Emu * transform.B) + (height.Emu * transform.D) + y;
+
+        double minX = Math.Min(Math.Min(x, right), Math.Min(downX, farX));
+        double maxX = Math.Max(Math.Max(x, right), Math.Max(downX, farX));
+        double minY = Math.Min(Math.Min(y, bottom), Math.Min(downY, farY));
+        double maxY = Math.Max(Math.Max(y, bottom), Math.Max(downY, farY));
+
+        // The angle the matrix turns through, taken from the image of the x axis. A shear leaves
+        // that vector alone, so this is the rotation and not the whole transform — which is what a
+        // part wants, its box being axis-aligned before it is turned.
+        double degrees = Math.Atan2(transform.B, transform.A) * 180.0 / Math.PI;
+
+        return new Turned(
+            Length.FromEmu((long)Math.Round(minX)),
+            Length.FromEmu((long)Math.Round(minY)),
+            Length.FromEmu((long)Math.Round(maxX - minX)),
+            Length.FromEmu((long)Math.Round(maxY - minY)),
+            degrees,
+            new DocSize(width, height));
+    }
+
+    /// <summary>One length as a fraction of another, or zero when the second is degenerate.</summary>
+    private static double Fraction(Length part, Length whole)
+        => whole.Emu == 0 ? 0 : part.Emu / (double)whole.Emu;
+
 
     /// <summary>
     /// The chart a <c>draw:object</c> holds, or null when it holds something else.

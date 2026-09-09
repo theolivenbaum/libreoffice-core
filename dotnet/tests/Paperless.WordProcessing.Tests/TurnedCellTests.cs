@@ -341,7 +341,7 @@ public sealed class TurnedCellTests
     [Fact]
     public void VerticalAlignmentPlacesTheStackAcrossTheCell()
     {
-        Length Origin(CellVerticalAlignment alignment)
+        Length Origin(VerticalTextAlignment alignment)
         {
             PageTable table = Table(
                 CellTextDirection.BottomToTopLeftToRight,
@@ -354,9 +354,9 @@ public sealed class TurnedCellTests
             return Map(cells[0].ContentTransform!.Value, Length.Zero, Length.Zero).X;
         }
 
-        Length top = Origin(CellVerticalAlignment.Top);
-        Length middle = Origin(CellVerticalAlignment.Middle);
-        Length bottom = Origin(CellVerticalAlignment.Bottom);
+        Length top = Origin(VerticalTextAlignment.Top);
+        Length middle = Origin(VerticalTextAlignment.Middle);
+        Length bottom = Origin(VerticalTextAlignment.Bottom);
 
         top.ShouldBeLessThan(middle);
         middle.ShouldBeLessThan(bottom);
@@ -409,7 +409,7 @@ public sealed class TurnedCellTests
         Length? rowHeight = null,
         CellPadding? padding = null,
         Length? labelColumn = null,
-        CellVerticalAlignment alignment = CellVerticalAlignment.Top)
+        VerticalTextAlignment alignment = VerticalTextAlignment.Top)
         => new()
         {
             ColumnWidths = [labelColumn ?? Length.FromTwips(500), Length.FromTwips(6000)],

@@ -494,7 +494,7 @@ internal sealed partial class PptxSlideLayout
         if (depth >= MaxGroupDepth) return;
 
         XElement? graphic = Drawing.Child(Drawing.Child(frame, "graphic"), "graphicData");
-        if (Drawing.Attribute(graphic, "uri") != PptxDiagram.Uri) return;
+        if (Drawing.Attribute(graphic, "uri") != DiagramParts.Uri) return;
         if (PartOf(frame, slide) is not { } part) return;
 
         XElement? transform = Ppt.Child(frame, "xfrm");
@@ -505,9 +505,9 @@ internal sealed partial class PptxSlideLayout
         // baked tree is what the authoring application itself drew, so preferring it keeps a
         // modern file independent of the evaluator agreeing with PowerPoint; LibreOffice decides
         // the same way in one line — diagram.cxx:701, bCreate = getExtDrawings().empty().
-        if ((PptxDiagram.Baked(_file, part, graphic!)
-             ?? PptxDiagram.Evaluated(
-                 _file,
+        if ((DiagramParts.Baked(_file.Diagrams, part, graphic!)
+             ?? DiagramParts.Evaluated(
+                 _file.Diagrams,
                  part,
                  graphic!,
                  ThemePart(slide),
@@ -634,11 +634,33 @@ internal sealed partial class PptxSlideLayout
             return;
         }
 
-        (GraphicsPath shaft, List<PlacedShape> markers) = SlideLineEnds.Apply(
-            shape.Outline, stroke, shape.HeadEnd, shape.TailEnd, shape.Name);
+        (GraphicsPath shaft, List<GraphicsPath> markers) =
+            LineEnds.Apply(shape.Outline, stroke, shape.HeadEnd, shape.TailEnd);
 
-        shapes.Add(shape with { Outline = shaft });
-        shapes.AddRange(markers);
+        // Whichever of the two painted paths *was* the whole outline follows it onto the shaft; a
+        // subpath split that made one of them a proper part of the outline is left alone, because
+        // shortening a shaft says nothing about which of a preset's subpaths are painted.
+        shapes.Add(shape with
+        {
+            Outline = shaft,
+            FillOutline =
+                ReferenceEquals(shape.FillOutline, shape.Outline) ? shaft : shape.FillOutline,
+            StrokeOutline =
+                ReferenceEquals(shape.StrokeOutline, shape.Outline) ? shaft : shape.StrokeOutline,
+        });
+
+        // A marker is a filled polygon beside the shaft, so it becomes a shape of its own — with
+        // the line's name, the line's paint, and no line of its own.
+        foreach (GraphicsPath marker in markers)
+        {
+            shapes.Add(new PlacedShape
+            {
+                Name = shape.Name,
+                Outline = marker,
+                Bounds = DocRect.Empty,
+                Fill = stroke.Paint,
+            });
+        }
     }
 
     /// <summary>
@@ -888,9 +910,14 @@ internal sealed partial class PptxSlideLayout
             ? null
             : CustomShapeGeometry.Custom(custom, local.Size);
 
-        GraphicsPath outline = ShapeTransform.Apply(
-            placement,
-            own?.Outline ?? SlidePresetGeometry.Outline(preset, local.Size, adjustment));
+        CustomShapeGeometry.Geometry resolved =
+            own ?? SlidePresetGeometry.Of(preset, local.Size, adjustment);
+
+        GraphicsPath outline = ShapeTransform.Apply(placement, resolved.Outline);
+
+        // What is filled, what is stroked and what is shaded, all of which a subpath states for
+        // itself. See `SlidePresetGeometry.Painted`.
+        PaintedGeometry painted = SlidePresetGeometry.Painted(resolved, placement, outline);
 
         FillContext fills = new(slide, theme.Colours, local.Size, placement);
         DocRect bounds = ShapeTransform.PlacedBounds(placement, local.Size);
@@ -903,10 +930,41 @@ internal sealed partial class PptxSlideLayout
         XElement? themedFill = theme.Styles?.Fill(style, theme.Colours);
         XElement? themedLine = theme.Styles?.Line(style, theme.Colours);
 
+        // WordArt replaces the whole shape, so it is settled before the rest of it is composed:
+        // the curves become the outline, the first run's colour becomes the fill, the shape's own
+        // fill, pen and shadow go, and the text leaves the text layer. See `SlideFontwork`.
+        //
+        // The box is scaled into slide units for the same reason a text rectangle is: the warp is
+        // fitted against a font size, and a group scales its children's coordinates without
+        // scaling their type. The scale then comes back off the matrix that places the curves. The
+        // mirror stays on it, unlike the one that carries text — `EnhancedCustomShapeEngine::render2`
+        // mirrors the Fontwork object with everything else, so a flipped WordArt shape reads
+        // backwards, which is what it does in the reference.
+        SlideFontwork.Drawing warp = SlideFontwork.Read(
+            WarpedBodyOf(shape, theme),
+            ShapeTransform.Scaled(local, scaleX, scaleY).Size,
+            _fonts);
+
+        if (warp.Outline is { } warped)
+        {
+            return new PlacedShape
+            {
+                Name = Name(shape),
+                Outline = ShapeTransform.Apply(
+                    ShapeTransform.WithoutScale(placement, scaleX, scaleY), warped),
+                Bounds = bounds,
+                Fill = warp.Fill,
+                Picture = Picture(shape, slide, bounds),
+            };
+        }
+
         return new PlacedShape
         {
             Name = Name(shape),
             Outline = outline,
+            FillOutline = painted.Fill,
+            StrokeOutline = painted.Stroke,
+            ShadedParts = painted.ShadedParts,
             Bounds = bounds,
             Fill = ShapeFill(shape, properties, inherited, themedFill, fills, groupFill),
             Picture = Picture(shape, slide, bounds),
@@ -1098,6 +1156,38 @@ internal sealed partial class PptxSlideLayout
     }
 
     /// <summary>
+    /// The shape's body when it is warped, and null otherwise — including when it holds no text.
+    /// </summary>
+    /// <remarks>
+    /// Gated on the markup before the body is read, because reading one is not free and a warp is
+    /// rare: <c>a:prstTxWarp</c> appears on 39 of the 112 corpus decks and 722 times, and 712 of
+    /// those state <c>textNoShape</c> or <c>textPlain</c>. Ten occurrences across two decks bend
+    /// anything at all.
+    /// </remarks>
+    private SlideTextBody? WarpedBodyOf(XElement shape, SlideTheme theme)
+    {
+        XElement? body = Ppt.Child(shape, "txBody");
+        if (body is null) return null;
+
+        bool warped = StatesWarp(Drawing.Child(body, "bodyPr"));
+        if (!warped && _styles?.BodyPropertiesFor(shape) is { } inheritedBody)
+        {
+            foreach (XElement? properties in inheritedBody)
+            {
+                if (StatesWarp(properties)) { warped = true; break; }
+            }
+        }
+
+        if (!warped) return null;
+
+        return BodyOf(shape, theme) is { IsTextPath: true } read ? read : null;
+
+        static bool StatesWarp(XElement? properties)
+            => Fontwork.IsWarp(
+                Drawing.Child(properties, "prstTxWarp")?.Attribute("prst")?.Value);
+    }
+
+    /// <summary>
     /// The text a shape draws, laid out in its text rectangle.
     /// </summary>
     /// <remarks>
@@ -1125,8 +1215,9 @@ internal sealed partial class PptxSlideLayout
         if (BodyOf(shape, theme) is not { } body) return null;
 
         // Fontwork is a picture of words rather than words, in the reference's output and so in
-        // ours. See SlideTextBody.IsTextPath for what LibreOffice does instead and for why the
-        // unwarped runs are not a better answer than none.
+        // ours: the curves are built in `SlideFontwork` and replace the shape outright, and a warp
+        // whose geometry is not implemented draws nothing at all. Either way no run reaches the
+        // text layer. See SlideTextBody.IsTextPath.
         if (body.IsTextPath) return null;
 
         // The text area's own turn, outside the body's and inside the shape's — see
@@ -1521,108 +1612,26 @@ internal sealed partial class PptxSlideLayout
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>A path gradient's stop 0 is at the centre, and a linear one's is at the start of its
-    /// ramp.</b> That is not obvious from the file and is the mapping most easily got backwards:
-    /// LibreOffice <em>reverses</em> the stop list for a path gradient
-    /// (<c>fillproperties.cxx:544</c>) before handing it to a model whose first stop paints the
-    /// outer edge, so the two reversals cancel and DrawingML's own order is already
-    /// centre-outwards. ODF says the opposite and needs the swap; see
-    /// <see cref="OpenDocument.OdpSlideLayout"/>.
+    /// Everything DrawingML decides about a gradient — that a path gradient's stop 0 is at the
+    /// centre while a linear one's is at the start of its ramp, that <c>path="shape"</c> is drawn
+    /// as a rectangle, how <c>a:fillToRect</c> becomes a focus — is in
+    /// <see cref="DrawingGradient.Paint"/>, because it means the same thing wherever the element
+    /// appears. It sat here until a Word document needed it and could not reach it; see the
+    /// remarks there for what that cost.
     /// </para>
     /// <para>
-    /// <c>a:path path="shape"</c> — a gradient following a custom outline — is drawn as a
-    /// rectangular one, which is what LibreOffice does with it too: its comment says
-    /// "XML_rect or XML_shape, but the latter is not implemented".
-    /// </para>
-    /// <para>
-    /// <strong>A <c>path="circle"</c> whose focus lands on a corner is a radial gradient and not
-    /// a diagonal linear one.</strong>
-    /// [24.2.7-audit: FIXED 2026-08-21, slides-r59 — round 39 measured the corner case as
-    /// <c>draw:style="linear"</c> with a 45° angle on the superseded binary and this reader was
-    /// built on that. Re-running that round's own four-arm fixture through 26.2.4.2's flat-ODF
-    /// export gives <c>radial</c> on all four, the two corner arms included:
-    /// <c>l="100000" t="100000"</c> exports <c>draw:style="radial" draw:cx="100%"
-    /// draw:cy="100%"</c> and <c>r="99000" b="99000"</c> exports <c>radial</c> at
-    /// <c>0%/0%</c>. The corner branch is removed. Corpus reach, counted on what the parts
-    /// state: 67 corner-focus circle paths in 7 documents — 6 slides decks and one words
-    /// document, with 42 of the 67 in two infographic funnel decks.]
+    /// What is left here is the one thing that is the slide's own: the space the paint is drawn
+    /// into. A rotated shape fills its <em>local</em> box and carries the rotation in the paint's
+    /// transform, so the gradient turns with the shape rather than staying square to the page.
     /// </para>
     /// </remarks>
     private static Paint? Gradient(XElement? element, in FillContext context)
     {
-        if (DrawingFill.ReadGradient(element) is not { Stops.Count: > 0 } gradient) return null;
-
-        List<GradientStop> stops = [];
-        foreach (DrawingGradientStop stop in gradient.Stops)
-        {
-            if (stop.Colour.Resolve(context.Theme, placeholder: null) is not { } colour) continue;
-            stops.Add(new GradientStop(stop.Position, colour));
-        }
-
-        if (stops.Count == 0) return null;
-
         (DocRect box, AffineTransform space) = GradientSpace(context);
 
-        if (gradient.Path is null)
-        {
-            double radians = (gradient.Angle ?? 0) * Math.PI / 180.0;
-            return SlideGradients.Linear(box, Math.Cos(radians), Math.Sin(radians), stops)
-                with { Transform = space };
-        }
-
-        // a:fillToRect states the inner rectangle the gradient converges on; its centre is what
-        // LibreOffice keeps, as (MAX_PERCENT + l - r) / 2, truncated to whole per cent and
-        // clamped into the box (fillproperties.cxx:531-537).
-        int cx = FocusPerCent(gradient.FillToRect.Left, gradient.FillToRect.Right);
-        int cy = FocusPerCent(gradient.FillToRect.Top, gradient.FillToRect.Bottom);
-
-        DocPoint centre = new(
-            box.Left + (box.Width * (cx / 100.0)),
-            box.Top + (box.Height * (cy / 100.0)));
-
-        GradientKind kind = gradient.Path == "circle"
-            ? GradientKind.Radial
-            : GradientKind.Rectangular;
-
-        return SlideGradients.Centred(kind, box, centre, stops) with { Transform = space };
-    }
-
-    /// <summary>
-    /// One axis of an <c>a:fillToRect</c>'s centre, as the whole number of per cent inside the
-    /// filled box that LibreOffice keeps.
-    /// </summary>
-    /// <remarks>
-    /// Both halves matter and both are observable. The <b>clamp</b> is what makes the stock
-    /// Office theme's gradient a gradient at all: its <c>fillToRect</c> is
-    /// <c>t="-80000" b="180000"</c>, a centre 80% of the box above its own top edge, and
-    /// unclamped every point of the box sits past the ramp's last stop and the fill comes out
-    /// flat. On the probe deck that is 56.94% of the page's pixels against 0.15%.
-    /// <b>Its measured corpus reach is nought</b>, and the distinction is worth keeping: 79 of the
-    /// 114 zip-container decks state that exact <c>fillToRect</c>, all of them in a theme's
-    /// <c>a:fillStyleLst</c>, and not one of them changed a pixel when this landed — a theme's
-    /// third fill style is almost never what a drawn shape resolves to. Correct, tested, and
-    /// waiting for a document. The <b>truncation</b> to whole per cent decides the corner test in
-    /// <see cref="Gradient"/>. Measured against the superseded binary, a stated centre of 0.5%
-    /// was treated as 0 and took a *linear* branch there, and 1% did not
-    /// (<c>probes/slides-r39/gradient-path.md</c>).
-    ///
-    /// [24.2.7-audit: VERIFIED 2026-08-21, slides-r59 — the truncation and the clamp both still
-    /// hold on 26.2.4.2, and the branch they fed does not. Re-run of round 39's own four-arm
-    /// fixture through the reference's flat-ODF export: <c>l="0" r="99000"</c> (0.5%) exports
-    /// <c>draw:cx="0%"</c> and <c>l="0" r="98000"</c> (1%) exports <c>draw:cx="1%"</c>, so the
-    /// truncation is intact; <c>t="-80000" b="180000"</c> exports <c>draw:cy="0%"</c>, so the
-    /// clamp is intact. What changed is <see cref="Gradient"/>'s corner test — see the marker
-    /// there.]
-    /// </remarks>
-    private static int FocusPerCent(double nearInset, double farInset)
-    {
-        // Back to the file's own thousandths of a per cent before truncating: a stated 98000
-        // must not arrive as 0.9999999 and fall on the wrong side of the corner test.
-        long near = (long)Math.Round(nearInset * 100000);
-        long far = (long)Math.Round(farInset * 100000);
-
-        // Both divisions truncate towards zero, as the C++ integer arithmetic does.
-        return (int)Math.Clamp((100000 + near - far) / 2 / 1000, 0, 100);
+        return DrawingGradient.Paint(element, context.Theme, box) is { } paint
+            ? paint with { Transform = space }
+            : null;
     }
 
     /// <summary>
@@ -1917,7 +1926,7 @@ internal sealed partial class PptxSlideLayout
     }
 
     /// <summary>The marker one end of a line carries, from its own <c>a:ln</c> or its placeholder's.</summary>
-    private static SlideLineEnd LineEnd(XElement? properties, XElement?[] inherited, string which)
+    private static LineEnd LineEnd(XElement? properties, XElement?[] inherited, string which)
     {
         foreach (XElement? source in (XElement?[])[properties, .. inherited])
         {
@@ -1928,7 +1937,7 @@ internal sealed partial class PptxSlideLayout
             string? type = Drawing.Attribute(end, "type");
             if (type is null or "none") return default;
 
-            return new SlideLineEnd(
+            return new LineEnd(
                 type, Drawing.Attribute(end, "w"), Drawing.Attribute(end, "len"));
         }
 
@@ -1942,11 +1951,32 @@ internal sealed partial class PptxSlideLayout
         _ => LineCap.Butt,
     };
 
+    /// <summary>
+    /// How an <c>a:ln</c>'s corners are drawn; round when it says nothing, which is most of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The default is round, not mitre.</strong> <c>LineProperties::pushToPropMap</c> sets
+    /// <c>ShapeProperty::LineJoint</c> only when the markup states one of the three children
+    /// (<c>oox/source/drawingml/lineproperties.cxx</c>:491-492), so an <c>a:ln</c> with none leaves
+    /// the draw layer's pool default, and <c>XLineJointItem</c>'s is <c>LineJoint_ROUND</c>
+    /// (<c>include/svx/xlinjoit.hxx</c>:35, <c>svx/source/svdraw/svdattr.cxx</c>:182). Even the
+    /// oox helper falls through to <c>ROUND</c> for a token it does not know
+    /// (<c>lineproperties.cxx</c>:220).
+    /// </para>
+    /// <para>
+    /// Measured rather than only cited: on a probe deck of nine presets each stating an
+    /// <c>a:ln</c> with no join child, 26.2.4.2 writes <c>1 j</c> on all eleven of its stroke
+    /// setups (<c>probes/slides-subpath-paint</c>). The Escher side is the other way round and is
+    /// left alone — <c>msdffimp.cxx</c>:1052 defaults <c>DFF_Prop_lineJoinStyle</c> to
+    /// <c>mso_lineJoinMiter</c> for every shape type but <c>mso_sptMin</c>.
+    /// </para>
+    /// </remarks>
     private static LineJoin Join(XElement line)
     {
-        if (Drawing.Child(line, "round") is not null) return LineJoin.Round;
         if (Drawing.Child(line, "bevel") is not null) return LineJoin.Bevel;
-        return LineJoin.Miter;
+        if (Drawing.Child(line, "miter") is not null) return LineJoin.Miter;
+        return LineJoin.Round;
     }
 
     private static string? Name(XElement shape)

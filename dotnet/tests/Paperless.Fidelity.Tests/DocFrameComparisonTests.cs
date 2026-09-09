@@ -63,7 +63,7 @@ public sealed class DocFrameComparisonTests : IDisposable
     [Fact]
     public void EveryLineStartsWhereLibreOfficeStartsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("frame-wrap.doc");
         List<Line> expected = Reference(path);
@@ -93,7 +93,7 @@ public sealed class DocFrameComparisonTests : IDisposable
     [Fact]
     public void TheWrappedLinesAreIndentedByTheFramesWidthAndItsWrapDistance()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<Line> lines = Drawn(Corpus.Require("frame-wrap.doc"));
         lines.Count.ShouldBeGreaterThan(10, "too few lines to say anything");
@@ -126,7 +126,7 @@ public sealed class DocFrameComparisonTests : IDisposable
     [Fact]
     public void TheFramesOwnTextIsDrawnInsideIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("frame-wrap.doc");
         RecordingDrawingSink sink = Record(path);

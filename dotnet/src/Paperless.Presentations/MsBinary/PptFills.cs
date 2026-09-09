@@ -266,12 +266,12 @@ internal static class PptFills
         // the swap above has been applied.
         if (rectangular)
         {
-            // A centred kind takes the ramp inside out — SlideGradients.Centred wants the centre's
+            // A centred kind takes the ramp inside out — GradientGeometry.Centred wants the centre's
             // colour first, and a BGradient's first stop paints the outer edge.
             DocPoint centre = new(
                 box.Left + (box.Width * focusX), box.Top + (box.Height * focusY));
 
-            return SlideGradients.Centred(
+            return GradientGeometry.Centred(
                 GradientKind.Rectangular,
                 box,
                 centre,
@@ -283,8 +283,8 @@ internal static class PptFills
         double dy = Math.Cos(radians);
 
         return axial
-            ? SlideGradients.Linear(box, dx, dy, SlideGradients.Axial(second, first))
-            : SlideGradients.Linear(
+            ? GradientGeometry.Linear(box, dx, dy, GradientGeometry.Axial(second, first))
+            : GradientGeometry.Linear(
                 box, dx, dy, [new GradientStop(0, second), new GradientStop(1, first)]);
     }
 
@@ -337,7 +337,7 @@ internal static class PptFills
     }
 
     /// <summary>
-    /// A <c>fillAngle</c> as degrees in the convention <see cref="SlideGradients"/> expects.
+    /// A <c>fillAngle</c> as degrees in the convention <see cref="GradientGeometry"/> expects.
     /// </summary>
     /// <remarks>
     /// <c>Fix16ToAngle</c> (<c>msdffimp.cxx:393</c>) negates the 16.16 value and normalises it to

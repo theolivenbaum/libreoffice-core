@@ -116,20 +116,31 @@ public sealed class SheetCellMarginTests
     /// An indent is added to the cell's own margin rather than replacing it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>GetLeftTotal()</c> is <c>pMargin->GetLeftMargin() + nIndent</c>
     /// (<c>output2.cxx:160</c>), so an indented cell in an <c>.xls</c> carries both. D2's
-    /// <c>Ind</c> sits 265.72 pt in on the <c>.xls</c> and 261.38 on the <c>.xlsx</c>, and the
+    /// <c>Ind</c> sits 265.72 pt in on the <c>.xls</c> and 261.67 on the <c>.xlsx</c>, and the
     /// gap is <em>not</em> the margin alone: the three exports of this workbook state three
     /// different indents — the flat ODF puts the same cell at 264.87 — so all this pins is that
     /// the sum matches LibreOffice's own rendering of each file. It is the case that would break
     /// if the margin were dropped where an indent is stated, which is a distinct site from the
     /// unindented one above.
+    /// </para>
+    /// <para>
+    /// <strong>The <c>.xlsx</c> figure was 261.38 and that is 24.2.7.2's answer, not the target's.</strong>
+    /// Rendering all three spellings through both binaries, the <c>.xls</c> lands at 265.720 and the
+    /// flat ODF at 264.869 under each — and the <c>.xlsx</c> at <strong>261.383 under 24.2.7.2 and
+    /// 261.666 under 26.2.4.2</strong>. Only the OOXML spelling moves, because only it derives its
+    /// indent from a space width, and the space reaches Calc as a whole number of twips that
+    /// 26.2.4.2 rounds where 24.2.7.2 truncated. See <c>SheetIndentUnitTests</c> for the six sizes
+    /// that establish the rule and <c>probes/advance-ppem/</c> for the measurement.
+    /// </para>
     /// </remarks>
     [Fact]
     public void AnIndentIsMeasuredOnTopOfTheCellsOwnMargin()
     {
         Run(FirstPage("sheet-cell-text.xls"), "Ind").Origin.X.Points.ShouldBe(265.72, 0.05);
-        Run(FirstPage("sheet-cell-text.xlsx"), "Ind").Origin.X.Points.ShouldBe(261.38, 0.05);
+        Run(FirstPage("sheet-cell-text.xlsx"), "Ind").Origin.X.Points.ShouldBe(261.67, 0.05);
         Run(FirstPage("sheet-cell-text.fods"), "Ind").Origin.X.Points.ShouldBe(264.87, 0.05);
     }
 

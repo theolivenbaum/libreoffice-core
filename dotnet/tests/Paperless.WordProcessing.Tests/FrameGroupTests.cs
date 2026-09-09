@@ -138,7 +138,9 @@ public sealed class FrameGroupTests
             $"""
             <w:drawing xmlns:w="{W}" xmlns:wp="{Wp}" xmlns:a="{A}" xmlns:wps="{Wps}" xmlns:wpg="{Wpg}">
               <wp:anchor>
-                <wp:extent cx="2000000" cy="1000000"/>
+                <!-- What the two members cover, so the fit to `wp:extent` is the identity and the
+                     nested transform is what these assertions read. -->
+                <wp:extent cx="1500000" cy="300000"/>
                 <wp:wrapNone/>
                 <a:graphic><a:graphicData uri="{Wpg}">
                   <wpg:wgp>
@@ -246,10 +248,15 @@ public sealed class FrameGroupTests
             </w:drawing>
             """);
 
+    /// <remarks>
+    /// 200 units tall at 0, 400 and 800, so the three of them cover the group's child space exactly
+    /// and the fit to <c>wp:extent</c> — see <see cref="FrameGroupExtentFitTests"/> — is the identity.
+    /// What is under test here is the child transform, which that would otherwise scale.
+    /// </remarks>
     private static string Member(int y, string text)
         => $"""
            <wps:wsp>
-             <wps:spPr><a:xfrm><a:off x="0" y="{y}"/><a:ext cx="2000" cy="300"/></a:xfrm></wps:spPr>
+             <wps:spPr><a:xfrm><a:off x="0" y="{y}"/><a:ext cx="2000" cy="200"/></a:xfrm></wps:spPr>
              <wps:txbx><w:txbxContent><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:txbxContent></wps:txbx>
            </wps:wsp>
            """;

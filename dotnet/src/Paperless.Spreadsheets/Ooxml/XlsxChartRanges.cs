@@ -53,6 +53,9 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
     private readonly Dictionary<string, XlsxChartTotalsRows> _totals =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, XlsxChartHiddenCells> _hidden =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// A sheet's cells, read once however many times they are asked for.
     /// </summary>
@@ -73,9 +76,23 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
         return table;
     }
 
+    /// <summary>
+    /// A resolver bound to one chart's <c>c:plotVisOnly</c>.
+    /// </summary>
+    /// <param name="plotVisibleOnly">
+    /// What the chart's <c>c:plotVisOnly</c> resolves to. True — the default for anything Excel
+    /// 2010 or later wrote — means a cell in a hidden row or column is not chart data. See
+    /// <see cref="XlsxChartHiddenCells"/>.
+    /// </param>
+    public ChartRangeResolver Resolver(bool plotVisibleOnly)
+        => formula => Resolve(formula, plotVisibleOnly);
+
     /// <summary>The cells a <c>c:f</c> names, or null when it names nothing this can reach.</summary>
     /// <param name="formula">The <c>c:f</c> text.</param>
-    public ChartRangeValues? Resolve(string formula)
+    /// <param name="plotVisibleOnly">
+    /// True when the chart plots visible cells only, which is <c>c:plotVisOnly</c>'s own default.
+    /// </param>
+    public ChartRangeValues? Resolve(string formula, bool plotVisibleOnly = true)
     {
         if (string.IsNullOrWhiteSpace(formula)) return null;
 
@@ -113,10 +130,12 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
 
         Dictionary<(int Row, int Column), ContentTableCell> index = IndexFor(sheet);
         XlsxChartTotalsRows totals = TotalsFor(sheet);
+        XlsxChartHiddenCells hidden = plotVisibleOnly ? HiddenFor(sheet) : XlsxChartHiddenCells.None;
 
         List<string?> labels = new((int)cells);
         List<double?> numbers = new((int)cells);
         bool any = false;
+        bool skippedHidden = false;
 
         for (int row = range.FirstRow; row <= range.LastRow; row++)
         {
@@ -127,17 +146,30 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
                 // the sequence it builds is genuinely one shorter.
                 if (totals.Skips(range, row, column)) continue;
 
+                // A hidden row or column is not chart data unless the chart says otherwise. As
+                // above, the cell is dropped rather than blanked: LibreOffice's own loop
+                // `continue`s past it (chart2uno.cxx:2636-2646).
+                if (hidden.Hides(row, column)) { skippedHidden = true; continue; }
+
                 labels.Add(null);
                 numbers.Add(null);
 
                 if (!index.TryGetValue((row, column), out ContentTableCell? cell)) continue;
 
-                string shown = cell.GetText();
+                string shown = cell.GetOwnText();
                 if (shown.Length > 0) { labels[^1] = shown; any = true; }
 
                 if (NumberOf(cell.Value) is { } number) { numbers[^1] = number; any = true; }
             }
         }
+
+        // A range every cell of which is hidden leaves the *cache* standing, which is the
+        // opposite of what an all-totals range does and is measured rather than reasoned.
+        // 053_Personal_asset_inventory names two ranges wholly inside hidden columns H and I:
+        // 26.2.4.2 draws its six cached points, and stripping the <c:pt> from the chart part —
+        // changing nothing else — makes it draw nothing at all. So the cached points are what
+        // it is drawing there. probes/chart-resid-r75/results.md §2.
+        if (labels.Count == 0 && skippedHidden) return null;
 
         // Every cell of the range was an Excel table's totals row. That is a *resolved* sequence
         // with no points, not a failure to resolve, and the difference decides whether the chart
@@ -186,6 +218,16 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
         XlsxChartTotalsRows totals = XlsxChartTotalsRows.Read(file, sheet);
         _totals[sheet.Name] = totals;
         return totals;
+    }
+
+    /// <summary>A sheet's hidden rows and columns, read once however many charts ask.</summary>
+    private XlsxChartHiddenCells HiddenFor(XlsxSheetEntry sheet)
+    {
+        if (_hidden.TryGetValue(sheet.Name, out XlsxChartHiddenCells? known)) return known;
+
+        XlsxChartHiddenCells cells = XlsxChartHiddenCells.Read(file.LoadSheet(sheet));
+        _hidden[sheet.Name] = cells;
+        return cells;
     }
 
     private Dictionary<(int Row, int Column), ContentTableCell> IndexFor(XlsxSheetEntry sheet)

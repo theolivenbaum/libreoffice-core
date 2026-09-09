@@ -1,7 +1,223 @@
+using Paperless.Core.Graphics;
 using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 
 namespace Paperless.WordProcessing.Model;
+
+/// <summary>Which pages of a section a page border is drawn on.</summary>
+public enum PageBorderDisplay
+{
+    /// <summary>Every page of the section — <c>w:display="allPages"</c>, and the default.</summary>
+    AllPages,
+
+    /// <summary>Its first page only — <c>w:display="firstPage"</c>.</summary>
+    FirstPage,
+
+    /// <summary>Every page but its first — <c>w:display="notFirstPage"</c>.</summary>
+    NotFirstPage,
+}
+
+/// <summary>One side of a page border.</summary>
+/// <param name="Width">The line's width; zero for a side that draws nothing.</param>
+/// <param name="Colour">The line's colour.</param>
+/// <param name="Space">
+/// How far the line stands off the edge it is measured from — the paper's edge or the text's,
+/// depending on <see cref="PageBorders.OffsetFromText"/>. Word states this in whole points.
+/// </param>
+public readonly record struct PageBorderSide(Length Width, Colour Colour, Length Space)
+{
+    /// <summary>True when the side draws a line at all.</summary>
+    public bool Draws => Width > Length.Zero;
+}
+
+/// <summary>
+/// A border drawn round the page rather than round a paragraph — Word's <c>w:pgBorders</c>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// It is page furniture and not content: with <see cref="OffsetFromText"/> false the rectangle is
+/// measured from the paper's edge and does not touch the text area at all, which is why it can be
+/// carried on the geometry and drawn without anything in the layout knowing about it.
+/// </para>
+/// <para>
+/// <strong>The shadow shrinks the rectangle rather than growing the page.</strong> Measured off
+/// 26.2.4.2's own PDF of <c>Case-Study-Heathrow-Airport.docx</c> — A4, <c>w:sz="36"</c> (4.5 pt),
+/// <c>w:space="15"</c>, <c>w:shadow="1"</c> — the four strokes are 4.5 pt wide at
+/// <c>#396533</c> with their centrelines at 17.25 from the left and top, 573.60 from the left
+/// (21.70 from the right) and 21.69 from the bottom: the right and bottom edges come in by the
+/// shadow's own width, and the shadow is two black rectangles offset by it,
+/// <c>19.4 15.039 560.85 4.45 re f*</c> and <c>575.8 19.439 4.45 803.05 re f*</c>.
+/// </para>
+/// </remarks>
+public sealed record PageBorders
+{
+    /// <summary>The top side.</summary>
+    public PageBorderSide Top { get; init; }
+
+    /// <summary>The left side.</summary>
+    public PageBorderSide Left { get; init; }
+
+    /// <summary>The bottom side.</summary>
+    public PageBorderSide Bottom { get; init; }
+
+    /// <summary>The right side.</summary>
+    public PageBorderSide Right { get; init; }
+
+    /// <summary>
+    /// True when the spacing is measured from the text rather than from the paper's edge —
+    /// <c>w:offsetFrom="text"</c>.
+    /// </summary>
+    public bool OffsetFromText { get; init; }
+
+    /// <summary>
+    /// How wide a shadow the border casts down and to the right, or zero for none.
+    /// </summary>
+    /// <remarks>
+    /// A length rather than a flag because the three readers state its width differently and only one
+    /// of them derives it from the border. <strong>Word puts the shadow on every side and takes its
+    /// width from the <em>right</em> side alone</strong> — <c>ApplyBorderToPageStyles</c> reads
+    /// <c>m_bBorderShadows[BORDER_RIGHT]</c> and <c>getShadowFromBorder</c> takes that side's
+    /// <c>LineWidth</c> (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:715-734), and WW8's
+    /// <c>SwWW8ImplReader::SetShadow</c> reads <c>pbrc[WW8_RIGHT].fShadow()</c> with a floor of sixteen
+    /// twips (<c>ww8par6.cxx</c>:1548-1562). ODF states the offset outright, in
+    /// <c>style:shadow</c>.
+    /// </remarks>
+    public Length Shadow { get; init; }
+
+    /// <summary>Which pages of the section carry it.</summary>
+    public PageBorderDisplay Display { get; init; }
+
+    /// <summary>True when at least one side draws a line.</summary>
+    public bool Draws => Top.Draws || Left.Draws || Bottom.Draws || Right.Draws;
+
+    /// <summary>Whether a page of the section carries the border.</summary>
+    /// <param name="isFirstOfSection">True for the section's first page.</param>
+    public bool AppearsOn(bool isFirstOfSection) => Display switch
+    {
+        PageBorderDisplay.FirstPage => isFirstOfSection,
+        PageBorderDisplay.NotFirstPage => !isFirstOfSection,
+        _ => true,
+    };
+
+    /// <summary>
+    /// Where the border's rectangle sits on a page of this size with this text area.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The border never moves the text</strong>, whichever edge it is measured from. That is
+    /// not obvious and it is what <c>editeng::BorderDistanceFromWord</c>
+    /// (<c>editeng/source/items/frmitems.cxx</c>:4143-4174) does: Writer keeps a page's margin as the
+    /// distance to the <em>border box</em> and a separate distance from the box to the text, and both
+    /// of Word's two spellings are converted so that margin + width + distance is the margin Word
+    /// stated. Confirmed by rendering: the first line of a bordered fixture and of the same fixture
+    /// with no border sit at the same point on 26.2.4.2, in both <c>offsetFrom</c> modes.
+    /// </para>
+    /// <para>
+    /// So a side that draws has its box edge <see cref="PageBorderSide.Space"/> from the paper's edge
+    /// when the section says <c>offsetFrom="page"</c>, and <c>margin − space − width</c> from it when
+    /// the section says <c>offsetFrom="text"</c>. <strong>A side that draws nothing keeps the text
+    /// area's own edge</strong> — measured on a fixture bordered left and right only, where 26.2.4.2
+    /// runs the two verticals between the top and bottom margins rather than the length of the paper.
+    /// </para>
+    /// <para>
+    /// The two clamps are that function's, and they fire when a border would land outside the paper
+    /// or inside the text: a <c>page</c> border whose space and width together exceed the margin
+    /// keeps the margin, and a <c>text</c> border whose margin is too small for it sits on the
+    /// paper's edge.
+    /// </para>
+    /// </remarks>
+    /// <param name="page">The sheet's size.</param>
+    /// <param name="textArea">Where body text goes, which the border does not disturb.</param>
+    public PlacedPageBorder? Place(DocSize page, DocRect textArea)
+    {
+        if (!Draws) return null;
+
+        Length left = Inset(Left, textArea.X);
+        Length top = Inset(Top, textArea.Y);
+        Length right = Inset(Right, page.Width - textArea.Right);
+        Length bottom = Inset(Bottom, page.Height - textArea.Bottom);
+
+        DocRect outer = new(
+            left, top,
+            page.Width - left - right,
+            page.Height - top - bottom);
+
+        if (Shadow > Length.Zero)
+        {
+            outer = new DocRect(
+                outer.X,
+                outer.Y,
+                Length.Max(Length.Zero, outer.Width - Shadow),
+                Length.Max(Length.Zero, outer.Height - Shadow));
+        }
+
+        if (outer.Width <= Length.Zero || outer.Height <= Length.Zero) return null;
+
+        return new PlacedPageBorder
+        {
+            Outer = outer,
+            Top = Top,
+            Left = Left,
+            Bottom = Bottom,
+            Right = Right,
+            Shadow = Shadow,
+        };
+    }
+
+    /// <summary>How far one side's box edge stands in from the paper's matching edge.</summary>
+    private Length Inset(PageBorderSide side, Length textInset)
+    {
+        if (!side.Draws) return textInset;
+
+        if (!OffsetFromText)
+        {
+            // The border would reach past the text's own edge, which Word can state and Writer cannot
+            // draw: it keeps the margin instead.
+            return side.Space + side.Width > textInset ? textInset : side.Space;
+        }
+
+        Length inset = textInset - side.Space - side.Width;
+        return inset > Length.Zero ? inset : Length.Zero;
+    }
+}
+
+/// <summary>
+/// A page border placed on one page: the rectangle its sides stand on, and the sides.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The rectangle is the border's <em>outer</em> extent and is already shrunk for the shadow, because
+/// <strong>the shadow shrinks the box rather than hanging off the paper</strong> — measured off
+/// 26.2.4.2's own content stream and the one thing about a page border that cannot be guessed from
+/// the specification.
+/// </para>
+/// <para>
+/// Separate from <see cref="PageBorders"/> so that a page carries a rectangle rather than the four
+/// insets and a rule for combining them: the paginator is the only layer that knows both the sheet
+/// and the text area, and it is also the only one that knows whether a page is the first of its
+/// section.
+/// </para>
+/// </remarks>
+public sealed record PlacedPageBorder
+{
+    /// <summary>The rectangle the four sides stand on, shadow already taken off.</summary>
+    public required DocRect Outer { get; init; }
+
+    /// <summary>The top side.</summary>
+    public PageBorderSide Top { get; init; }
+
+    /// <summary>The left side.</summary>
+    public PageBorderSide Left { get; init; }
+
+    /// <summary>The bottom side.</summary>
+    public PageBorderSide Bottom { get; init; }
+
+    /// <summary>The right side.</summary>
+    public PageBorderSide Right { get; init; }
+
+    /// <summary>The shadow's width, or zero when the border casts none.</summary>
+    public Length Shadow { get; init; }
+}
 
 /// <summary>
 /// The four page margins.
@@ -315,6 +531,14 @@ public sealed record PageGeometry
     /// </summary>
     public bool HasMirroredMargins { get; init; }
 
+    /// <summary>The border drawn round the page, or null when the section declares none.</summary>
+    /// <remarks>
+    /// Page furniture rather than content — see <see cref="PageBorders"/>. Null rather than a
+    /// no-sides value so that the overwhelming majority of sections, which declare nothing, cost
+    /// one null check at drawing time and nothing at all in the layout.
+    /// </remarks>
+    public PageBorders? Borders { get; init; }
+
     /// <summary>The width a line of body text has to fit in.</summary>
     public Length TextWidth
     {
@@ -561,6 +785,33 @@ public sealed record WritingSection
     /// </para>
     /// </remarks>
     public bool BalancesColumns { get; init; }
+
+    /// <summary>
+    /// True when the section is a Writer <em>text section</em> rather than a page style, so its own
+    /// horizontal geometry applies where it starts instead of on the next sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A continuous section normally inherits the page style of the section above it, which is why a
+    /// change of margins waits for the next page — see the note beside the break handling in
+    /// <c>Paginator</c>. A multi-column stretch is the exception, and it is an exception because Writer
+    /// models it as a different object: <c>SectionPropertyMap::CloseSectionGroup</c> says so in as many
+    /// words — <em>"prefer setting column properties into a section, not a page style if at all
+    /// possible"</em> (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:1905-1913) — and the WW8
+    /// importer does the same, putting the <em>difference</em> between the Word section's margins and
+    /// the page style's onto that section's own <c>SvxLRSpaceItem</c>:
+    /// <c>nSectionLeft = rSection.GetPageLeft() - nPageLeft</c>
+    /// (<c>sw/source/filter/ww8/ww8par6.cxx</c>:735-745). A <c>SwSectionFrame</c> begins where the flow
+    /// reaches it, so both its columns and its indents take effect mid-page.
+    /// </para>
+    /// <para>
+    /// ODF states that object directly, as a <c>text:section</c> whose section style carries
+    /// <c>style:columns</c> and <c>fo:margin-left</c>/<c>fo:margin-right</c>; those margins are stated
+    /// <em>relative to the page's</em>, which is why the reader adds them to the master's own before
+    /// handing the geometry over. Default false, so nothing but a reader that says otherwise changes.
+    /// </para>
+    /// </remarks>
+    public bool IsTextSection { get; init; }
 
     /// <summary>True when the section's first page uses the <c>First</c> furniture slot.</summary>
     public bool HasDifferentFirstPage { get; init; }

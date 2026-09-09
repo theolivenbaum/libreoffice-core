@@ -18,14 +18,36 @@ namespace Paperless.Presentations.Layout;
 /// <strong>Three things about it are surprising, and all three are load-bearing.</strong>
 /// </para>
 /// <para>
-/// <em>The stated scale is thrown away.</em> <c>a:normAutofit/@fontScale</c> is the answer the
-/// authoring application arrived at, and the reference reads it into
-/// <c>TextBodyProperties::mnFontScale</c> and then never reads that field again
-/// (<c>oox/source/drawingml/textbodypropertiescontext.cxx:240</c>, LibreOffice 24.2) — so the fit
-/// is always solved from scratch, against LibreOffice's own metrics rather than PowerPoint's.
+/// <em>The stated scale is thrown away — in 24.2.</em> <c>a:normAutofit/@fontScale</c> is the
+/// answer the authoring application arrived at, and 24.2 read it into
+/// <c>TextBodyProperties::mnFontScale</c> and then never read that field again — so the fit was
+/// always solved from scratch, against LibreOffice's own metrics rather than PowerPoint's.
 /// Honouring the stated scale instead disagrees with the reference on every autofitted shape
 /// whose author measured with different fonts, which in a corpus rendered against Carlito and
-/// Caladea is all of them. <c>@lnSpcReduction</c> is not read at all.
+/// Caladea is all of them.
+/// </para>
+/// <para>
+/// <strong>That is no longer true of 26.2.4.2, and this tree has not caught up.</strong>
+/// <c>oox/source/drawingml/textbodypropertiescontext.cxx</c>:242-243 now sets
+/// <c>PROP_TextFitToSizeFontScale</c> and <c>PROP_TextFitToSizeSpacingScale</c> from the element,
+/// <c>SvxShape</c> puts them on the <c>SdrTextFitToSizeTypeItem</c>
+/// (<c>svx/source/unodraw/unoshape.cxx</c>:2343-2367), and <c>setupAutoFitText</c> hands them
+/// straight to the outliner rather than searching —
+/// <c>if (fFontScale &gt; 0.0 &amp;&amp; fSpacingScale &gt; 0.0 &amp;&amp; !mbInEditMode)</c>,
+/// <c>svx/source/svdraw/svdotext.cxx</c>:1238-1247 — after which
+/// <c>ImpEditEngine::ScaleContentToFitWindow</c> walks <c>constScaleLevels</c> only if that first
+/// format <em>overflows</em> (<c>editeng/source/editeng/impedit3.cxx</c>:303-333).
+/// <strong>The gate on it is <c>@lnSpcReduction</c> and not <c>@fontScale</c></strong>: the
+/// spacing scale is <c>1.0 - lnSpcReduction/100000</c> and the attribute's own default is 100000,
+/// so an element stating <c>fontScale</c> alone yields a spacing scale of <strong>zero</strong>,
+/// fails the guard, and is searched from scratch exactly as before. Censused over the corpus:
+/// <strong>326 <c>a:normAutofit</c> state <c>fontScale</c> and 209 state <c>lnSpcReduction</c>,
+/// the latter in 40 of the 251 <c>.pptx</c></strong>. <strong>Read from the source and censused,
+/// not measured at the reference</strong> — that is the next round's job, and it must be measured
+/// rather than implemented on this reading alone. <c>@lnSpcReduction</c> is still read nowhere
+/// here. A <c>.ppt</c> is unaffected either way: <c>filter/source/msfilter/svdfppt.cxx</c>:1099
+/// builds the item from its type alone and both of its scales default to zero
+/// (<c>include/svx/sdtfsitm.hxx</c>:68-69).
 /// </para>
 /// <para>
 /// <em>It is not a search.</em> LibreOffice 25.2 replaced the bisection with a walk down a fixed

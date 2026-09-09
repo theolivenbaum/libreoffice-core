@@ -83,6 +83,19 @@ public static class PptRecordTypes
     /// <summary>A text run's ruler: tab stops and per-level indents.</summary>
     public const ushort TextRulerAtom = 4006;
 
+    /// <summary>
+    /// A shape's PowerPoint 97+ paragraph extensions: picture bullets and automatic numbering.
+    /// </summary>
+    /// <remarks>
+    /// <c>PPT_PST_ExtendedParagraphAtom</c>, <c>include/filter/msfilter/svdfppt.hxx:1339</c>. It
+    /// never sits beside the text records: it is buried in the shape's <c>ClientData</c> under
+    /// <see cref="ProgTags"/> → <see cref="ProgBinaryTag"/> named <c>___PPT9</c> →
+    /// <see cref="BinaryTagData"/>, which is why a reader that walks the client text box alone
+    /// cannot see it. <c>SdrPowerPointImport::SeekToContentOfProgTag(9, …)</c>,
+    /// <c>svdfppt.cxx:6547-6551</c>.
+    /// </remarks>
+    public const ushort ExtendedParagraphAtom = 4012;
+
     /// <summary>A text run's characters, one byte each.</summary>
     public const ushort TextBytesAtom = 4008;
 
@@ -120,6 +133,34 @@ public static class PptRecordTypes
     /// <summary>Marks the position of the page's footer inside a run's text.</summary>
     public const ushort FooterMCAtom = 4090;
 
+    /// <summary>The document's list of external objects, hyperlinks among them.</summary>
+    public const ushort ExObjList = 1033;
+
+    /// <summary>One external hyperlink of the <see cref="ExObjList"/>.</summary>
+    public const ushort ExHyperlink = 4055;
+
+    /// <summary>
+    /// An <see cref="ExHyperlink"/>'s own identifier, which an
+    /// <see cref="InteractiveInfoAtom"/> names.
+    /// </summary>
+    public const ushort ExHyperlinkAtom = 4051;
+
+    /// <summary>An interactive action attached to a shape or to a range of its text.</summary>
+    public const ushort InteractiveInfo = 4082;
+
+    /// <summary>Which <see cref="ExHyperlink"/> an <see cref="InteractiveInfo"/> names.</summary>
+    public const ushort InteractiveInfoAtom = 4083;
+
+    /// <summary>
+    /// The character range an <see cref="InteractiveInfo"/> covers, when it covers text.
+    /// </summary>
+    /// <remarks>
+    /// It is a <em>sibling</em> of the <see cref="InteractiveInfo"/> rather than a child, and
+    /// must be the very next record for the range to be read at all
+    /// (<c>filter/source/msfilter/svdfppt.cxx:6911-6921</c>).
+    /// </remarks>
+    public const ushort TxInteractiveInfoAtom = 4063;
+
     /// <summary>One of the document's three slide lists, distinguished by the header instance.</summary>
     public const ushort SlideListWithText = 4080;
 
@@ -131,6 +172,18 @@ public static class PptRecordTypes
 
     /// <summary>Application-private tagged data hanging off a container.</summary>
     public const ushort ProgTags = 5000;
+
+    /// <summary>One tagged block, named by the <see cref="CString"/> that opens it.</summary>
+    public const ushort ProgBinaryTag = 5002;
+
+    /// <summary>
+    /// A tagged block's payload, which holds further records despite being an atom.
+    /// </summary>
+    /// <remarks>
+    /// Its header's version is not <c>0xF</c>, so a walker that recurses only into containers
+    /// steps straight over the records inside it.
+    /// </remarks>
+    public const ushort BinaryTagData = 5003;
 
     /// <summary>A block of the persist directory: persist ids to stream offsets.</summary>
     public const ushort PersistPtrIncrementalBlock = 6002;

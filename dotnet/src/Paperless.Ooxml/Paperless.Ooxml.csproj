@@ -5,6 +5,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The SmartArt layout algorithms place their children by arithmetic with no package around
+         them, so they are pinned where they can be called directly rather than through a deck. -->
+    <InternalsVisibleTo Include="Paperless.Presentations.Tests" />
+    <InternalsVisibleTo Include="Paperless.WordProcessing.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--
       The 187 DrawingML preset shape definitions, reduced from LibreOffice's own
       presetShapeDefinitions.xml. Data rather than code because it *is* data: each preset is a

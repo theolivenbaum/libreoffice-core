@@ -1,3 +1,4 @@
+using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Ooxml;
 using Shouldly;
 
@@ -38,7 +39,7 @@ public class SlideDiagramGeometryTests
     {
         DiagramShape frame = Frame(4000, 4000, Children(4));
 
-        PptxDiagramGeometry.Snake(Algorithm("snake"), frame, []);
+        DiagramLayoutGeometry.Snake(Algorithm("snake"), frame, []);
 
         frame.Children.Select(child => (child.X, child.Y, child.Width, child.Height))
             .ShouldBe([(0, 0, 1739, 939), (2260, 0, 1739, 939),
@@ -59,7 +60,7 @@ public class SlideDiagramGeometryTests
     {
         DiagramShape frame = Frame(4000, 4000, Children(4));
 
-        PptxDiagramGeometry.Snake(Algorithm("snake", ("grDir", "tR")), frame, []);
+        DiagramLayoutGeometry.Snake(Algorithm("snake", ("grDir", "tR")), frame, []);
 
         frame.Children[0].X.ShouldBe(4000 - 1739);
         frame.Children[1].X.ShouldBe(4000 - 1739 - 2261);
@@ -80,7 +81,7 @@ public class SlideDiagramGeometryTests
     {
         DiagramShape frame = Frame(1200, 1200, Children(4));
 
-        PptxDiagramGeometry.Cycle(Algorithm("cycle"), frame);
+        DiagramLayoutGeometry.Cycle(Algorithm("cycle"), frame);
 
         foreach (DiagramShape child in frame.Children)
         {
@@ -108,7 +109,7 @@ public class SlideDiagramGeometryTests
     {
         DiagramShape frame = Frame(1200, 1200, Children(4));
 
-        PptxDiagramGeometry.Cycle(Algorithm("cycle", ("ctrShpMap", "fNode")), frame);
+        DiagramLayoutGeometry.Cycle(Algorithm("cycle", ("ctrShpMap", "fNode")), frame);
 
         frame.Children[0].X.ShouldBe(450);
         frame.Children[0].Y.ShouldBe(450);
@@ -131,7 +132,7 @@ public class SlideDiagramGeometryTests
         DiagramShape frame = Frame(1000, 1000, Children(2));
         frame.VerticalShapesCount = 2;
 
-        PptxDiagramGeometry.Hierarchy(Algorithm("hierRoot"), frame);
+        DiagramLayoutGeometry.Hierarchy(Algorithm("hierRoot"), frame);
 
         frame.Children.Select(child => (child.X, child.Y, child.Width, child.Height))
             .ShouldBe([(0, 0, 1000, 434), (0, 564, 1000, 434)]);
@@ -151,7 +152,7 @@ public class SlideDiagramGeometryTests
     {
         DiagramShape frame = Frame(1000, 1000, Children(1));
 
-        PptxDiagramGeometry.Hierarchy(Algorithm("hierChild"), frame);
+        DiagramLayoutGeometry.Hierarchy(Algorithm("hierChild"), frame);
 
         frame.Children[0].X.ShouldBe(100);
         frame.Children[0].Width.ShouldBe(800);
@@ -172,7 +173,7 @@ public class SlideDiagramGeometryTests
         children[1].PresetType = "conn";
         DiagramShape frame = Frame(1000, 1000, children);
 
-        PptxDiagramGeometry.Hierarchy(Algorithm("hierChild"), frame);
+        DiagramLayoutGeometry.Hierarchy(Algorithm("hierChild"), frame);
 
         frame.Children[1].Width.ShouldBe(1);
 
@@ -195,7 +196,7 @@ public class SlideDiagramGeometryTests
     {
         DiagramShape frame = Frame(900, 900, Children(3));
 
-        PptxDiagramGeometry.Pyramid(frame);
+        DiagramLayoutGeometry.Pyramid(frame);
 
         frame.Children.Select(child => (child.X, child.Y, child.Width, child.Height))
             .ShouldBe([(192, 96, 600, 300), (42, 396, 900, 300), (-108, 696, 1200, 300)]);

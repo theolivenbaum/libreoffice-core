@@ -114,7 +114,26 @@ internal static class OdfParagraphFormats
     private static readonly Length DefaultSize = Length.FromPoints(12);
 
     /// <summary>Resolves a paragraph style's layout properties.</summary>
-    internal static ParagraphFormat Resolve(OdfStyles styles, string? styleName)
+    /// <param name="styles">The document's styles.</param>
+    /// <param name="styleName">The paragraph's own style, automatic or named.</param>
+    /// <param name="shrinksJustifiedBlanks">
+    /// True when a justified line in this document may squeeze its blanks below their natural width,
+    /// which the document's <c>JustifyLinesWithShrinking</c> setting decides. See
+    /// <see cref="OdtLayoutSource.ShrinksJustifiedBlanks"/> and
+    /// <see cref="ParagraphFormat.ShrinksJustifiedBlanks"/>.
+    /// </param>
+    /// <param name="tabsRelativeToIndent">
+    /// True when this document's tab stops are measured from the paragraph's own indent, which the
+    /// document's <c>TabsRelativeToIndent</c> setting decides. Writer's own default and therefore this
+    /// one; every <c>.odt</c> LibreOffice exported from a Word file states <c>false</c>. See
+    /// <see cref="OdtLayoutSource.TabsRelativeToIndent(System.Xml.Linq.XElement?)"/> and
+    /// <see cref="ParagraphFormat.TabsRelativeToIndent"/>.
+    /// </param>
+    internal static ParagraphFormat Resolve(
+        OdfStyles styles,
+        string? styleName,
+        bool shrinksJustifiedBlanks = false,
+        bool tabsRelativeToIndent = true)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -155,6 +174,15 @@ internal static class OdfParagraphFormats
             ClampsTabsAtLineEdge = true,
             SpillsTrailingNoBreakSpace = true,
             DefaultTabInterval = TabInterval(styles),
+
+            // A document-wide setting rather than anything the paragraph states; see
+            // OdtLayoutSource.ShrinksJustifiedBlanks for what turns it on and what it costs when it is
+            // read wrongly.
+            ShrinksJustifiedBlanks = shrinksJustifiedBlanks,
+
+            // Also document-wide, and the one flag every Word-family reader in this tree already sets
+            // by hand: an ODF document states it outright, so it is read rather than assumed.
+            TabsRelativeToIndent = tabsRelativeToIndent,
         };
     }
 
@@ -332,15 +360,19 @@ internal static class OdfParagraphFormats
         {
             OdfStyleReference at = cascade[i];
 
-            if (Unquote(Own(styles, at, OdfNamespaces.FoCompatible, "font-family").Value)
-                is { } direct)
-            {
-                return direct;
-            }
+            // Both spellings in one walk, so the level decides before the spelling *inside* a
+            // parent chain as well as across the cascade. Asking for them one at a time let a
+            // parent style's `fo:font-family` beat its child's `style:font-name` — the shape
+            // LibreOffice writes whenever an automatic style names a face and the named style it
+            // inherits from states a family.
+            OdfProperty found = styles.ResolveWithoutDefaults(
+                at.Name, at.Family, OdfPropertyKind.Text, FontSpellings, out int matched);
 
-            if (Own(styles, at, OdfNamespaces.Style, "font-name").Value is { } declared)
+            if (found.HasValue)
             {
-                return FamilyOfDeclaration(styles, declared);
+                return matched == 1
+                    ? FamilyOfDeclaration(styles, found.Value!)
+                    : Unquote(found.Value);
             }
         }
 
@@ -354,6 +386,19 @@ internal static class OdfParagraphFormats
             ? FamilyOfDeclaration(styles, name)
             : null;
     }
+
+    /// <summary>The two spellings of a face, in the order one style's own attributes settle.</summary>
+    /// <remarks>
+    /// <c>fo:font-family</c> first: a style stating both is settled by attribute order, and
+    /// LibreOffice writes <c>style:font-name</c> before it, so the <c>fo:</c> value is the second
+    /// write into <c>CTF_FONTFAMILYNAME</c> and the one that stands
+    /// (<c>xmloff/source/text/txtimppr.cxx</c>:58-101).
+    /// </remarks>
+    private static readonly (string Namespace, string Name)[] FontSpellings =
+    [
+        (OdfNamespaces.FoCompatible, "font-family"),
+        (OdfNamespaces.Style, "font-name"),
+    ];
 
     private static string? FamilyOfDeclaration(OdfStyles styles, string declared)
         => styles.FontFaces.TryGetValue(declared, out OdfFontFace? face)

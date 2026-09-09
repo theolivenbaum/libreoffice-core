@@ -6,6 +6,7 @@ using Paperless.Core.Numbering;
 using Paperless.Core.Units;
 using Paperless.MsBinary.Escher;
 using Paperless.MsBinary.Records;
+using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
 using Paperless.Text.Layout;
 using Paperless.Vector;
@@ -81,6 +82,12 @@ internal sealed class PptSlideLayout
 
     private PptStyleSheet? _defaultStyles;
     private PptFontTable _fontTable = PptFontTable.Empty;
+
+    /// <summary>
+    /// The identifiers of the hyperlinks the deck declares, which is what makes a text range's
+    /// <c>InteractiveInfo</c> a field. See <see cref="PptHyperlinks"/>.
+    /// </summary>
+    private IReadOnlySet<uint> _hyperlinks = new HashSet<uint>();
     private Dictionary<int, EscherBlip>? _blips;
     private PptHeadersFooters _deckHeadersFooters = PptHeadersFooters.None;
     private bool _titlePlaceholdersOmitted;
@@ -122,6 +129,7 @@ internal sealed class PptSlideLayout
 
         DocSize size = SlideSize(pages);
         _fontTable = PptFontTable.Read(_stream, pages.Environment);
+        _hyperlinks = PptHyperlinks.Read(_stream, pages.Document);
         _blips = ReadBlips(pages);
         _deckHeadersFooters = DeckHeadersFooters(pages);
         _titlePlaceholdersOmitted = TitlePlaceholdersOmitted(pages);
@@ -935,18 +943,31 @@ internal sealed class PptSlideLayout
         // A shape's own vertex array outranks its type, because LibreOffice's exporter writes one
         // on nearly every shape and names no preset at all; falling through to the type would draw
         // a bounding rectangle for a triangle it had the exact path for.
-        GraphicsPath outline =
-            (PptCustomGeometry.Has(shape.Properties)
-                ? PptCustomGeometry.Outline(shape.Properties, local.Size)
-                : null)
-            ?? SlidePresetGeometry.Outline(preset, local.Size, Guides(adjustment));
+        GraphicsPath? own = PptCustomGeometry.Has(shape.Properties)
+            ? PptCustomGeometry.Outline(shape.Properties, local.Size)
+            : null;
+
+        CustomShapeGeometry.Geometry resolved = own is null
+            ? SlidePresetGeometry.Of(preset, local.Size, Guides(adjustment))
+            : new CustomShapeGeometry.Geometry(
+                own, new DocRect(Length.Zero, Length.Zero, local.Size.Width, local.Size.Height));
+
+        GraphicsPath outline = ShapeTransform.Apply(placement, resolved.Outline);
+
+        // What is filled, what is stroked and what is shaded, all of which a subpath states for
+        // itself. A shape drawing its own vertex array reports none, so it is painted whole,
+        // exactly as before.
+        PaintedGeometry painted = SlidePresetGeometry.Painted(resolved, placement, outline);
 
         DocRect bounds = ShapeTransform.PlacedBounds(placement, local.Size);
 
         return new PlacedShape
         {
             Name = shape.Name,
-            Outline = ShapeTransform.Apply(placement, outline),
+            Outline = outline,
+            FillOutline = painted.Fill,
+            StrokeOutline = painted.Stroke,
+            ShadedParts = painted.ShadedParts,
             Bounds = bounds,
             Fill = Fill(shape, context.Scheme, local, placement),
             Line = Line(shape, context.Scheme),
@@ -1485,15 +1506,27 @@ internal sealed class PptSlideLayout
     /// for either (fdo#41245 — "autofit text only if there is no auto grow height and width").
     /// </para>
     /// <para>
-    /// <strong>The wrap half of that is an approximation, and the direction it errs in is
-    /// known.</strong> The reference derives auto-grow-<em>width</em> from the wrap only where the
-    /// shape is a custom shape holding plain rectangle text; a true outline placeholder takes
-    /// <c>bAutoGrowWidth = false</c> whatever its wrap says, so LibreOffice would shrink it even
-    /// unwrapped. Paperless does not model "is a custom shape" here, so a non-wrapping outline
-    /// placeholder is left alone where the reference shrinks it. No deck in the slides corpus
-    /// holds that combination — the track went from 44 to 46 matching PPT documents with none
-    /// moving the other way — but it is a difference rather than a simplification, and it is the
-    /// first place to look if one turns up.
+    /// <strong>The wrap half of that is an approximation, and the corpus does not witness the
+    /// difference — measured, after a round was briefed that it does.</strong> The reference
+    /// derives auto-grow-<em>width</em> from the wrap only where the object it built is an
+    /// <c>SdrObjCustomShape</c> <em>and</em> the text kind had been rewritten to Rectangle
+    /// (<c>svdfppt.cxx</c>:1053-1055); every other branch sets <c>bAutoGrowWidth = false</c>
+    /// (<c>:1084</c>) and the wrap decides nothing. The rewrite happens on exactly one condition —
+    /// <c>!aTextObj.GetOEPlaceHolderAtom() || nPlaceholderId == PptPlaceholder::NONE</c>
+    /// (<c>:1043-1047</c>) — so the two rules disagree only on a Body-kind text that <em>names
+    /// itself a placeholder</em> and states <c>wrapNone</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The corpus holds no such shape.</strong> Of 1401 Body/HalfBody/QuarterBody shapes in
+    /// the 51 <c>.ppt</c>, 55 state <c>wrapNone</c> — in <c>Architecture.ppt</c> and
+    /// <c>Fundamentals_Module_1_basics.ppt</c> — and <strong>every one of the 55 carries no
+    /// <c>OEPlaceholderAtom</c> at all</strong>, which is precisely the case where the reference
+    /// takes the wrap. Corroborated at the reference: over every page of both decks, the set of
+    /// drawn text sizes agrees with 26.2.4.2's exactly, the one exception being two classes on
+    /// page 6 of <c>Fundamentals</c> that are an embedded chart the reference does not draw as text
+    /// at all. <c>probes/ppt-fit-r85/placeholder-census.py</c>; round 84's
+    /// <em>"55 shapes in 2 documents would newly autofit"</em> counted the wrap and not the
+    /// placeholder atom, and is withdrawn.
     /// </para>
     /// <para>
     /// Measured on <c>berlin.ppt</c>, whose 29 slides are all outline placeholders: without this
@@ -1527,15 +1560,26 @@ internal sealed class PptSlideLayout
         int start = textbox.ContentStart;
         int end = _stream.EndOf(textbox);
 
+        // Picture bullets and automatic numbering are not in the text box at all -- they are in
+        // the shape's own private data, three records down and behind an atom that holds records.
+        // See `PptTextReader.ReadExtendedParagraphs`.
+        IReadOnlyList<PptExtendedParagraph>? extended =
+            PptTextReader.ReadExtendedParagraphs(_stream, shape.ClientData);
+
         foreach (DffRecordHeader record in _stream.Range(start, end))
         {
             if (record.Type != PptRecordTypes.OutlineTextRefAtom) continue;
 
             uint reference = DffRecordBuffer.ReadUInt32(_stream.Content(record));
-            return OutlineText(context.Entry, reference, context.Fields);
+
+            // A shape that refers to the slide list still carries its own extensions, and they
+            // still apply to the text it points at.
+            return OutlineText(context.Entry, reference, context.Fields) is { } outline
+                ? outline with { Extended = extended ?? outline.Extended }
+                : null;
         }
 
-        return PptTextReader.Read(_stream, start, end, context.Fields);
+        return PptTextReader.Read(_stream, start, end, context.Fields, extended, _hyperlinks);
     }
 
     /// <summary>
@@ -1552,11 +1596,18 @@ internal sealed class PptSlideLayout
             if (record.Type == PptRecordTypes.SlidePersistAtom) break;
             if (record.Type != PptRecordTypes.TextHeaderAtom) continue;
 
-            if (start >= 0) return PptTextReader.Read(_stream, start, record.Position, fields);
+            if (start >= 0)
+            {
+                return PptTextReader.Read(
+                    _stream, start, record.Position, fields, null, _hyperlinks);
+            }
+
             if (matches++ == reference) start = record.Position;
         }
 
-        return start >= 0 ? PptTextReader.Read(_stream, start, entry.TextEnd, fields) : null;
+        return start >= 0
+            ? PptTextReader.Read(_stream, start, entry.TextEnd, fields, null, _hyperlinks)
+            : null;
     }
 
     /// <summary>

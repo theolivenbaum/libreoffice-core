@@ -298,10 +298,10 @@ public class ChartPlotTypeLayoutTests
     [Fact]
     public void UpDownBarsMakeABoxWhoseColourSaysWhichWayThePriceWent()
     {
-        Place(Stock(candles: false)).Boxes.Count(box => box.Fill is not null).ShouldBe(0);
+        Place(Stock(candles: false)).Shapes.Count(shape => shape.Fill is not null).ShouldBe(0);
 
         ChartDrawing drawing = Place(Stock(candles: true));
-        List<ChartBox> candles = [.. drawing.Boxes.Where(box => box.Fill is not null)];
+        List<ChartShape> candles = drawing.Filled();
 
         candles.Count.ShouldBe(2);
 

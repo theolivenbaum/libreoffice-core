@@ -62,6 +62,7 @@ public sealed partial class Ww8DocumentReader
                 : new Ww8Border(bytes[5], bytes[4], ColourOf(bytes[..4]))
                 {
                     SpacePoints = BinaryPrimitives.ReadUInt16LittleEndian(bytes[6..]) & DptSpaceMask,
+                    HasShadow = (bytes[6] & ShadowBit) != 0,
                 };
         }
 
@@ -73,6 +74,7 @@ public sealed partial class Ww8DocumentReader
             : new Ww8Border(bytes[1], bytes[0], IcoPalette[bytes[2] < IcoPalette.Length ? bytes[2] : 0])
             {
                 SpacePoints = bytes[3] & DptSpaceMask,
+                HasShadow = (bytes[3] & ShadowBit) != 0,
             };
     }
 
@@ -84,6 +86,16 @@ public sealed partial class Ww8DocumentReader
     /// and padding. It sits in the fourth byte of a <c>BRC80</c> and in the last word of a <c>BRC</c>.
     /// </remarks>
     private const int DptSpaceMask = 0x1F;
+
+    /// <summary>
+    /// The bit above <see cref="DptSpaceMask"/>: <c>fShadow</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only a page border uses it — <c>SwWW8ImplReader::SetShadow</c> reads it from the section's
+    /// <em>right</em> <c>BRC</c> and from nothing else (<c>ww8par6.cxx</c>:1548-1562) — but it lives
+    /// in the same byte of the same structure, so it is decoded once with the distance.
+    /// </remarks>
+    private const int ShadowBit = 0x20;
 
     /// <summary>
     /// Reads one <c>sprmTSetBrc</c> or <c>sprmTSetBrc80</c>: a range of cells, a set of sides, and a BRC.
@@ -295,6 +307,13 @@ public readonly record struct Ww8Border(int Kind, int EighthPoints, Colour? Colo
     /// </remarks>
     public int SpacePoints { get; init; }
 
+    /// <summary>The <c>fShadow</c> flag: this side asks the box for a shadow.</summary>
+    /// <remarks>
+    /// Read from every <c>BRC</c> because there is one decoder, and acted on only for a section's
+    /// right-hand side, which is the one Word's page border takes its shadow from.
+    /// </remarks>
+    public bool HasShadow { get; init; }
+
     /// <summary>
     /// How much space the border takes, which is not simply its stated width.
     /// </summary>
@@ -324,14 +343,52 @@ public readonly record struct Ww8Border(int Kind, int EighthPoints, Colour? Colo
     }
 
     /// <summary>
-    /// The border as the layout engine wants it.
+    /// The line and drawn width this <c>BRC</c> comes to, or null when it draws nothing.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The second half of the chain <see cref="Width"/> begins. <c>DetermineBorderProperties</c> gives
+    /// the thickness Word reserves for the rule, and <c>GetLineIndex</c>
+    /// (<c>sw/source/filter/ww8/ww8par6.cxx</c>:1444-1478) then hands that and the <c>brcType</c> to the
+    /// same pair of editeng functions the DOCX reader uses — so a DOC's <c>double</c> is three bands of
+    /// the stated width exactly as a <c>w:val="double"</c> is. See <see cref="Layout.BorderRules"/>.
+    /// </para>
+    /// <para>
+    /// With one substitution of Writer's own, made here because it is the filter's rather than
+    /// editeng's: <b>Word 9's <c>outset</c> and <c>inset</c> become a thick-thin and a thin-thick large
+    /// gap, drawn in silver</b>, with the comment "LO cannot handle outset/inset (new in WW9 BRC) so
+    /// fall back same as WW8". A DOCX stating the same two is <em>not</em> substituted — the OOXML
+    /// reader keeps them — which is Writer's inconsistency and is reproduced rather than tidied.
+    /// </para>
+    /// </remarks>
+    private (Layout.BorderLine Line, Length Width)? Rule
+    {
+        get
+        {
+            int kind = Kind switch { 0x1A => 0x12, 0x1B => 0x11, _ => Kind };
+            return Layout.BorderRules.FromWord(kind, Width);
+        }
+    }
+
+    /// <summary>The colour, with Word's substitutions applied.</summary>
     /// <remarks>
     /// Word's automatic colour becomes black rather than staying automatic, which is what LibreOffice does
     /// for a border and only for a border: <c>GetLineIndex</c>'s "no AUTO for borders as yet, so if AUTO,
-    /// use BLACK".
+    /// use BLACK". An <c>outset</c> or <c>inset</c> loses its stated colour outright and is drawn in
+    /// <c>0xc0c0c0</c>, which goes with the substitution in <see cref="Rule"/>.
     /// </remarks>
-    public Layout.TableBorder Resolved => new(Width, Colour ?? Core.Graphics.Colour.Black);
+    private Core.Graphics.Colour Drawn
+        => Kind is 0x1A or 0x1B
+            ? Core.Graphics.Colour.FromRgb(0xC0C0C0)
+            : Colour ?? Core.Graphics.Colour.Black;
+
+    /// <summary>
+    /// The border as the layout engine wants it.
+    /// </summary>
+    public Layout.TableBorder Resolved
+        => Rule is { } rule
+            ? new Layout.TableBorder(rule.Width, Drawn, rule.Line)
+            : new Layout.TableBorder(Length.Zero, Drawn);
 
     /// <summary>
     /// The border as one side of a paragraph's box: the rule, and the distance it keeps from the text.
@@ -342,11 +399,26 @@ public readonly record struct Ww8Border(int Kind, int EighthPoints, Colour? Colo
     /// <c>w:val="none"</c> carries in a <c>w:pBdr</c>, and the reason a paragraph can switch off the rule
     /// its style would have given it.
     /// </remarks>
+    /// <summary>
+    /// The border as one side of a <em>page's</em> box: the rule, its colour, and its distance.
+    /// </summary>
+    /// <remarks>
+    /// The same three quantities as <see cref="ResolvedParagraphSide"/> in a different carrier, because
+    /// what <c>dptSpace</c> measures differs: on a paragraph it is the gap to the text and on a page it
+    /// is the gap to whatever <c>sprmSPgbProp</c>'s <c>pgbOffsetFrom</c> names. It is the same unit —
+    /// whole points — as OOXML's <c>w:space</c>, which is what lets one
+    /// <see cref="Model.PageBorders"/> serve all four readers.
+    /// </remarks>
+    public Model.PageBorderSide ResolvedPageSide
+        => Rule is { } rule
+            ? new Model.PageBorderSide(rule.Width, Drawn, Length.FromPoints(SpacePoints))
+            : default;
+
     public Layout.ParagraphBorder ResolvedParagraphSide
-        => Kind is Unset or Nil
-            ? new Layout.ParagraphBorder(Length.Zero, Length.Zero, Core.Graphics.Colour.Black)
-            : new Layout.ParagraphBorder(
-                Width, Length.FromPoints(SpacePoints), Colour ?? Core.Graphics.Colour.Black);
+        => Rule is { } rule
+            ? new Layout.ParagraphBorder(
+                rule.Width, Length.FromPoints(SpacePoints), Length.Zero, Drawn, rule.Line)
+            : new Layout.ParagraphBorder(Length.Zero, Length.Zero, Core.Graphics.Colour.Black);
 }
 
 /// <summary>The four <c>BRC</c>s a cell states, each null where it states nothing.</summary>

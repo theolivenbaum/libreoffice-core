@@ -108,6 +108,16 @@ public readonly record struct RtfLayoutRun(
 /// <param name="SectionIndex">Which of the document's sections the paragraph sits in.</param>
 /// <param name="Notes">The notes anchored in the paragraph's text, or null when it cites none.</param>
 /// <param name="Frames">The floating frames anchored in it, or null when it anchors none.</param>
+/// <param name="PageFields">
+/// The <c>PAGE</c> and <c>NUMPAGES</c> results in <paramref name="Text"/>, or null when it holds none.
+/// <para>
+/// Recorded rather than left at the producer's cached value for the reason
+/// <see cref="Layout.PageFields"/> gives at length: the cached result is right on one page of the
+/// document and wrong on every other, so a footer reading <c>Page 9</c> is drawn on all nine pages. All
+/// three other word-processing readers have recorded them since round 45 and this one did not, which is
+/// why an RTF running head printed one number throughout.
+/// </para>
+/// </param>
 /// <param name="ListMarker">
 /// The label this item draws, or null when it draws none.
 /// <para>
@@ -135,6 +145,7 @@ public readonly record struct RtfLayoutParagraph(
     int SectionIndex = 0,
     IReadOnlyList<RtfLayoutNote>? Notes = null,
     IReadOnlyList<RtfLayoutFrame>? Frames = null,
+    IReadOnlyList<Layout.PageFieldSpan>? PageFields = null,
     string? ListMarker = null,
     bool AutoKerning = false);
 
@@ -162,9 +173,11 @@ public readonly record struct RtfLayoutParagraph(
 /// <param name="Right">Its right edge.</param>
 /// <param name="Bottom">Its bottom edge.</param>
 /// <param name="Wrap">
-/// <c>\shpwr</c>: 1 around, 2 tight, 3 through, 4 top and bottom, 5 none. The numbering is not the order
-/// the concepts are usually listed in, and 3 and 5 are the pair that invite a swap — 3 leaves a
-/// rectangular hole the text flows through the middle of, and 5 is the one that ignores the shape.
+/// <c>\shpwr</c>, kept as the file's own number because the reading of it belongs with the layout.
+/// LibreOffice's dispatch (<c>rtfdispatchvalue.cxx</c>:1222-1247) is what this project is measured
+/// against and it is not the specification's list: <b>1 puts no text beside the shape at all</b>, 2 and
+/// 4 put text on both sides, and <b>3 and 5 are both <em>through</em></b>. See
+/// <c>RtfReader.WrapOf</c>, which carries the probe.
 /// </param>
 /// <param name="WrapSide"><c>\shpwrk</c>: 0 both sides, 1 left, 2 right, 3 the larger side.</param>
 /// <param name="HorizontalOrigin">Which <c>\shpbx*</c> word was seen, or null for none.</param>
@@ -201,6 +214,34 @@ public sealed record RtfLayoutFrame(
 
     /// <summary>The picture the frame holds, or nothing when it holds none.</summary>
     public FramePicture Picture { get; init; }
+
+    /// <summary>
+    /// The inset between the shape's edge and its own text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Escher's <c>dxTextLeft</c>, <c>dyTextTop</c>, <c>dxTextRight</c> and <c>dyTextBottom</c>, which
+    /// <c>RTFSdrImport::resolve</c> divides by 360 to get 1/100 mm and hands to the frame's four
+    /// <c>*BorderDistance</c> properties (<c>rtfsdrimport.cxx</c>:600-625).
+    /// </para>
+    /// <para>
+    /// <b>The default is not zero.</b> A shape that states none of the four keeps
+    /// <c>getTextFrameDefaults</c>'s (<c>rtfsdrimport.cxx</c>:111-124) <c>91440 / 360</c> = 254 across
+    /// and <c>45720 / 360</c> = 127 down — 0.1 inch and 0.05 inch — so a reader that supplies nothing
+    /// puts a shape's first line 7.2 pt to the left of where the reference draws it and gives every
+    /// line 14.4 pt more room than the reference has. Measured on a wrapping probe against 26.2.4.2.
+    /// </para>
+    /// </remarks>
+    public Core.Geometry.Margins TextInset { get; init; } = DefaultTextInset;
+
+    /// <summary>
+    /// <c>getTextFrameDefaults</c>' four border distances, which are what a shape stating none gets.
+    /// </summary>
+    public static Core.Geometry.Margins DefaultTextInset { get; } = new(
+        Core.Units.Length.FromMm100(254),
+        Core.Units.Length.FromMm100(127),
+        Core.Units.Length.FromMm100(254),
+        Core.Units.Length.FromMm100(127));
 }
 
 /// <summary>
@@ -273,13 +314,30 @@ public readonly record struct RtfLayoutBlock
 /// <param name="ColumnFit">
 /// How to size the columns when the <c>\cellx</c> edges stated none, and null when they stated them all.
 /// </param>
+/// <param name="IsPositioned">
+/// True when the row definitions made this a <em>positioned</em> table — RTF's Positioned Wrapped
+/// Tables, which LibreOffice's importer turns into <c>w:tblpPr</c> and Writer into a fly holding a
+/// table. See <see cref="Layout.PageTable.IsPositioned"/>, which is where it ends up.
+/// </param>
+/// <param name="VerticalOrigin">What <paramref name="VerticalOffset"/> is measured from.</param>
+/// <param name="VerticalOffset"><c>\tposy</c>: how far below that origin the table's top goes.</param>
+/// <param name="HorizontalPosition">
+/// <c>\tposxc</c> and friends: the edge the table aligns against instead of taking
+/// <paramref name="LeftIndent"/>, and null when it stated none or anchored to the page.
+/// </param>
+/// <param name="LowerSpacing"><c>\tdfrmtxtBottom</c>: the gap the flow keeps below the fly.</param>
 public sealed record RtfLayoutTable(
     IReadOnlyList<Core.Units.Length> ColumnWidths,
     IReadOnlyList<RtfLayoutRow> Rows,
     int HeaderRowCount,
     Core.Units.Length LeftIndent,
     int SectionIndex = 0,
-    Layout.TableColumnFit? ColumnFit = null);
+    Layout.TableColumnFit? ColumnFit = null,
+    bool IsPositioned = false,
+    Layout.FrameVerticalOrigin VerticalOrigin = Layout.FrameVerticalOrigin.Paragraph,
+    Core.Units.Length VerticalOffset = default,
+    Layout.FrameHorizontalAlignment? HorizontalPosition = null,
+    Core.Units.Length LowerSpacing = default);
 
 /// <summary>One row of an RTF table.</summary>
 /// <param name="Cells">Its cells, left to right; a cell covered by a merge above is absent.</param>
@@ -309,12 +367,17 @@ public sealed record RtfLayoutRow(
 /// <param name="Blocks">The blocks inside it, in order — paragraphs, and any table nested in it.</param>
 /// <param name="Shading">The colour behind its text, or null when it is not shaded.</param>
 /// <param name="Borders">Its four borders.</param>
+/// <param name="TextDirection">
+/// Which way its text runs — RTF's <c>\cltxbtlr</c> and its siblings, which LibreOffice's tokeniser
+/// turns into <c>w:textDirection</c> (<c>rtfdispatchflag.cxx</c>:483-508).
+/// </param>
 public sealed record RtfLayoutCell(
     int Column,
     int ColumnSpan,
     int RowSpan,
     Layout.CellPadding Padding,
-    Layout.CellVerticalAlignment VerticalAlignment,
+    Layout.VerticalTextAlignment VerticalAlignment,
     IReadOnlyList<RtfLayoutBlock> Blocks,
     Colour? Shading = null,
-    Layout.CellBorders Borders = default);
+    Layout.CellBorders Borders = default,
+    Layout.CellTextDirection TextDirection = Layout.CellTextDirection.LeftToRight);

@@ -22,10 +22,12 @@ namespace Paperless.Spreadsheets.Tests;
 /// (<c>sc/source/ui/view/printfun.cxx:1870</c>) and then draws the left, centre and right areas
 /// into it as three separate pieces of text. <c>ImpEditEngine::DrawText_ToPosition</c> takes each
 /// area's whole primitive range and returns having emitted <em>nothing</em> when that range
-/// misses the clip (<c>editeng/source/editeng/impedit3.cxx:3367-3372</c>); when it overlaps only
-/// partly it wraps the area in a <c>MaskPrimitive2D</c> and keeps every line. So the clip is
-/// all-or-nothing <em>per area</em> and never per line — which is what
-/// <see cref="AnAreaWhoseInkIsInsideTheBandIsStillDrawnBesideOneThatIsNot"/> pins.
+/// misses the clip (<c>editeng/source/editeng/impedit3.cxx:3367-3379</c>); when it overlaps only
+/// partly it wraps the area in a <c>MaskPrimitive2D</c> of the clip polygon (<c>:3380-3389</c>),
+/// which keeps every line in the primitive tree and <em>cuts</em> all of them when they are
+/// rendered. So the decision to draw at all is <em>per area</em> and never per line — which is
+/// what <see cref="AnAreaWhoseInkIsInsideTheBandIsStillDrawnBesideOneThatIsNot"/> pins — and the
+/// cut that follows it is geometric, which is what <see cref="SheetBandScaleClipTests"/> pins.
 /// </para>
 /// <para>
 /// This is what round 55 recorded as an unexplained "text-fit threshold, about 0.27x the point

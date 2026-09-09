@@ -55,7 +55,7 @@ public sealed class CellSpacingAndTabStopComparisonTests : IDisposable
     [Fact]
     public void ASpacedTableRowIsTallerThanASingleSpacedOneByLibreOfficesAllowance()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("cell-line-spacing.docx");
 
@@ -85,7 +85,7 @@ public sealed class CellSpacingAndTabStopComparisonTests : IDisposable
     [Fact]
     public void ARunningHeadsTabsReachTheStopsItsStyleContributed()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("style-tab-stops.docx");
 
@@ -124,7 +124,7 @@ public sealed class CellSpacingAndTabStopComparisonTests : IDisposable
     [Fact]
     public void AContentsEntryWithAStopPastItsLineEdgeStaysOnOneLine()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("style-tab-stops.docx");
 

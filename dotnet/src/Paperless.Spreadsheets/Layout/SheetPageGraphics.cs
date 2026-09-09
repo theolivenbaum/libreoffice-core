@@ -51,16 +51,6 @@ namespace Paperless.Spreadsheets.Layout;
 /// </remarks>
 internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
 {
-    /// <summary>
-    /// The width a shape's outline is stroked at when the file states a hairline.
-    /// </summary>
-    /// <remarks>
-    /// A comment caption's border is <c>svg:stroke-width="0in"</c> in LibreOffice's own export,
-    /// which is a hairline rather than an absent line — the same convention the page furniture
-    /// already draws its rules at.
-    /// </remarks>
-    private static readonly Length HairlineWidth = Length.FromPoints(0.1);
-
     /// <summary>Paints the sheet's drawings that belong to this page.</summary>
     /// <param name="sink">Receives the drawing commands.</param>
     /// <param name="columns">The columns on the page, with their positions.</param>
@@ -88,13 +78,31 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // page. See `SheetDrawing.IsPrintable` for why the two flags are not one.
             if (!drawing.IsPrintable) continue;
 
+            bool paintsParts = false;
+            foreach (SheetDrawingPart part in drawing.Parts)
+            {
+                if (part.HasPicture) { paintsParts = true; break; }
+            }
+
+            bool paintsPartInk = false;
+            foreach (SheetDrawingPart part in drawing.Parts)
+            {
+                if (part.HasInk) { paintsPartInk = true; break; }
+            }
+
             if (drawing.Image is null && drawing.Vector is null && drawing.Chart is null
-                && drawing.Text is null && drawing.Fill is null && drawing.Stroke is null)
+                && drawing.Text is null && !drawing.HasInk
+                && !paintsParts && !paintsPartInk)
             {
                 continue;
             }
 
-            if (Place(drawing, byColumn, byRow) is not { } box) continue;
+            if (Place(drawing, byColumn, byRow) is not { } placed) continue;
+
+            // The anchor of a shape turned through a quarter describes it *after* the turn, so
+            // the rectangle is reflected in `y = x` before anything is drawn in it. See
+            // `SheetDrawing.QuarterTurnedAnchor`.
+            DocRect box = drawing.QuarterTurnedAnchor ? Reflected(placed) : placed;
             if (box.Width <= Length.Zero || box.Height <= Length.Zero) continue;
             if (!ReachesTheBlock(box, columns, rows)) continue;
 
@@ -102,14 +110,14 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // text rather than instead of it, and under the cells' text rather than over it: the
             // internal layer is drawn after the strings, so a shown comment covers what it sits on
             // (`PrintDrawingLayer(SC_LAYER_INTERN)`, printfun.cxx:1713).
-            if (drawing.Fill is { } fill)
-                sink.FillPath(GraphicsPath.Rectangle(box), Paint.Solid(fill));
-            if (drawing.Stroke is { } outline)
-            {
-                sink.StrokePath(
-                    GraphicsPath.Rectangle(box),
-                    new Stroke(Paint.Solid(outline), HairlineWidth));
-            }
+            //
+            // Through the shape's own preset rather than the anchor's rectangle -- 438 of the
+            // corpus's 644 worksheet shapes name a preset that is not `rect`. See
+            // `SheetShapeInk`.
+            SheetShapeInk.Draw(
+                sink, box, drawing.Fill, drawing.Gradient, drawing.Stroke, drawing.StrokeWidth,
+                drawing.Preset, drawing.Adjustments,
+                drawing.FlipHorizontal, drawing.FlipVertical, scale);
 
             // The vector before the raster, since a shape carrying both means the DrawingML `svgBlip`
             // case where the raster is the fallback. `VectorImage.Draw` maps the picture's own frame
@@ -124,7 +132,102 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // Not an `else`: a shape may carry both a picture and a caption, and the text goes
             // over the fill rather than instead of it.
             if (drawing.Text is { } text) SheetShapePainter.Draw(sink, text, box, scale);
+
+            if (paintsParts || paintsPartInk) DrawParts(sink, box, drawing.Parts);
         }
+    }
+
+    /// <summary>
+    /// Draws the pictures held by the leaf shapes of a group, each in its own part of the box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An anchor holding an <c>xdr:grpSp</c> carries no picture of its own, so the whole
+    /// group was skipped here and painted nothing.</strong> See
+    /// <see cref="SheetDrawingPart.Image"/>: the parts were already read, for the bounding
+    /// rectangle, and this draws them.
+    /// </para>
+    /// <para>
+    /// A part states its rectangle as fractions of the anchor's, with the group's
+    /// <c>a:chOff</c>/<c>a:chExt</c> mapping already folded in, so resolving it is arithmetic on
+    /// the box. Its <c>a:xfrm/@rot</c> turns it about its own centre, which is what DrawingML means
+    /// by a rotation and what <c>SheetDrawingPart.Degrees</c> was carried for.
+    /// </para>
+    /// </remarks>
+    private void DrawParts(
+        IDrawingSink sink, DocRect box, IReadOnlyList<SheetDrawingPart> parts)
+    {
+        foreach (SheetDrawingPart part in parts)
+        {
+            if (!part.HasPicture && !part.HasInk) continue;
+
+            DocRect where = new(
+                box.X + Length.FromEmu((long)Math.Round(box.Width.Emu * part.X)),
+                box.Y + Length.FromEmu((long)Math.Round(box.Height.Emu * part.Y)),
+                Length.FromEmu((long)Math.Round(box.Width.Emu * part.Width)),
+                Length.FromEmu((long)Math.Round(box.Height.Emu * part.Height)));
+
+            if (where.Width <= Length.Zero || where.Height <= Length.Zero) continue;
+
+            AffineTransform? turn = Turn(where, part.Degrees);
+            if (turn is { } transform)
+            {
+                sink.Save();
+                sink.Transform(transform);
+            }
+
+            try
+            {
+                // The ink first and the picture over it, which is the order a leaf shape states
+                // them in: a `pic` with a fill behind it is a picture on a coloured ground.
+                SheetShapeInk.Draw(
+                    sink, where, part.Fill, part.Gradient, part.Stroke, part.StrokeWidth,
+                    part.Preset, part.Adjustments,
+                    part.FlipHorizontal, part.FlipVertical, scale);
+
+                if (part.HasPicture)
+                    DrawPicture(sink, where, part.Crop, part.Vector, part.Image, part.Opacity);
+            }
+            finally
+            {
+                if (turn is not null) sink.Restore();
+            }
+        }
+    }
+
+    /// <summary>
+    /// A rectangle reflected in the line <c>y = x</c> about its own centre: the same centre, with
+    /// its width and height exchanged.
+    /// </summary>
+    /// <remarks>
+    /// <c>drawingfragment.cxx</c>:325-329 states it as two additions and a swap rather than as a
+    /// reflection, and the two are the same thing — <c>X + (w − h)/2</c> keeps the centre where it
+    /// was. See <see cref="SheetDrawing.QuarterTurnedAnchor"/> for when it applies.
+    /// </remarks>
+    private static DocRect Reflected(DocRect box)
+        => new(
+            box.X + ((box.Width - box.Height) / 2),
+            box.Y + ((box.Height - box.Width) / 2),
+            box.Height,
+            box.Width);
+
+    /// <summary>A rotation about a rectangle's centre, or null when there is no turn.</summary>
+    /// <remarks>
+    /// Null rather than the identity so an upright picture pays neither a <c>Save</c>/<c>Restore</c>
+    /// pair nor a transform in the output — the same reason <c>PageDrawing.Turn</c> does it.
+    /// </remarks>
+    private static AffineTransform? Turn(DocRect box, double degrees)
+    {
+        if (degrees == 0) return null;
+
+        double cx = box.X.Emu + (box.Width.Emu / 2.0);
+        double cy = box.Y.Emu + (box.Height.Emu / 2.0);
+
+        return AffineTransform.Concat(
+            AffineTransform.Concat(
+                AffineTransform.Translation(-cx, -cy),
+                AffineTransform.Rotation(degrees * Math.PI / 180.0)),
+            AffineTransform.Translation(cx, cy));
     }
 
     /// <summary>

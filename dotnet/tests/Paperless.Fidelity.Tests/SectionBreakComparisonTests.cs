@@ -57,7 +57,7 @@ public sealed class SectionBreakComparisonTests : IDisposable
     [InlineData("section-columns.doc")]
     public void AColumnBreakCostsAPageWhenTheColumnsDoNotLineUp(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<DrawnWord>> drawn = Drawn(path);

@@ -63,7 +63,7 @@ public sealed class OdpTableComparisonTests : IDisposable
     [Fact]
     public void EveryGridLineIsTheStrokeLibreOfficeDraws()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("odp-table-grid.odp");
         List<PdfStroke> ours = PdfStrokes.Read(Ours(path));
@@ -96,7 +96,7 @@ public sealed class OdpTableComparisonTests : IDisposable
     [Fact]
     public void EveryCellBackgroundIsWhereAndWhatLibreOfficeFillsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("odp-table-grid.odp");
         List<PdfFill> ours = CellFills(PdfFills.Read(Ours(path)));
@@ -125,7 +125,7 @@ public sealed class OdpTableComparisonTests : IDisposable
     [Fact]
     public void EveryCellsTextIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         const string fileName = "odp-table-grid.odp";
         string path = Corpus.Require(fileName);

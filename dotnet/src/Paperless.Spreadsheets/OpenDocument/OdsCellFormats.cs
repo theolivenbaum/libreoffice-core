@@ -44,6 +44,35 @@ internal static class OdsCellFormats
         return reader.Read(table);
     }
 
+    /// <summary>
+    /// The workbook's default cell font: the <c>Default</c> cell style's own family and size.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is what a header or footer naming no face of its own is set in, and what an
+    /// <em>empty</em> header area is measured as — <c>ScPrintFunc::MakeEditEngine</c> fills the
+    /// band's EditEngine defaults from <c>getDefaultCellAttribute</c>
+    /// (<c>sc/source/ui/view/printfun.cxx:1765-1772</c>). The other three readers have passed
+    /// this to <see cref="SheetBandHeight"/> since round 56; the ODF one had nowhere to pass it
+    /// to, because it read the band's declared height and never measured its text.
+    /// </para>
+    /// <para>
+    /// Resolved through the same <see cref="Reader"/> a cell goes through, rather than by reading
+    /// the style's attributes here, so that the two spellings of a face — <c>style:font-name</c>
+    /// and <c>fo:font-family</c>, one item — are settled by level before they are settled by
+    /// spelling. A converted workbook states the first on its automatic styles and both on
+    /// <c>Default</c>, so reading them independently answers the wrong one.
+    /// </para>
+    /// </remarks>
+    /// <param name="styles">The document's styles.</param>
+    public static SheetDefaultFont DefaultFont(OdfStyles styles)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+
+        Reader reader = new(styles);
+        return reader.DefaultFont();
+    }
+
     private sealed class Reader(OdfStyles styles)
     {
         private readonly Dictionary<string, SheetCellFormat> _resolved = new(StringComparer.Ordinal);
@@ -127,40 +156,55 @@ internal static class OdsCellFormats
 
         private void ReadRows(XElement table)
         {
-            int row = 0;
+            long row = 0;
             foreach (XElement element in Descend(table, "table-row"))
             {
                 int repeat = Repeat(element, "number-rows-repeated");
                 int rowStyle = Intern(Attribute(element, "default-cell-style-name"));
 
-                // A row repeated a million times is the sheet's padding, not a million formatted
-                // rows: reading its cells once and stamping them across the sheet would
-                // materialise the whole grid. Only the first is recorded, which is what the
-                // extraction path does with the same attribute.
-                int span = Math.Min(repeat, MaxRepeat);
+                // Clamped to the sheet's own last row rather than dropped or ignored, which is
+                // what `ScXMLTableRowContext` does with the same attribute:
+                // `min(declared, GetSheetLimits().GetMaxRowCount())`
+                // (`sc/source/filter/xml/xmlrowi.cxx`:73-82).
+                long lastRow = Math.Min(row + repeat - 1, SheetAddress.MaxRow);
 
-                for (int at = 0; at < span && row < SheetAddress.MaxRow; at++, row++)
+                if (row <= lastRow)
                 {
-                    _builder.SetRow(row, rowStyle);
                     _rowDefault = rowStyle;
-                    ReadCells(element, row);
+
+                    // A row default is one entry per row, so a row repeated a million times would
+                    // be a million of them. The cap is what it was before the run became a block.
+                    if (rowStyle != 0)
+                    {
+                        long last = Math.Min(lastRow, row + MaxRepeat - 1);
+                        for (long at = row; at <= last; at++) _builder.SetRow((int)at, rowStyle);
+                    }
+
+                    // Read once for the whole run: re-reading the element per repeated row is
+                    // what made a padded sheet cost rows times columns.
+                    ReadCells(element, (int)row, (int)lastRow);
                 }
 
-                if (repeat > span) row += repeat - span;
+                row = Math.Min(row + repeat, SheetAddress.MaxRow + 1L);
             }
         }
 
-        private void ReadCells(XElement rowElement, int row)
+        private void ReadCells(XElement rowElement, int firstRow, int lastRow)
         {
-            int column = 0;
+            long column = 0;
             foreach (XElement cell in rowElement.Elements())
             {
                 if (cell.Name.NamespaceName != OdfNamespaces.Table) continue;
                 if (cell.Name.LocalName is not ("table-cell" or "covered-table-cell")) continue;
+                if (column > SheetAddress.MaxColumn) break;
 
                 string? styleName = Attribute(cell, "style-name");
                 int repeat = Repeat(cell, "number-columns-repeated");
                 int index = Intern(styleName);
+
+                // The same clamp on the other axis: `min(GetMaxColCount(), max(declared, 1))`,
+                // `sc/source/filter/xml/xmlcelli.cxx`:186-195.
+                long lastColumn = Math.Min(column + repeat - 1, SheetAddress.MaxColumn);
 
                 // Padding, skipped whole. A row is written out to the sheet's full width with one
                 // repeated empty cell naming the default style, and expanding that run records
@@ -177,15 +221,45 @@ internal static class OdsCellFormats
                     continue;
                 }
 
-                int span = Math.Min(repeat, MaxRepeat);
-                for (int at = 0; at < span && column < SheetAddress.MaxColumn; at++, column++)
+                // Inside the columns a column default reaches, what a cell inherits differs from
+                // one column to the next, so the run is cut into the stretches that agree; past
+                // the last of them it is the same for all of them and the rest is one block.
+                long singly = Math.Min(lastColumn, _lastColumnDefault);
+                for (long at = column; at <= singly;)
                 {
-                    // Only where it says something the cell would not inherit; see InheritedIndex.
-                    if (index != InheritedIndex(column)) _builder.SetCell(row, column, index);
-                    ReadSpans(cell, row, column, Effective(index, column));
+                    bool differs = index != InheritedIndex((int)at);
+                    long end = at;
+                    while (end < singly && (index != InheritedIndex((int)end + 1)) == differs) end++;
+                    if (differs) Record(firstRow, lastRow, (int)at, (int)end, index);
+                    at = end + 1;
                 }
 
-                if (repeat > span) column += repeat - span;
+                long block = Math.Max(column, _lastColumnDefault + 1L);
+                if (block <= lastColumn && index != (_rowDefault != 0 ? _rowDefault : _sheetDefault))
+                    Record(firstRow, lastRow, (int)block, (int)lastColumn, index);
+
+                // Rich text is per cell and cannot be a block — a portion is an offset into one
+                // cell's own text. A repeated cell carrying spans is not something Calc writes, so
+                // the expansion is bounded by a budget over the whole rectangle rather than
+                // modelled. The test is hoisted out of the loops because it walks the cell's
+                // descendants and the loops can run to the budget.
+                if (cell.HasElements && HasSpan(cell))
+                {
+                    long budget = MaxRepeat;
+                    for (long line = firstRow; line <= lastRow && budget > 0; line++)
+                    {
+                        for (long at = column; at <= lastColumn && budget > 0; at++, budget--)
+                            ReadSpans(cell, (int)line, (int)at, Effective(index, (int)at));
+                    }
+                }
+
+                column += repeat;
+            }
+
+            void Record(int first, int last, int firstCol, int lastCol, int format)
+            {
+                if (first == last && firstCol == lastCol) _builder.SetCell(first, firstCol, format);
+                else _builder.SetCells(first, last, firstCol, lastCol, format);
             }
         }
 
@@ -355,9 +429,8 @@ internal static class OdsCellFormats
         /// </remarks>
         private SheetCellFormat TextStyle(SheetCellFormat cellFormat, string styleName)
         {
-            string? faceName = Span(styleName, "font-name", OdfNamespaces.Style);
-            string? stated = Span(styleName, "font-family", OdfNamespaces.FoCompatible);
-            string? family = stated ?? FontFaceFamily(faceName);
+            (string? family, FontFamilyClass declared) =
+                FontIdentity(styleName, OdfStyleFamily.Text);
 
             Length? size = Measure(Span(styleName, "font-size", OdfNamespaces.FoCompatible));
             string? weight = Span(styleName, "font-weight", OdfNamespaces.FoCompatible);
@@ -367,9 +440,7 @@ internal static class OdsCellFormats
             return cellFormat with
             {
                 FontFamily = family ?? cellFormat.FontFamily,
-                DeclaredFontClass = family is null
-                    ? cellFormat.DeclaredFontClass
-                    : stated is not null ? FontFamilyClass.Unknown : FontFaceClass(faceName),
+                DeclaredFontClass = family is null ? cellFormat.DeclaredFontClass : declared,
                 FontSize = size ?? cellFormat.FontSize,
                 FontWeight = weight is null ? cellFormat.FontWeight : Weight(weight),
                 IsItalic = posture is null
@@ -453,17 +524,28 @@ internal static class OdsCellFormats
             return _pool.GetValueOrDefault(index, SheetCellFormat.Default);
         }
 
+        /// <summary>The <c>Default</c> cell style's font, as a band's default.</summary>
+        public SheetDefaultFont DefaultFont()
+        {
+            SheetCellFormat format = Resolve(DefaultCellStyleName);
+
+            return new SheetDefaultFont(
+                format.FontFamily,
+                format.FontSize,
+                format.FontWeight,
+                format.IsItalic,
+                format.DeclaredFontClass);
+        }
+
         private SheetCellFormat Resolve(string styleName)
         {
-            string? faceName = Text(styleName, "font-name");
-            string? stated = Text(styleName, "font-family");
-            string? family = stated ?? FontFaceFamily(faceName);
+            (string? family, FontFamilyClass declared) =
+                FontIdentity(styleName, OdfStyleFamily.TableCell);
 
             return new SheetCellFormat
             {
                 FontFamily = family,
-                DeclaredFontClass =
-                    stated is not null ? FontFamilyClass.Unknown : FontFaceClass(faceName),
+                DeclaredFontClass = declared,
                 FontSize = Points(Text(styleName, "font-size")) ?? Length.FromPoints(10),
                 FontWeight = Weight(Text(styleName, "font-weight")),
                 IsItalic = Text(styleName, "font-style") is "italic" or "oblique",
@@ -610,6 +692,59 @@ internal static class OdsCellFormats
 
             return Math.Clamp(folded, -90, 90);
         }
+
+        /// <summary>
+        /// The face a style asks for, deciding the level of the parent chain before the spelling.
+        /// </summary>
+        /// <remarks>
+        /// <c>style:font-name</c> and <c>fo:font-family</c> are two spellings of one item, so an
+        /// ancestor stating the second must not beat a child stating the first. See
+        /// <see cref="OdfStyles.ResolveWithoutDefaults(string, OdfStyleFamily, OdfPropertyKind,
+        /// IReadOnlyList{ValueTuple{string, string}}, out int)"/>, which is where the whole of the
+        /// reasoning is. Every automatic cell style an <c>.ods</c> converted from a workbook
+        /// carries states <c>style:font-name</c> and no <c>fo:font-family</c>, while the
+        /// <c>Default</c> cell style it inherits from states both — so reading them independently
+        /// draws every such sheet in the document default's face rather than the cell's.
+        /// </remarks>
+        private (string? Family, FontFamilyClass Declared) FontIdentity(
+            string styleName, OdfStyleFamily family)
+        {
+            OdfProperty found = styles.ResolveWithoutDefaults(
+                styleName, family, OdfPropertyKind.Text, FontSpellings, out int matched);
+
+            if (!found.HasValue)
+            {
+                found = styles.ResolveFromDefaults(
+                    family, OdfPropertyKind.Text, OdfNamespaces.FoCompatible, "font-family");
+                matched = 0;
+
+                if (!found.HasValue)
+                {
+                    found = styles.ResolveFromDefaults(
+                        family, OdfPropertyKind.Text, OdfNamespaces.Style, "font-name");
+                    matched = 1;
+                }
+            }
+
+            if (!found.HasValue) return (null, FontFamilyClass.Unknown);
+
+            return matched == 1
+                ? (FontFaceFamily(found.Value), FontFaceClass(found.Value))
+                : (found.Value, FontFamilyClass.Unknown);
+        }
+
+        /// <summary>The two spellings of a face, in the order one style's own attributes settle.</summary>
+        /// <remarks>
+        /// <c>fo:font-family</c> first, because a style stating both is settled by attribute order
+        /// and LibreOffice's export writes <c>style:font-name</c> before it — the second write into
+        /// <c>CTF_FONTFAMILYNAME</c> is the one that stands. What this pair changes is only which
+        /// <em>level</em> answers; where one style states both, the answer is what it always was.
+        /// </remarks>
+        private static readonly (string Namespace, string Name)[] FontSpellings =
+        [
+            (OdfNamespaces.FoCompatible, "font-family"),
+            (OdfNamespaces.Style, "font-name"),
+        ];
 
         private string? FontFaceFamily(string? name)
             => name is not null && styles.FontFaces.TryGetValue(name, out OdfFontFace? face)

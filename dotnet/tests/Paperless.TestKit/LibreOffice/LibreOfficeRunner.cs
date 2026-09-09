@@ -65,11 +65,14 @@ public sealed class LibreOfficeRunner : IDisposable
 
     /// <summary>Creates a runner with a private user profile.</summary>
     /// <param name="sofficePath">
-    /// Path to the <c>soffice</c> executable. When null, it is looked up on <c>PATH</c>.
+    /// Path to the <c>soffice</c> executable. When null, <see cref="LibreOfficeReference.Path"/>
+    /// chooses — which is <em>not</em> simply the first <c>soffice</c> on <c>PATH</c>, because the
+    /// two installed versions resolve fonts by different rules and only one of them is what this
+    /// tree targets. See that type.
     /// </param>
     public LibreOfficeRunner(string? sofficePath = null)
     {
-        SofficePath = sofficePath ?? "soffice";
+        SofficePath = sofficePath ?? LibreOfficeReference.Path;
         _profileDirectory = Path.Combine(
             Path.GetTempPath(),
             "paperless-lo-" + Guid.NewGuid().ToString("N")[..12]);
@@ -80,21 +83,45 @@ public sealed class LibreOfficeRunner : IDisposable
     public string SofficePath { get; }
 
     /// <summary>
-    /// True when <c>soffice</c> is installed and its application modules are present.
+    /// True when the reference is installed, converts, and is fit to be compared against.
     /// </summary>
     /// <remarks>
-    /// Both halves matter, and only the second is easy to get wrong: a container with
-    /// <c>libreoffice-core</c> alone has an <c>soffice</c> that starts, reports a version and
-    /// then fails on every document. So availability is decided by actually converting
-    /// something, not by finding the binary.
+    /// <para>
+    /// Three halves, and only the first is obvious. A container with <c>libreoffice-core</c> alone
+    /// has an <c>soffice</c> that starts, reports a version and then fails on every document, so
+    /// availability is decided by actually converting something rather than by finding the binary.
+    /// </para>
+    /// <para>
+    /// And a reference that converts can still be the wrong oracle. A TDF tarball reads fonts out
+    /// of its own bundle, so it can answer a family the system lacks with a face nothing else on
+    /// the machine has, or draw a metric-compatible family from a different build of it — either
+    /// makes every comparison here void while looking entirely healthy.
+    /// <see cref="LibreOfficeReference"/> refuses those, and <see cref="UnavailableReason"/> says
+    /// which. A silent wrong reference cost this project two rounds; skipping loudly is the
+    /// cheaper failure.
+    /// </para>
     /// </remarks>
-    public static bool IsAvailable => AvailabilityCheck.Value;
+    public static bool IsAvailable => AvailabilityCheck.Value && LibreOfficeReference.IsUsable;
+
+    /// <summary>
+    /// Why <see cref="IsAvailable"/> is false, or a description of the reference when it is true.
+    /// </summary>
+    /// <remarks>
+    /// Passed as the skip reason at every call site instead of a literal, so a run that skips all
+    /// 552 comparisons says why in the first line of its output rather than looking like a pass.
+    /// </remarks>
+    public static string UnavailableReason
+        => !AvailabilityCheck.Value
+            ? $"LibreOffice at '{LibreOfficeReference.Path}' is not installed or converts nothing"
+            : LibreOfficeReference.IsUsable
+                ? LibreOfficeReference.Describe()
+                : LibreOfficeReference.Reason;
 
     private static readonly Lazy<bool> AvailabilityCheck = new(() =>
     {
         try
         {
-            using LibreOfficeRunner runner = new();
+            using LibreOfficeRunner runner = new(LibreOfficeReference.Path);
             if (runner.GetVersion().Length == 0) return false;
 
             string probeDirectory = Path.Combine(runner._profileDirectory, "probe");

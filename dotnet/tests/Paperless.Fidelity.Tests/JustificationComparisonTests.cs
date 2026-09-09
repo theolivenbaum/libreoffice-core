@@ -76,7 +76,7 @@ public sealed class JustificationComparisonTests : IDisposable
     [InlineData("justified.rtf")]
     public void EachWordIsAlignedAsLibreOfficeAlignsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<DrawnWord> drawn = Drawn(path);

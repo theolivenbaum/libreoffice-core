@@ -56,10 +56,19 @@ internal static class PptTextBody
     private const uint StatesBulletHardColour = 0x0000_0004;
 
     /// <summary>
+    /// The mask bit for <c>PPT_ParaAttr_BuHardFont</c>, which says whether the paragraph itself
+    /// decided that its bullet's face is stated rather than inherited from its text.
+    /// </summary>
+    private const uint StatesBulletHardFont = 0x0000_0002;
+
+    /// <summary>
     /// <c>PPT_ParaAttr_BuHardColor</c>'s bit within the bullet-flags word — the second, counting
     /// from <c>PPT_ParaAttr_BulletOn</c> at bit zero.
     /// </summary>
     private const ushort BulletHardColourFlag = 0x0004;
+
+    /// <summary><c>PPT_ParaAttr_BuHardFont</c>'s bit within the same word — the first.</summary>
+    private const ushort BulletHardFontFlag = 0x0002;
 
     /// <summary>The mask bits a character run sets for its face, size and colour.</summary>
     private const uint StatesFontIndex = 0x0001_0000;
@@ -98,12 +107,21 @@ internal static class PptTextBody
         List<SlideParagraph> paragraphs = [];
         int start = 0;
 
+        // One counter and one "inside a numbered run" flag per outline level, owned by the body
+        // rather than by a paragraph -- an automatic number runs across the paragraphs of one
+        // text body and restarts wherever the run is broken, which is the same contract
+        // `DrawingTextBody.AutoNumber` takes for the OOXML side and the reason both readers can
+        // share its arithmetic instead of numbering a nested list two different ways.
+        int[] counters = new int[PptNumbering.Levels];
+        bool[] counting = new bool[PptNumbering.Levels];
+
         while (start <= run.Text.Length)
         {
             int stop = run.Text.IndexOf(PptTextReader.ParagraphSeparator, start);
             int length = (stop < 0 ? run.Text.Length : stop) - start;
 
-            paragraphs.Add(Paragraph(run, styles, scheme, fonts, start, length));
+            paragraphs.Add(
+                Paragraph(run, styles, scheme, fonts, start, length, counters, counting));
 
             if (stop < 0) break;
             start = stop + 1;
@@ -146,7 +164,9 @@ internal static class PptTextBody
         PptColourScheme scheme,
         PptFontTable fonts,
         int start,
-        int length)
+        int length,
+        int[] counters,
+        bool[] counting)
     {
         PptParagraphRun properties = PropertiesAt(run.Paragraphs, start);
         int depth = properties.Depth;
@@ -167,14 +187,31 @@ internal static class PptTextBody
 
         List<SlideTextRun> runs = Runs(run, scheme, fonts, characters, start, length, text.Length);
 
+        // A bullet whose colour is not hard takes the first portion's -- and a hyperlink portion
+        // hands it the colour it had *before* the link recoloured it, rather than the scheme's
+        // hyperlink slot: `PPTParagraphObj::GetAttrib` keeps `mnHylinkOrigColor` for exactly this
+        // (`filter/source/msfilter/svdfppt.cxx:6037-6042`), falling back to the master character
+        // level's own colour when the portion stated none of its own. Without it every bulleted
+        // paragraph opening on a link would take a blue bullet the reference does not draw.
+        Colour? linkedBullet = run.IsLinked(start)
+            ? PptColour.ResolveText(UnlinkedColour(run, characters, start), scheme)
+            : null;
+
         ushort alignment = properties.States(StatesAlignment) ? properties.Alignment : level.Alignment;
         short lineFeed = properties.States(StatesLineFeed) ? properties.LineFeed : level.LineFeed;
         short before = properties.States(StatesSpaceBefore) ? properties.SpaceBefore : level.SpaceBefore;
         short after = properties.States(StatesSpaceAfter) ? properties.SpaceAfter : level.SpaceAfter;
-        ushort textOffset = properties.States(StatesTextOffset) ? properties.TextOffset : level.TextOffset;
+        // The shape's own ruler outranks the master, and is consulted only where the paragraph
+        // itself said nothing. That is exactly `ReadParaProps`' tail
+        // (`filter/source/msfilter/svdfppt.cxx:5062-5068`): the ruler's value is written into the
+        // property set *and the mask bit is set with it*, so a level the ruler speaks for never
+        // reaches the master's level at all. See `PptTextRuler` for the measurement.
+        ushort textOffset = properties.States(StatesTextOffset)
+            ? properties.TextOffset
+            : run.Ruler?.TextOffset(depth) ?? level.TextOffset;
         ushort bulletOffset = properties.States(StatesBulletOffset)
             ? properties.BulletOffset
-            : level.BulletOffset;
+            : run.Ruler?.BulletOffset(depth) ?? level.BulletOffset;
 
         Length size = runs.Count > 0 ? runs[0].Size : Length.FromPoints(characters.FontHeight);
 
@@ -188,7 +225,19 @@ internal static class PptTextBody
             MasterUnits(textOffset),
             MasterUnits(bulletOffset) - MasterUnits(textOffset),
             Language: null,
-            Marker: Marker(properties, level, scheme, fonts, runs))
+            Marker: Marker(
+                properties,
+                level,
+                scheme,
+                fonts,
+                runs,
+                linkedBullet,
+                TextFontAt(run, characters, start),
+                run.ExtensionAt(ExtendedIndexAt(run, start)),
+                depth,
+                text.Length > 0,
+                counters,
+                counting))
         {
             // Every binary paragraph, unconditionally -- and that is a measurement rather than a
             // reading. `PPTParagraphObj::ApplyTo` puts the SvxLineSpacingItem (and with it
@@ -215,10 +264,23 @@ internal static class PptTextBody
             // The master's own value, which PowerPoint writes as 0x240 — one inch — and which the
             // record's default already is. Reading it matters for the deck that states something
             // else, and stating nothing must not fall back to a word processor's half inch.
-            DefaultTabInterval = level.DefaultTab > 0
-                ? MasterUnits(level.DefaultTab)
-                : SlideParagraph.DefaultTabDistance,
+            //
+            // The ruler's own default tab wins over it outright — `GetDefaultTab` is asked
+            // unconditionally rather than only when the paragraph said nothing
+            // (`svdfppt.cxx:5069-5070`), because a default tab is a property of the shape and a
+            // paragraph has no way to state one.
+            DefaultTabInterval = DefaultTab(run.Ruler, level),
         };
+    }
+
+    /// <summary>The tab interval in force, which the shape's ruler may state for itself.</summary>
+    private static Length DefaultTab(PptTextRuler? ruler, PptParagraphLevel level)
+    {
+        if (ruler?.DefaultTab is { } stated && stated > 0) return MasterUnits(stated);
+
+        return level.DefaultTab > 0
+            ? MasterUnits(level.DefaultTab)
+            : SlideParagraph.DefaultTabDistance;
     }
 
     /// <summary>
@@ -254,15 +316,67 @@ internal static class PptTextBody
         PptParagraphLevel level,
         PptColourScheme scheme,
         PptFontTable fonts,
-        List<SlideTextRun> runs)
+        List<SlideTextRun> runs,
+        Colour? linkedBullet,
+        ushort textFont,
+        PptExtendedParagraph? extended,
+        int depth,
+        bool hasText,
+        int[] counters,
+        bool[] counting)
     {
         bool bulleted = properties.HasBullet ?? level.HasBullet;
+
+        // The number outranks the bullet the paragraph states, and the paragraph goes on stating
+        // one: a numbered PowerPoint list still carries its master's round dot in its property
+        // run, so reading the two in the other order draws a bullet on every numbered item.
+        // `ImplGetExtNumberFormat` reaches the same place by overwriting the SVX_NUM_CHAR_SPECIAL
+        // the bullet put there (`svdfppt.cxx:3466-3630`).
+        if (bulleted
+            && runs.Count > 0
+            && extended is { HasAutoNumber: true } numbering
+            && PptNumbering.Next(numbering, depth, hasText, counters, counting) is { } number)
+        {
+            return new SlideMarker(
+                number,
+                runs[0].Typeface,
+                MarkerScale(properties, level),
+                MarkerColour(properties, level, scheme, linkedBullet),
+
+                // A generated number sits on the text's own baseline rather than centred on it,
+                // and is drawn in the paragraph's own face -- see `SlideMarker.IsSymbol`.
+                IsSymbol: false);
+        }
+
+        PptNumbering.Break(depth, counting);
+
         if (!bulleted || runs.Count == 0) return null;
 
         char character = properties.BulletCharacter
                          ?? (level.BulletCharacter != 0 ? (char)level.BulletCharacter : '•');
 
-        ushort font = properties.States(StatesBulletFont) ? properties.BulletFont : level.BulletFont;
+        // The face word is only the bullet's face when a separate flag says so, and the flag is
+        // PPT_ParaAttr_BuHardFont -- the exact counterpart of the BuHardColor rule below, and read
+        // the same way: the paragraph's own flag when its mask names it, otherwise the master
+        // level's. With the flag clear the word means nothing and the bullet is drawn in
+        // <em>the face of the first character of the text it labels</em>
+        // (<c>PPTParagraphObj::GetAttrib</c>, <c>svdfppt.cxx:5918-5942</c>, both the hard and the
+        // inherited branch: "it is the font used which assigned to the first character of the
+        // following text").
+        //
+        // Measured on <c>slides/done-014/ppt/Aerospace_Journey_of_Flight_Chapter_*.ppt</c> page 5,
+        // whose Body master level states <c>buFlags=1</c> -- BulletOn and nothing else -- beside a
+        // <c>buFont</c> of 0, Times New Roman. The reference draws every bullet on the page from
+        // <b>Liberation Sans</b>, the face of the Arial text beside it; we took the level's word at
+        // face value and drew them from Liberation Serif.
+        bool hardFont = properties.States(StatesBulletHardFont)
+            ? (properties.BulletFlags & BulletHardFontFlag) != 0
+            : (level.BulletFlags & BulletHardFontFlag) != 0;
+
+        ushort font = hardFont
+            ? properties.States(StatesBulletFont) ? properties.BulletFont : level.BulletFont
+            : textFont;
+
         ushort height = properties.States(StatesBulletHeight)
             ? properties.BulletHeight
             : level.BulletHeight;
@@ -296,8 +410,101 @@ internal static class PptTextBody
         return new SlideMarker(
             text,
             typeface,
-            height is > 0 and <= 400 ? height / 100.0 : 1.0,
-            hardColour ? PptColour.ResolveText(colour, scheme) : null);
+            MarkerScale(properties, level),
+            MarkerColour(properties, level, scheme, linkedBullet));
+    }
+
+    /// <summary>The marker's size as a fraction of its text's.</summary>
+    private static double MarkerScale(PptParagraphRun properties, PptParagraphLevel level)
+    {
+        ushort height = properties.States(StatesBulletHeight)
+            ? properties.BulletHeight
+            : level.BulletHeight;
+
+        return height is > 0 and <= 400 ? height / 100.0 : 1.0;
+    }
+
+    /// <summary>The marker's own colour, or null for the first run's.</summary>
+    /// <remarks>
+    /// The paragraph states <c>PPT_ParaAttr_BuHardColor</c> only when its mask names it; otherwise
+    /// the master's level holds it, exactly as the character and the face do.
+    /// </remarks>
+    /// <param name="properties">The paragraph's own property run.</param>
+    /// <param name="level">The master's level, for everything the paragraph does not state.</param>
+    /// <param name="scheme">The page's colour scheme.</param>
+    /// <param name="linkedBullet">
+    /// The colour the paragraph's first portion had before a text-range hyperlink recoloured it,
+    /// or null when that portion is not linked. A soft bullet takes the first portion's colour,
+    /// and <c>GetAttrib</c> reaches past the link for it
+    /// (<c>filter/source/msfilter/svdfppt.cxx:6037-6042</c>).
+    /// </param>
+    private static Colour? MarkerColour(
+        PptParagraphRun properties,
+        PptParagraphLevel level,
+        PptColourScheme scheme,
+        Colour? linkedBullet = null)
+    {
+        uint colour = properties.States(StatesBulletColour)
+            ? properties.BulletColour
+            : level.BulletColour;
+
+        bool hardColour = properties.States(StatesBulletHardColour)
+            ? (properties.BulletFlags & BulletHardColourFlag) != 0
+            : (level.BulletFlags & BulletHardColourFlag) != 0;
+
+        if (hardColour) return PptColour.ResolveText(colour, scheme);
+
+        return linkedBullet;
+    }
+
+    /// <summary>
+    /// Which <c>ExtendedParagraphAtom</c> entry is in force at a paragraph's first character.
+    /// </summary>
+    /// <remarks>
+    /// The selection is made by the <em>character</em> run rather than by the paragraph, which is
+    /// how one atom entry covers three paragraphs and a second covers the fourth
+    /// (<c>PPTStyleTextPropReader::ReadCharProps</c>, <c>svdfppt.cxx:5171-5182</c>).
+    /// </remarks>
+    private static int ExtendedIndexAt(PptTextRun run, int start)
+    {
+        int position = 0;
+
+        foreach (PptCharacterRun character in run.Characters)
+        {
+            int runEnd = position + character.Length;
+            if (start >= position && start < runEnd) return character.ExtendedIndex;
+
+            position = runEnd;
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// The typeface index in force at a paragraph's first character.
+    /// </summary>
+    /// <remarks>
+    /// What a bullet with no hard face of its own is drawn in. The character run covering the
+    /// paragraph's first character when it states a face, and the level's otherwise — which is
+    /// <c>PPTParagraphObj::GetAttrib</c>'s own pair of alternatives for
+    /// <c>PPT_ParaAttr_BulletFont</c> (<c>svdfppt.cxx:5929-5941</c>).
+    /// </remarks>
+    private static ushort TextFontAt(PptTextRun run, PptCharacterLevel level, int start)
+    {
+        int position = 0;
+
+        foreach (PptCharacterRun character in run.Characters)
+        {
+            int runEnd = position + character.Length;
+            if (start >= position && start < runEnd)
+            {
+                return character.States(StatesFontIndex) ? character.FontIndex : level.FontIndex;
+            }
+
+            position = runEnd;
+        }
+
+        return level.FontIndex;
     }
 
     /// <summary>
@@ -349,7 +556,19 @@ internal static class PptTextBody
             int to = Math.Min(runEnd, end);
 
             if (!found && start >= position && start < runEnd) { atStart = character; found = true; }
-            if (to > from) runs.Add(Run(character, scheme, fonts, level, from - start, to - from));
+
+            // A text-range hyperlink splits the portion it lands in, and each piece it covers is
+            // its own field: `svdfppt.cxx:7080-7091` clones the PPTCharPropSet at the range's end
+            // and gives the head its own SvxURLField, so a run half inside a link is two portions.
+            for (int piece = from; piece < to;)
+            {
+                bool linked = run.IsLinked(piece);
+                int stop = piece + 1;
+                while (stop < to && run.IsLinked(stop) == linked) stop++;
+
+                runs.Add(Run(character, scheme, fonts, level, piece - start, stop - piece, linked));
+                piece = stop;
+            }
 
             position = runEnd;
 
@@ -387,13 +606,24 @@ internal static class PptTextBody
         return runs;
     }
 
+    /// <param name="character">The character property run the piece falls in.</param>
+    /// <param name="scheme">The page's colour scheme.</param>
+    /// <param name="fonts">The document's font collection.</param>
+    /// <param name="level">The master's character level, behind everything the run leaves unsaid.</param>
+    /// <param name="start">Where the piece begins in the paragraph's own text.</param>
+    /// <param name="length">How many characters it covers.</param>
+    /// <param name="linked">
+    /// Whether a text-range hyperlink covers it, which makes it a field and redecorates it —
+    /// see the remarks.
+    /// </param>
     private static SlideTextRun Run(
         PptCharacterRun character,
         PptColourScheme scheme,
         PptFontTable fonts,
         PptCharacterLevel level,
         int start,
-        int length)
+        int length,
+        bool linked = false)
     {
         ushort fontIndex = character.States(StatesFontIndex) ? character.FontIndex : level.FontIndex;
         ushort height = character.States(StatesFontHeight) ? character.FontHeight : level.FontHeight;
@@ -401,6 +631,22 @@ internal static class PptTextBody
 
         RunEmphasis emphasis = (level.Emphasis & ~character.Stated)
                                | (character.Emphasis & character.Stated);
+
+        if (linked)
+        {
+            // The scheme's "accent and hyperlink" slot, imposed on the portion whatever it stated
+            // (`SetColor(PPT_COLSCHEME_A_UND_HYPERLINK)`, `svdfppt.cxx:7060` and `:7094`, the
+            // constant at `:145`).
+            colour = HyperlinkSchemeColour;
+
+            // And the emphasis is *replaced* rather than added to: `svdfppt.cxx:7054-7056` sets
+            // the underline bit in the attribute mask and then assigns -- not ors --
+            // `mnFlags = 1 << PPT_CharAttr_Underline`, so every emphasis the portion stated for
+            // itself is turned off and stated as off, while the ones it left to the master still
+            // come from there. A bold linked run is therefore drawn upright and light.
+            RunEmphasis stated = character.Stated | RunEmphasis.Underline;
+            emphasis = (level.Emphasis & ~stated) | RunEmphasis.Underline;
+        }
 
         // Already a percentage in the file, so it goes straight through; the size that goes with
         // it does not, and LibreOffice supplies DFLT_ESC_PROP whenever the value is non-zero
@@ -421,7 +667,47 @@ internal static class PptTextBody
             IsShadowed: emphasis.HasFlag(RunEmphasis.Shadow),
             Escapement: escapement == 0
                 ? SlideEscapement.None
-                : new SlideEscapement(escapement, SlideEscapement.AutomaticProportion));
+                : new SlideEscapement(escapement, SlideEscapement.AutomaticProportion),
+            // A hyperlinked portion is an EditEngine field, which changes where the line breaks
+            // and how the lines it spills onto are stacked -- see `SlideTextRun.IsField`,
+            // `PptHyperlinkRange` and `PptHyperlinks`.
+            IsField: linked);
+    }
+
+    /// <summary>
+    /// The packed colour word for the scheme's "accent and hyperlink" slot.
+    /// </summary>
+    /// <remarks>
+    /// <c>PPT_COLSCHEME_A_UND_HYPERLINK</c>, <c>filter/source/msfilter/svdfppt.cxx:145</c> — the
+    /// <c>0x08</c> family with the scheme index in the low word, which
+    /// <see cref="PptColour.ResolveText"/> already resolves.
+    /// </remarks>
+    private const uint HyperlinkSchemeColour = 0x0800_0006;
+
+    /// <summary>
+    /// The colour the character run at a position states, before any hyperlink recolours it.
+    /// </summary>
+    /// <remarks>
+    /// The portion's own word when it states one and the master character level's when it does
+    /// not, which is the pair <c>GetAttrib</c> chooses between for a soft bullet whose paragraph
+    /// opens on a link (<c>filter/source/msfilter/svdfppt.cxx:6039-6042</c>).
+    /// </remarks>
+    private static uint UnlinkedColour(PptTextRun run, PptCharacterLevel level, int start)
+    {
+        int position = 0;
+
+        foreach (PptCharacterRun character in run.Characters)
+        {
+            int runEnd = position + character.Length;
+            if (start >= position && start < runEnd)
+            {
+                return character.States(StatesColour) ? character.Colour : level.Colour;
+            }
+
+            position = runEnd;
+        }
+
+        return level.Colour;
     }
 
     /// <summary>

@@ -38,11 +38,32 @@ namespace Paperless.WordProcessing.Ooxml;
 /// lives in <c>w:rPr</c>, is stated in twips, and is commonly negative. See
 /// <see cref="Paperless.Text.Layout.FormattedRun.Tracking"/> for what a reader owes it.
 /// </param>
+/// <param name="WidthPerCent">
+/// How wide <c>w:w</c> draws the run's glyphs against their own design, 100 for none. See
+/// <see cref="Paperless.Text.Layout.TextWidthScale"/> for why the factor it produces is not the
+/// percentage.
+/// </param>
 /// <param name="DeclaredClass">
 /// The generic class the document has in force at this run — <see cref="FontFamilyClass.Unknown"/>
 /// when nothing states one — for a family the font matcher cannot find.
 /// <strong>It is inherited, and it is not a property of <see cref="FamilyName"/>.</strong>
 /// See <see cref="WordParagraphFormats.StatedClass"/> for the rule and the probe behind it.
+/// </param>
+/// <param name="AsianLanguage">
+/// <c>w:lang/@w:eastAsia</c>, the language of the East Asian font item, or null when nothing states
+/// one.
+/// </param>
+/// <param name="ComplexLanguage">
+/// <c>w:lang/@w:bidi</c>, the language of the complex-script font item, or null when nothing states
+/// one.
+/// </param>
+/// <param name="Hint">
+/// <c>w:rFonts/@w:hint</c>, which says which item an <em>ambiguous</em> character belongs to. See
+/// <see cref="WriterScripts.ForRun"/>.
+/// </param>
+/// <param name="Script">
+/// Which of the three character-font items this run's text is set from, western until a caller that
+/// has the text says otherwise. See <see cref="OnScript"/>.
 /// </param>
 public readonly record struct WordTextStyle(
     string? FamilyName,
@@ -58,16 +79,79 @@ public readonly record struct WordTextStyle(
     bool IsStruckThrough = false,
     bool AutoKerning = false,
     Length Tracking = default,
-    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown)
+    int WidthPerCent = 100,
+    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown,
+    string? AsianLanguage = null,
+    string? ComplexLanguage = null,
+    WriterScriptHint Hint = WriterScriptHint.Automatic,
+    WriterScript Script = WriterScript.Western)
 {
     /// <summary>The key a face cache is keyed on: what actually decides which font file is loaded.</summary>
     /// <remarks>
+    /// <para>
     /// <see cref="DeclaredClass"/> is part of it, and leaving it out is a cache collision rather than an
     /// omission: one family named under a <c>swiss</c> ancestor and under a <c>roman</c> one resolves to
     /// two different faces, and whichever run reached the cache first would decide for both.
+    /// </para>
+    /// <para>
+    /// So are <see cref="Script"/> and the language it selects, for the same reason and a sharper
+    /// one: the item decides both the generic appended to the fontconfig pattern and its
+    /// <c>FC_LANG</c>, so the same family named in a western run and in an East Asian one is two
+    /// requests with two answers.
+    /// </para>
     /// </remarks>
-    public (string? Family, int Weight, bool Italic, FontFamilyClass Class) FaceKey
-        => (FamilyName, Weight, IsItalic, DeclaredClass);
+    public (string? Family, int Weight, bool Italic, FontFamilyClass Class, WriterScript Script,
+        string? Language) FaceKey
+        => (FamilyName, Weight, IsItalic, DeclaredClass, Script, ItemLanguage);
+
+    /// <summary>
+    /// The language of the font item this run's script selects, never null.
+    /// </summary>
+    /// <remarks>
+    /// Writer's three default language items stand in where the document states none:
+    /// <c>SwDoc::SwDoc</c> resolves them through
+    /// <c>MsLangId::resolveSystemLanguageByScriptType</c>, which answers <c>LANGUAGE_ENGLISH_US</c>,
+    /// <c>LANGUAGE_CHINESE_SIMPLIFIED</c> and <c>LANGUAGE_HINDI</c>
+    /// (<c>sw/source/core/doc/docnew.cxx</c>:383-398,
+    /// <c>i18nlangtag/source/isolang/mslangid.cxx</c>:135-165). It is not a detail: it is what sends
+    /// a Hebrew character in a complex-script run to FreeSans rather than to DejaVu Sans.
+    /// </remarks>
+    public string ItemLanguage => Script switch
+    {
+        WriterScript.Asian => AsianLanguage ?? WriterScripts.DefaultLanguage(WriterScript.Asian),
+        WriterScript.Complex => ComplexLanguage ?? WriterScripts.DefaultLanguage(WriterScript.Complex),
+        _ => Language ?? WriterScripts.DefaultLanguage(WriterScript.Western),
+    };
+
+    /// <summary>The same style, told which font item the run's own text selects.</summary>
+    /// <param name="text">The run's text.</param>
+    public WordTextStyle OnScript(ReadOnlySpan<char> text)
+        => this with { Script = WriterScripts.ForRun(text, Hint) };
+
+    /// <summary>
+    /// The item this run's glyph fallback is asked under: a family, a class and a language.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Built here rather than at the resolver because only the reader knows which of the three
+    /// items the run's script selects, and the class is the item's rather than the document's — see
+    /// <see cref="Layout.WordFallbackClass.ForScript"/>.
+    /// </para>
+    /// <para>
+    /// <strong>A run naming no family at all states no item</strong>, and that is the same
+    /// distinction <see cref="Layout.WordFallbackClass.ForDeclared"/> carries: "no font named" is
+    /// answered by <c>DefaultFonts</c> rather than by a fallback shape, and a pattern built round an
+    /// empty family would ask fontconfig about nothing. Such a run keeps the answer it has always
+    /// had — the generic the face it resolved to is filed under.
+    /// </para>
+    /// </remarks>
+    public FontItem FontItem
+        => string.IsNullOrWhiteSpace(FamilyName)
+            ? default
+            : new FontItem(
+                FamilyName,
+                Layout.WordFallbackClass.ForScript(FamilyName, DeclaredClass, Script),
+                ItemLanguage);
 }
 
 /// <summary>
@@ -112,10 +196,42 @@ internal static class WordParagraphFormats
 {
     /// <summary>The em size used when nothing in the chain states one.</summary>
     /// <remarks>
-    /// Ten points, which is what Word's own <c>w:docDefaults</c> falls back to when a document omits
-    /// them — not the eleven or twelve a template usually sets.
+    /// Ten points, which is what <c>StyleSheetTable</c> puts in <c>m_pDefaultCharProps</c> before a
+    /// document's own <c>w:docDefaults</c> are laid over it
+    /// (<c>sw/source/writerfilter/dmapper/StyleSheetTable.cxx</c>:341-350, <em>"set font height
+    /// default to 10pt"</em>) — not the eleven or twelve a template usually sets. See
+    /// <see cref="NoDocDefaultsSize"/> for the one case where it is not this.
     /// </remarks>
     private static readonly Length DefaultSize = Length.FromPoints(10);
+
+    /// <summary>The em size for a package that declares no <c>w:rPrDefault</c> at all.</summary>
+    /// <remarks>
+    /// <para>
+    /// Eleven points in Calibri, which is a <em>different</em> default rather than a variant of
+    /// <see cref="DefaultSize"/>: a DOCX import begins at Calibri 11 pt
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:182-193, tdf#108350, <em>"In Word
+    /// since version 2007, the default document font is Calibri 11 pt. If a DOCX document doesn't
+    /// contain font information, we should assume the intended font to provide best layout
+    /// match."</em>) and is reset to Times New Roman 10 pt only when a <c>w:rPrDefault</c> element
+    /// is actually seen (<c>StyleSheetTable.cxx</c>:2161-2167). Presence decides, not content.
+    /// </para>
+    /// <para>
+    /// Measured in <c>dotnet/probes/words-empty-paragraph-height/</c> against both installed
+    /// references, which agree on every row. An empty paragraph between two 12 pt lines, the gap
+    /// between those lines: <b>27.25 pt</b> with no styles part, and 25.35, 26.00, 29.90 and 30.90
+    /// with a <c>w:rPrDefault</c> that is respectively empty, names Carlito, states
+    /// <c>w:sz w:val="28"</c>, and does both. Only the first row moved.
+    /// </para>
+    /// <para>
+    /// <b>No document in the words corpus reaches it</b> — all 272 of its DOCX-family files declare a
+    /// <c>w:rPrDefault</c>, so every one of them takes the Times New Roman 10 pt branch. Its witness
+    /// is a hand-built package, which is what the probe fixtures and several test fixtures here are.
+    /// </para>
+    /// </remarks>
+    private static readonly Length NoDocDefaultsSize = Length.FromPoints(11);
+
+    /// <summary>The family for the same case. See <see cref="NoDocDefaultsSize"/>.</summary>
+    private const string NoDocDefaultsFamily = "Calibri";
 
     /// <summary>The <c>auto</c> line rule's unit: a line is two hundred and forty of them.</summary>
     private const double LineUnitsPerLine = 240.0;
@@ -447,19 +563,31 @@ internal static class WordParagraphFormats
     /// <em>layer</em> named a classified font, and the layers are gone by then — see
     /// <see cref="StatedClass"/>.
     /// </param>
+    /// <param name="ignoreCharacterStyle">
+    /// True to drop the run's <c>w:rStyle</c> layer while keeping its own <c>w:rPr</c>, which is what a
+    /// run inside a table of contents gets: <c>DomainMapper.cxx</c>:3037-3047 resolves the style name,
+    /// finds it, and then declines to insert <c>PROP_CHAR_STYLE_NAME</c> when
+    /// <c>DomainMapper_Impl::IsInTOC</c> — "do not add it elements in TOC: they will receive later
+    /// another style references from TOC". Word writes every contents entry as a run naming the
+    /// <c>Hyperlink</c> character style, so honouring it draws the whole list blue and underlined where
+    /// the reference draws it in the <c>TOC N</c> paragraph style alone.
+    /// </param>
     internal static WordTextStyle ResolveRun(
         WordStyles styles,
         XElement? paragraphProperties,
         XElement? runProperties,
         DrawingTheme? theme = null,
         IReadOnlyList<XElement>? tableStyleRunProperties = null,
-        WordFontTable? fontTable = null)
+        WordFontTable? fontTable = null,
+        bool ignoreCharacterStyle = false)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
         string? styleId = Word.Attribute(Word.Child(paragraphProperties, "pStyle"), "val")
                           ?? styles.DefaultStyleId(WordStyleType.Paragraph);
-        string? characterStyleId = Word.Attribute(Word.Child(runProperties, "rStyle"), "val");
+        string? characterStyleId = ignoreCharacterStyle
+            ? null
+            : Word.Attribute(Word.Child(runProperties, "rStyle"), "val");
 
         List<XElement> fonts =
             styles.RunPropertyLayers(
@@ -492,10 +620,19 @@ internal static class WordParagraphFormats
         WordProperty tracking =
             styles.ResolveRunProperty("spacing", runProperties, styleId, characterStyleId, tableStyleRunProperties);
 
-        Length resolvedSize = HalfPoints(size.Element) ?? DefaultSize;
+        // `w:w`, whose one-letter name is why it is easy to miss and impossible to grep for: it shares
+        // its spelling with the width attribute of half the format.
+        WordProperty scale =
+            styles.ResolveRunProperty("w", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+
+        // A package that declares no `w:rPrDefault` keeps the importer's own Calibri 11 pt instead
+        // of the Times New Roman 10 pt every other document is reset to. See `NoDocDefaultsSize`.
+        bool docDefaults = styles.HasDefaultRunPropertiesElement;
+        Length resolvedSize =
+            HalfPoints(size.Element) ?? (docDefaults ? DefaultSize : NoDocDefaultsSize);
 
         return new WordTextStyle(
-            Family(fonts, theme?.Fonts),
+            Family(fonts, theme?.Fonts) ?? (docDefaults ? null : NoDocDefaultsFamily),
             resolvedSize,
             bold.IsOn ? 700 : 400,
             italic.IsOn,
@@ -518,7 +655,38 @@ internal static class WordParagraphFormats
             strike.IsOn || doubleStrike.IsOn,
             AutoKerningOf(kerning),
             TrackingOf(tracking),
-            StatedClass(fonts, fontTable));
+            WidthOf(scale),
+            StatedClass(fonts, fontTable),
+            Word.Attribute(language.Element, "eastAsia"),
+            Word.Attribute(language.Element, "bidi"),
+            HintOf(fonts));
+    }
+
+    /// <summary>
+    /// What <c>w:rFonts/@w:hint</c> says an ambiguous character's script is, across the layers.
+    /// </summary>
+    /// <remarks>
+    /// The innermost layer that states one wins, as for every other <c>w:rFonts</c> attribute.
+    /// <c>DomainMapper::lcl_attribute</c> maps <c>eastAsia</c> onto
+    /// <c>ScriptHintType::ASIAN</c> and <c>cs</c> onto <c>COMPLEX</c>, and anything else — including
+    /// <c>default</c> — onto <c>AUTOMATIC</c>
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:969-988).
+    /// </remarks>
+    internal static WriterScriptHint HintOf(IReadOnlyList<XElement> layers)
+    {
+        if (layers is null) return WriterScriptHint.Automatic;
+
+        foreach (XElement fonts in layers)
+        {
+            switch (Word.Attribute(fonts, "hint"))
+            {
+                case "eastAsia": return WriterScriptHint.Asian;
+                case "cs": return WriterScriptHint.Complex;
+                case { Length: > 0 }: return WriterScriptHint.Automatic;
+            }
+        }
+
+        return WriterScriptHint.Automatic;
     }
 
     /// <summary>
@@ -540,6 +708,36 @@ internal static class WordParagraphFormats
     /// </remarks>
     private static Length TrackingOf(WordProperty spacing)
         => spacing.IntegerValue is { } twips and not 0 ? Length.FromTwips(twips) : Length.Zero;
+
+    /// <summary>
+    /// The percentage a <c>w:w</c> draws the run's glyphs at, 100 when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ST_TextScale</c>, whose range is 1 to 600, and <c>DomainMapper</c> hands it to
+    /// <c>PROP_CHAR_SCALE_WIDTH</c> unchanged
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>, <c>NS_ooxml::LN_EG_RPrBase_w</c>) — which
+    /// is <c>SvxCharScaleWidthItem</c>, and which VCL then applies as the font's width. It is <em>not</em>
+    /// a font size: the line stays as tall as it was and only the glyphs narrow.
+    /// </para>
+    /// <para>
+    /// It was read by nothing at all, and the corpus is full of it: <b>1677 <c>w:w</c> across 20 DOCX</b>,
+    /// of which 237 say 100 and so mean nothing. Of the 1440 that do, <b>1226 say 99</b> — a Word habit,
+    /// and one that costs a line's width one and a quarter per cent rather than one, for the reason in
+    /// <see cref="Paperless.Text.Layout.TextWidthScale"/>. The documents that carry it are the ones the
+    /// project's own notes reach for when they discuss reflow: <c>AWR OPS-AOC 044</c> states 25,
+    /// <c>ESPN-R - MCF - RA - Ed1</c> 112, and <c>Annex-10-to-the-Aircraft-Maintenance-Specialist</c>
+    /// 1100.
+    /// </para>
+    /// <para>
+    /// Out-of-range and unparseable values fall back to 100 rather than to the stated number, which is
+    /// what an unread property already did: a scale of zero would collapse the run to nothing.
+    /// </para>
+    /// </remarks>
+    private static int WidthOf(WordProperty scale)
+        => scale.IntegerValue is { } percent and >= 1 and <= 600
+            ? percent
+            : TextWidthScale.Natural;
 
     /// <summary>
     /// Whether a <c>w:kern</c> switches pair kerning on.

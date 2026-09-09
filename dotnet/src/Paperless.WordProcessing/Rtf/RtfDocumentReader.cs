@@ -112,6 +112,56 @@ public sealed partial class RtfDocumentReader
     /// <summary>The document's <c>\htmautsp</c>; see <see cref="AddsParagraphSpacing"/>.</summary>
     private bool _htmlAutoSpacing;
 
+    /// <summary>
+    /// True once the document has had its first run, which is when RTF's settings stop being
+    /// readable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The RTF importer emits its whole settings table at the document's first run —
+    /// <c>RTFDocumentImpl::checkFirstRun</c> calls <c>outputSettingsTable</c>
+    /// (<c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:414-435) — so a settings word
+    /// written after that is stored and never sent.
+    /// </para>
+    /// <para>
+    /// What counts as that run is wider than body text. <c>checkFirstRun</c> has <strong>thirteen</strong>
+    /// call sites, every one of them re-read for round 85: <c>\footnote</c>
+    /// (<c>rtfdispatchdestination.cxx</c>:264), <c>\shptxt</c>/<c>\dptxbxtext</c> (:405),
+    /// <c>\super</c> (<c>rtfdispatchflag.cxx</c>:893), <c>\dptxbx</c> (:1103), <c>\par</c>
+    /// (<c>rtfdispatchsymbol.cxx</c>:133), <c>\cell</c>/<c>\nestcell</c> (:250), <c>\column</c>
+    /// (:518), <c>\page</c> (:574), <c>tableBreak</c> and <c>parBreak</c>
+    /// (<c>rtfdocumentimpl.cxx</c>:724 and :732), <c>resolvePict</c> (:1297), <c>text</c> (:1706)
+    /// and <c>RTFFrame::setSprm</c> (:4137).
+    /// </para>
+    /// <para>
+    /// None of them fires inside a <c>Destination::SKIP</c> group, because
+    /// <c>RTFTokenizer::dispatchKeyword</c> returns before looking the keyword up
+    /// (<c>rtftokenizer.cxx</c>:2156-2164). That is why a <c>{\header}</c> group does <em>not</em>
+    /// count — not because a substream is re-parsed later — and it is also why a list table does:
+    /// <c>LISTTABLE</c> is a destination of its own. See <see cref="RtfDestination.ListTable"/>.
+    /// </para>
+    /// <para>
+    /// Seven of the thirteen can only stand in a document's <em>body</em>, where the word is
+    /// already too late by every other rule, which is why <c>\super</c> is the one that matters:
+    /// it is the only caller LibreOffice's own RTF export writes into a preamble. Censused over
+    /// the 338 converted corpus <c>.rtf</c>, 308 state the word and <strong>exactly one</strong>
+    /// has any caller before it (<c>probes/rtf-htmautsp-r85/census-all.py</c>).
+    /// </para>
+    /// </remarks>
+    private bool _firstRunSeen;
+
+    /// <summary>The document's <c>\deff</c>: the font a run that names none is set in.</summary>
+    /// <remarks>
+    /// Not font zero. LibreOffice puts <c>\deff</c>'s <em>name</em> into the default character state
+    /// as <c>w:rFonts/@ascii</c> when the font table closes — <c>RTFDocumentImpl::beforePopState</c>,
+    /// <c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:2494-2500 — and <c>\plain</c>
+    /// restores that state (<c>rtfdispatchflag.cxx</c>:575-583). Taking font zero instead draws every
+    /// unstated run in whatever the first font-table entry happens to be, which in every file
+    /// LibreOffice writes is <c>Times New Roman</c>: <strong>215 of the 338 converted corpus
+    /// <c>.rtf</c> declare a <c>\deff</c> naming a different face from their <c>\f0</c></strong>.
+    /// </remarks>
+    private int _defaultFontIndex;
+
     private int _colourRed;
     private int _colourGreen;
     private int _colourBlue;
@@ -181,7 +231,11 @@ public sealed partial class RtfDocumentReader
     public DocumentMetadata Metadata { get; private set; } = DocumentMetadata.Empty;
 
     /// <summary>The sections' page geometry, valid once <see cref="Read"/> has run.</summary>
-    public IReadOnlyList<Model.WritingSection> Sections => _geometry.Sections;
+    /// <remarks>
+    /// The colour table is passed in rather than read out, because a page border's <c>\brdrcf</c> is
+    /// an index and the <c>{\colortbl}</c> may follow the border that names it.
+    /// </remarks>
+    public IReadOnlyList<Model.WritingSection> Sections => _geometry.Resolve(ColourAt);
 
     /// <summary>
     /// True when two consecutive paragraphs' spacings add rather than the larger one winning.
@@ -371,6 +425,11 @@ public sealed partial class RtfDocumentReader
         // property and \pich is not a paragraph one, and both share their prefix with nothing else.
         if (HandlePictureWord(token)) return;
 
+        // Inside a {\stylesheet} entry, remember that the entry mentioned this word at all. The
+        // merge through \sbasedon needs "the style said nothing" kept apart from "the style said
+        // the default", and RTF's toggles cannot express that in the group state alone.
+        state.StyleSheetStated?.Add(token.Name);
+
         switch (token.Name)
         {
             // ---- document-level settings
@@ -391,6 +450,11 @@ public sealed partial class RtfDocumentReader
                 return;
             case "uc":
                 state.UnicodeSkip = Math.Clamp(token.Parameter ?? 1, 0, 32);
+                return;
+            case "deff":
+                // The default font, which is where an unstated run starts rather than font zero.
+                _defaultFontIndex = Math.Max(token.Parameter ?? 0, 0);
+                state.FontIndex = _defaultFontIndex;
                 return;
             case "ftnstart":
                 // The first footnote's number, one-based — unlike ODF's `text:start-value`, which is an
@@ -490,7 +554,14 @@ public sealed partial class RtfDocumentReader
                 // recorded against a number rather than a person.
                 state.Destination = RtfDestination.RevisionTable;
                 return;
-            case "listtable" or "listoverridetable" or "rsidtbl"
+            case "listtable" or "listoverridetable":
+                // Neither is read, and neither may be skipped either: a list table is
+                // `Destination::LISTTABLE` and not `Destination::SKIP`, so its control words are
+                // dispatched and one of them ends the document's first run. See
+                // RtfDestination.ListTable and _firstRunSeen.
+                state.Destination = RtfDestination.ListTable;
+                return;
+            case "rsidtbl"
                  or "generator" or "filetbl" or "themedata" or "colorschememapping"
                  or "datastore" or "latentstyles" or "xmlnstbl" or "pgptbl":
                 state.Destination = token.Name == "generator"
@@ -500,11 +571,21 @@ public sealed partial class RtfDocumentReader
                 return;
             case "stylesheet":
                 state.Destination = RtfDestination.StyleSheet;
+                state.StyleSheetStated = [];
                 return;
             case "info":
                 state.Destination = RtfDestination.Info;
                 return;
             case "pict":
+                // A picture is one of `checkFirstRun`'s callers — `RTFDocumentImpl::resolvePict`
+                // ends with it (`rtfdocumentimpl.cxx`:1297) — so a `{\pict}` in the body closes the
+                // window on the document's settings exactly as a word of text does.
+                //
+                // Only a body one. A `{\*\listtable{\*\listpicture{\*\shppict{\pict …}}}}` does
+                // not, which is measured rather than assumed: `probes/rtf-resid-r80`'s
+                // `p-listpicture` puts that group before a `\htmautsp` and 26.2.4.2 still honours
+                // the word, while `p-bodypict` puts a bare `{\pict}` there and it does not.
+                if (state.Destination is RtfDestination.Body) NoteFirstRun();
                 state.Destination = RtfDestination.Picture;
                 BeginPicture();
                 return;
@@ -661,7 +742,13 @@ public sealed partial class RtfDocumentReader
             // exactly as \htmautsp does. Measured — both put the reference's paragraph boundaries at
             // 24.00 pt where their absence gives 32.00 pt — which is why this is not `Parameter != 0`.
             case "htmautsp":
-                _htmlAutoSpacing = true;
+                // And deliberately ignoring it once the body has begun: the RTF importer sends its
+                // settings table from `checkFirstRun` (`rtfdocumentimpl.cxx`:414-435), so a
+                // `\htmautsp` written after the document's first run is set on an
+                // `m_aSettingsTableSprms` nobody reads again. `rtfsprm.cxx`:238-241 says so in a
+                // comment of its own — "\htmautsp arrives after the style table, so only the
+                // non-style value is correct".
+                if (!_firstRunSeen) _htmlAutoSpacing = true;
                 return;
 
             case "li":
@@ -736,14 +823,50 @@ public sealed partial class RtfDocumentReader
             // ---- paragraph and character state
             case "pard":
                 state.ResetParagraph();
+
                 // Table membership is paragraph formatting, so \pard clears it and the \intbl and
                 // \itap that follow re-state it. Without the reset a paragraph after a table stays
                 // in it, and the table never closes.
-                CurrentFlow.InTable = false;
-                CurrentFlow.TableLevelIndex = 0;
+                //
+                // But only for a \pard the *body* wrote. Membership lives on the flow rather than on
+                // the group, so unlike everything else `ResetParagraph` touches it does not come back
+                // when the group closes — and a `{\listtext\pard\plain \tab}` label, which is how
+                // Word writes the rendered `1.` of every numbered item, therefore took the paragraph
+                // holding it out of its own cell. LibreOffice states the rule outright at
+                // `rtfdispatchflag.cxx`:588: "\pard is allowed between \cell and \row, but in that
+                // case it should not reset the fact that we're inside a table." Its oracle agrees —
+                // 26.2.4.2 draws a row whose first cell carries such a label as one row.
+                //
+                // Gated on the destination, which is the same gate `EndCell` and `EndRow` already use
+                // for the same reason: a control word written inside a label, a field instruction or a
+                // note is not the body's statement about the body's table.
+                if (state.Destination is RtfDestination.Body)
+                {
+                    CurrentFlow.InTable = false;
+                    CurrentFlow.TableLevelIndex = 0;
+                }
+
+                // "Reset currently selected paragraph style as well. By default the style with
+                // index 0 is applied" — `sw/source/writerfilter/rtftok/rtfdispatchflag.cxx`:600-614.
+                // So a paragraph that names no style is not unstyled: it is in style zero, and
+                // takes that style's formatting.
+                SelectParagraphStyle(state, 0);
+
                 return;
             case "plain":
                 state.ResetCharacter();
+
+                // \plain restores the *default* character state and not merely the toggles:
+                // `m_aStates.top().getCharacterSprms() = getDefaultState().getCharacterSprms()`,
+                // `rtfdispatchflag.cxx`:575-583, and the default state carries \deff's face. Leaving
+                // the font and the size where the previous run put them lets a `\f0\fs18` written
+                // for one empty table cell set the face of every cell after it.
+                state.FontIndex = _defaultFontIndex;
+                state.FontSizeHalfPoints = null;
+
+                // The paragraph style sits under the direct formatting rather than beside it, so
+                // clearing the direct half exposes the style's again.
+                ReapplyStyleCharacters(state);
                 return;
             case "par":
                 EmitParagraph(state);
@@ -764,7 +887,7 @@ public sealed partial class RtfDocumentReader
                 }
                 else
                 {
-                    state.ParagraphStyleId = token.Parameter ?? 0;
+                    SelectParagraphStyle(state, token.Parameter ?? 0);
                 }
                 return;
             case "cs":
@@ -815,6 +938,20 @@ public sealed partial class RtfDocumentReader
                 state.SmallCapitals = token.Parameter != 0;
                 return;
             case "super":
+                // `\super` is one of `checkFirstRun`'s thirteen callers, and the only one that can
+                // stand in a document's preamble: `RTFDocumentImpl::dispatchFlag`'s `SUPER` case
+                // sends the settings table for anything that is not a style-sheet entry
+                // (`sw/source/writerfilter/rtftok/rtfdispatchflag.cxx`:887-895, under a comment
+                // about a document that starts with a footnote). `\sub` and `\nosupersub` beside
+                // it do not, which is why only this arm notes the run.
+                //
+                // Its reach is a *list level*. LibreOffice's own RTF export writes `\super` into a
+                // numbering level whose text is superscript, and a list table is dispatched rather
+                // than skipped — so a `\htmautsp` written after the list table, which is where
+                // that exporter writes it, is never read. `150-5370-10H.rtf` states `\super` at
+                // byte 222775 in `{\*\listtable{\list{\listlevel …}}}` and `\htmautsp` at
+                // 266199, and 26.2.4.2 draws it in 746 pages with the word and 746 without it.
+                NoteSettingsWindowClosed(state);
                 state.VerticalPosition = token.Parameter == 0 ? 0 : 1;
                 return;
             case "sub":
@@ -885,6 +1022,55 @@ public sealed partial class RtfDocumentReader
             case "trleft":
                 DefinitionTarget(CurrentFlow).RowLeftEdge = token.Parameter ?? 0;
                 return;
+
+            // ---- positioned ("wrapped") tables. Every one of these words makes the row's table a fly,
+            // because every one of them writes into `w:tblpPr` in LibreOffice's own importer — including
+            // the four \tdfrmtxt* distances, which state no position at all. Mirrored rather than
+            // narrowed: `DocxLayoutSource` asks exactly "is there a tblpPr", so narrowing here would make
+            // the two readers of one document disagree. It cannot bite on the corpus either way — of the
+            // 22 720 row definitions in the 328 converted RTF, **1135 state a real position and not one
+            // states a \tdfrmtxt* distance without one** (`probes/rtf-gate-r71/census.py`).
+            case "tpvpg" or "tpvmrg" or "tpvpara":
+                Position(CurrentFlow).VerticalAnchor = token.Name switch
+                {
+                    "tpvpg" => FrameVerticalOrigin.Page,
+                    "tpvmrg" => FrameVerticalOrigin.PageMargin,
+                    _ => FrameVerticalOrigin.Paragraph,
+                };
+                return;
+            case "tphpg" or "tphmrg" or "tphcol":
+                Position(CurrentFlow).HorizontalAnchorIsPage = token.Name is "tphpg";
+                return;
+            case "tposxc" or "tposxr":
+                // Only these two. `\tposxl`, `\tposxi` and `\tposxo` are tokenised by LibreOffice and
+                // then dispatched nowhere (`rtfdispatchflag.cxx`:82-101 names centre and right and no
+                // other), so they reach no `w:tblpXSpec` and no `w:tblpPr` — reading them here would
+                // both invent an alignment the reference does not apply and turn a table into a fly
+                // that the reference leaves in the flow. None of the three occurs in the corpus.
+                Position(CurrentFlow).HorizontalSpec = token.Name is "tposxc"
+                    ? FrameHorizontalAlignment.Centre
+                    : FrameHorizontalAlignment.Right;
+                return;
+            case "tposy":
+                Position(CurrentFlow).VerticalOffset = token.Parameter ?? 0;
+                return;
+            case "tdfrmtxtBottom":
+                Position(CurrentFlow).BottomFromText = token.Parameter ?? 0;
+                return;
+            // The rest of what does reach `w:tblpPr`, and is not read past that. `\tposx` is the
+            // horizontal distance, which `PageTable` takes from the row's own `\trleft`; `\tposyc` and
+            // `\tposyb` name a vertical edge, which is `w:tblpYSpec` and which neither reader honours;
+            // and `\tdfrmtxtTop`, `Left` and `Right` are distances the flow keeps beside a fly it cannot
+            // wrap into. Consumed rather than dropped, because writing a `tblpPr` is the whole of what
+            // makes the row's table a fly and each of these five writes one.
+            case "tposx" or "tposyc" or "tposyb"
+              or "tdfrmtxtTop" or "tdfrmtxtLeft" or "tdfrmtxtRight":
+                _ = Position(CurrentFlow);
+                return;
+            // `\tposnegx`, `\tposnegy`, `\tposyt`, `\tposyil`, `\tposyin` and `\tposyout` are
+            // deliberately absent: LibreOffice's tokeniser recognises all six and its dispatchers handle
+            // none of them, so each is dropped and none makes a table positioned. Not one occurs in the
+            // corpus's 22 720 row definitions (`probes/rtf-gate-r71/census.py`).
             case "trgaph":
                 // Half the gap between two cells, so it is the padding on each side of one. RTF's oldest
                 // spelling of cell padding and the one LibreOffice writes.
@@ -959,14 +1145,38 @@ public sealed partial class RtfDocumentReader
                 DefinitionTarget(CurrentFlow).PendingCellShading = token.Parameter;
                 return;
             case "clvertalt":
-                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.CellVerticalAlignment.Top;
+                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Top;
                 return;
             case "clvertalc":
-                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.CellVerticalAlignment.Middle;
+                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Middle;
                 return;
             case "clvertalb":
-                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.CellVerticalAlignment.Bottom;
+                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Bottom;
                 return;
+
+            // The cell's text flow. LibreOffice's tokeniser turns these five straight into
+            // `w:textDirection` (`rtfdispatchflag.cxx`:483-508), and `CellTextDirection` already holds
+            // the three answers dmapper reduces its six values to — so a turned cell is read here
+            // exactly as the DOCX spelling of the same document reads it. Without this a `\cltxbtlr`
+            // label is laid out upright in a cell as narrow as one glyph, which breaks it a character
+            // per line; 186 `\cltxbtlr` in 11 of the corpus's converted RTF, and 3 `\cltxtbrl` in one.
+            case "cltxbtlr":
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.BottomToTopLeftToRight;
+                return;
+            case "cltxtbrl" or "cltxtbrlv":
+                // Folded onto one answer by dmapper, not by us: `tbRl` and `tbRlV` both become
+                // `WritingMode2::TB_RL` in `DomainMapperTableManager.cxx`:325-350.
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.TopToBottomRightToLeft;
+                return;
+            case "cltxlrtb" or "cltxlrtbv":
+                // Upright, and stated explicitly to beat a direction set earlier in the same
+                // declaration — `\cltxlrtbv` because dmapper ignores `lrTbV` outright.
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.LeftToRight;
+                return;
+
             case "clmgf":
                 DefinitionTarget(CurrentFlow).PendingCellMergesFirst = true;
                 return;
@@ -1069,6 +1279,16 @@ public sealed partial class RtfDocumentReader
                 // paragraph at every section boundary — while a producer writing text straight into \sect
                 // still gets its last paragraph closed.
                 FinishParagraph(CurrentFlow, state, force: false);
+
+                // And any table still open with it. RTF marks no end to a table — a paragraph back
+                // at the enclosing level is what closes one — so `…\row\pard \sect` leaves the
+                // table open across the break, and `FinishTable` then stamps it with the section
+                // index it reads *now*, which is the next one. Every block on both sides of the
+                // break then claims one section and the `\sbkpage` page break never happens:
+                // measured on a two-section probe as one page against 26.2.4.2's two, and
+                // `Annex-10…GCAA.rtf` is 156 sections written in exactly that shape.
+                if (state.Destination is RtfDestination.Body) CloseTablesDeeperThan(CurrentFlow, 0);
+
                 _sectionIndex++;
                 return;
 

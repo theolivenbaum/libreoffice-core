@@ -55,7 +55,7 @@ public sealed class SheetPaginationComparisonTests : IDisposable
     [InlineData("xls-features.xls")]
     public void AWorkbookPrintsToAsManyPagesAsLibreOfficeDoes(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         string pdf = _libreOffice.ConvertToPdf(path, _workDirectory);
@@ -77,7 +77,7 @@ public sealed class SheetPaginationComparisonTests : IDisposable
     [InlineData("sheet-print-xls.xls")]
     public void EveryPageStartsAtTheCellLibreOfficeStartsItAt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         string pdf = _libreOffice.ConvertToPdf(path, _workDirectory);

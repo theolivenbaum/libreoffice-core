@@ -104,7 +104,7 @@ public sealed class SlideDiagramComparisonTests : IDisposable
     [Fact]
     public void EveryNodeIsFilledWhereLibreOfficeFillsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         string ourPdf = Ours(path);
@@ -141,7 +141,7 @@ public sealed class SlideDiagramComparisonTests : IDisposable
     [Fact]
     public void TheConnectorIsTheSamePolygonLibreOfficeDraws()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfPath> ours = [.. PdfPaths.Read(Ours(path)).Where(p => p.Colour == 0xA6A6A6)];
@@ -179,7 +179,7 @@ public sealed class SlideDiagramComparisonTests : IDisposable
     [Fact]
     public void EveryNodeIsOutlinedWithLibreOfficesPen()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfStroke> ours = PdfStrokes.Read(Ours(path));
@@ -230,7 +230,7 @@ public sealed class SlideDiagramComparisonTests : IDisposable
     [Fact]
     public void EveryLabelIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

@@ -70,7 +70,7 @@ public sealed class BidiDrawingComparisonTests : IDisposable
     [Fact]
     public void EveryPortionLibreOfficeDrawsStartsWhereOneOfOursDoes()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<List<PdfTextRun>> reference = ReferenceLines();
         List<List<DrawnGlyphRun>> drawn = DrawnLines();
@@ -107,7 +107,7 @@ public sealed class BidiDrawingComparisonTests : IDisposable
     [Fact]
     public void EveryLineStartsWhereLibreOfficeStartsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<List<PdfTextRun>> reference = ReferenceLines();
         List<List<DrawnGlyphRun>> drawn = DrawnLines();
@@ -132,7 +132,7 @@ public sealed class BidiDrawingComparisonTests : IDisposable
     [Fact]
     public void TheRunsOfALineAreDrawnLeftToRight()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<List<DrawnGlyphRun>> drawn = DrawnLines();
         int reordered = 0;
@@ -170,7 +170,7 @@ public sealed class BidiDrawingComparisonTests : IDisposable
     [Fact]
     public void TheLatinParagraphIsStillOneRun()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         // The no-op, against the reference rather than against ourselves: LibreOffice draws the
         // Latin paragraph as one portion and so must Paperless. A run split at a boundary it does

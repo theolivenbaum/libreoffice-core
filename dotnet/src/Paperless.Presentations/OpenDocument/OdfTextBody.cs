@@ -7,6 +7,7 @@ using Paperless.Core.Units;
 using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
 using Paperless.Presentations.Layout;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.Presentations.OpenDocument;
@@ -39,10 +40,16 @@ internal static class OdfTextBody
     /// <param name="shapeCascade">
     /// The shape's own style references, which the paragraph and run styles sit inside.
     /// </param>
+    /// <param name="fields">
+    /// What the slide this text is drawn on answers for a header, footer, date-time or
+    /// slide-number field. Null leaves every field showing the characters the file stores
+    /// against it, which is what a document with no page to resolve against can say.
+    /// </param>
     public static SlideTextBody Read(
         OdfFile file,
         IEnumerable<XElement> paragraphs,
-        IReadOnlyList<OdfStyleReference> shapeCascade)
+        IReadOnlyList<OdfStyleReference> shapeCascade,
+        OdpRunningObjects? fields = null)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentNullException.ThrowIfNull(paragraphs);
@@ -70,7 +77,7 @@ internal static class OdfTextBody
                 fontIndependent = true;
             }
 
-            SlideParagraph read1 = Paragraph(file, paragraph, cascade);
+            SlideParagraph read1 = Paragraph(file, paragraph, cascade, fields);
 
             read.Add(Label(file, paragraph, level) is { } label
                 ? read1 with
@@ -87,6 +94,7 @@ internal static class OdfTextBody
             Paragraphs = read,
             Insets = Insets(file, shapeCascade),
             Anchor = Anchor(file, shapeCascade),
+            AutoFit = Shrinks(file, shapeCascade),
             FontIndependentLineSpacing = fontIndependent,
         };
     }
@@ -153,7 +161,7 @@ internal static class OdfTextBody
         Length space = Measure(definition, "space-before");
         Length label = Measure(definition, "min-label-width");
 
-        return new ListLabel(space + label, -label, Marker(definition, level, style));
+        return new ListLabel(space + label, -label, Marker(file, definition, level, style));
 
         static Length Measure(OdfListLevel definition, string name)
             => OdfValue.ParseLength(
@@ -194,13 +202,35 @@ internal static class OdfTextBody
     /// here are all ones so that <see cref="OdfListStyle.FormatLabel"/> returns the bullet without
     /// pretending to number anything.
     /// </remarks>
-    private static SlideMarker? Marker(OdfListLevel definition, int level, OdfListStyle style)
+    private static SlideMarker? Marker(
+        OdfFile file, OdfListLevel definition, int level, OdfListStyle style)
     {
         if (definition.Kind != OdfListLabelKind.Bullet) return null;
         if (style.FormatLabel(level, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]) is not { Length: > 0 } text)
             return null;
 
-        return new SlideMarker(text, definition.Typeface, definition.RelativeSize ?? 1.0);
+        string? family = Family(file, definition.Typeface);
+
+        // A recodeable face keeps its Private Use Area slot, because `SlideTextLayout` needs the
+        // slot and the family together to reach the OpenSymbol glyph holding the same picture.
+        //
+        // `FormatLabel` is the *extraction* answer and collapses the slot to U+2022
+        // (`OutlineNumbers.NormaliseBullet`), which is right for an index — a Wingdings slot means
+        // nothing to a consumer — and wrong for a rendering, where it turned every green check
+        // mark on `redac-sas-201509-asisp-research.odp` page 7 into a black dot. The deck reader
+        // reached the same fork from the other side and took the other branch
+        // (`PptxTextBody.Marked`); this is the ODF statement of it.
+        //
+        // Censused over the converted corpus: **3598 bullet levels in 74 of the 302 `.odp` state a
+        // Private Use Area character**, every one of them in the F000 block, and every family they
+        // name has a recode table but one — `CommonBullets`, once.
+        if (definition.BulletCharacter is { Length: 1 } slot
+            && SymbolFontRecode.IsRecodeable(family))
+        {
+            text = definition.Prefix + slot + definition.Suffix;
+        }
+
+        return new SlideMarker(text, family, definition.RelativeSize ?? 1.0, definition.Colour);
     }
 
     /// <summary>
@@ -276,6 +306,50 @@ internal static class OdfTextBody
                .AsLength()
            ?? Length.Zero;
 
+    /// <summary>
+    /// Whether the shape shrinks its text until it fits — Impress's <em>autofit</em>, and
+    /// <see cref="SlideTextBody.AutoFit"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>ODF spells one property two ways and they have to be read together.</strong>
+    /// <c>drawing::TextFitToSizeType</c> has four values and <c>sdpropls.cxx</c>:143-144 maps
+    /// <em>both</em> <c>draw:fit-to-size</c> and <c>style:shrink-to-fit</c> onto it with
+    /// <c>MID_FLAG_MERGE_PROPERTY</c>: <c>draw:fit-to-size</c> carries
+    /// <c>false</c> / <c>true</c> (proportional) / <c>all</c> (all lines) /
+    /// <c>shrink-to-fit</c> (autofit) through <c>pXML_FitToSize_Enum</c> (:677-684), and
+    /// <c>style:shrink-to-fit</c> carries the autofit bit alone through
+    /// <c>pXML_ShrinkToFit_Enum</c> (:686-693). The second exists because the first is ODF 1.2's
+    /// spelling and older consumers read <c>true</c> as <em>stretch</em>; LibreOffice therefore
+    /// writes <c>draw:fit-to-size="false" style:shrink-to-fit="true"</c> for an autofitted shape,
+    /// and a reader that consults only the first concludes the shape does not autofit.
+    /// </para>
+    /// <para>
+    /// Which is what happened here: <c>SlideAutofit</c> has been a full port of
+    /// <c>autoFitTextForCompatibility</c> since round 52 and the ODF path reached none of it. It
+    /// is not a rare attribute — <c>style:shrink-to-fit="true"</c> appears <strong>3515 times,
+    /// in all 302</strong> of the converted corpus's <c>.odp</c>.
+    /// </para>
+    /// <para>
+    /// Only the autofit value is honoured. <c>PROPORTIONAL</c> and <c>ALLLINES</c> — Impress's
+    /// <em>fit to frame</em>, which stretches the glyphs rather than choosing a smaller size —
+    /// are a different transform and are not modelled on any of the three presentation readers;
+    /// the corpus states neither, all 25 525 of its <c>draw:fit-to-size</c> saying
+    /// <c>false</c>.
+    /// </para>
+    /// </remarks>
+    private static bool Shrinks(OdfFile file, IReadOnlyList<OdfStyleReference> cascade)
+    {
+        if (file.Styles.ResolveProperty(
+                cascade, OdfPropertyKind.Graphic, OdfNamespaces.Style, "shrink-to-fit").Is("true"))
+        {
+            return true;
+        }
+
+        return file.Styles.ResolveProperty(
+            cascade, OdfPropertyKind.Graphic, OdfNamespaces.Draw, "fit-to-size").Is("shrink-to-fit");
+    }
+
     private static TextAnchor Anchor(OdfFile file, IReadOnlyList<OdfStyleReference> cascade)
     {
         OdfProperty alignment = file.Styles.ResolveProperty(
@@ -287,17 +361,23 @@ internal static class OdfTextBody
     }
 
     private static SlideParagraph Paragraph(
-        OdfFile file, XElement paragraph, IReadOnlyList<OdfStyleReference> cascade)
+        OdfFile file,
+        XElement paragraph,
+        IReadOnlyList<OdfStyleReference> cascade,
+        OdpRunningObjects? fields)
     {
         StringBuilder text = new();
         List<SlideTextRun> runs = [];
+        IReadOnlyList<OdfStyleReference>? lastSpan = null;
 
-        Collect(file, paragraph, cascade, text, runs);
+        Collect(file, paragraph, cascade, text, runs, fields, ref lastSpan);
 
         if (runs.Count == 0)
         {
-            // An empty paragraph is still a line, as tall as the text that would go on it.
-            runs.Add(Run(file, cascade, 0, 0));
+            // An empty paragraph is still a line, and it is as tall as the text that *would* go
+            // on it -- which is the formatting of its last empty `text:span`, not the
+            // paragraph's own. See `EmptyLineCascade` for the measurement.
+            runs.Add(Run(file, lastSpan ?? cascade, 0, 0));
         }
 
         return new SlideParagraph(
@@ -325,7 +405,9 @@ internal static class OdfTextBody
         XElement element,
         IReadOnlyList<OdfStyleReference> cascade,
         StringBuilder text,
-        List<SlideTextRun> runs)
+        List<SlideTextRun> runs,
+        OdpRunningObjects? fields,
+        ref IReadOnlyList<OdfStyleReference>? lastSpan)
     {
         foreach (XNode node in element.Nodes())
         {
@@ -339,19 +421,48 @@ internal static class OdfTextBody
             }
 
             if (node is not XElement child) continue;
+
+            if (child.Name.NamespaceName == OdfNamespaces.Presentation)
+            {
+                // A running object's field. Its element is empty in the file: what it draws is
+                // the declaration the *slide* names, so nothing here can be read off the frame.
+                if (Field(child.Name.LocalName, fields) is { Length: > 0 } declared)
+                {
+                    runs.Add(Run(file, cascade, text.Length, declared.Length));
+                    text.Append(declared);
+                }
+
+                continue;
+            }
+
             if (child.Name.NamespaceName != OdfNamespaces.Text) continue;
 
             switch (child.Name.LocalName)
             {
                 case "span":
-                    Collect(
-                        file,
-                        child,
-                        [.. cascade, new OdfStyleReference(
+                    IReadOnlyList<OdfStyleReference> nested =
+                    [
+                        .. cascade,
+                        new OdfStyleReference(
                             child.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value,
-                            OdfStyleFamily.Text)],
-                        text,
-                        runs);
+                            OdfStyleFamily.Text),
+                    ];
+
+                    // Recorded whether or not the span carries any text, because an empty one
+                    // still sizes the line: see `EmptyLineCascade`. Recorded *before* the
+                    // descent, so that the winner is the last span entered in document order --
+                    // the innermost of a nest, and the later of two siblings. Both were
+                    // measured; the nest is the one an "outermost" or "largest" rule gets wrong.
+                    lastSpan = nested;
+                    Collect(file, child, nested, text, runs, fields, ref lastSpan);
+                    break;
+
+                // The slide's own number. The element's content is the placeholder the file
+                // stores against it -- LibreOffice writes the literal string `<number>` -- so
+                // drawing that content is drawing the placeholder rather than the field.
+                case "page-number" when fields is not null && Current(child):
+                    runs.Add(Run(file, cascade, text.Length, fields.PageNumber.Length));
+                    text.Append(fields.PageNumber);
                     break;
 
                 case "s":
@@ -374,14 +485,108 @@ internal static class OdfTextBody
                     text.Append(LineSeparator);
                     break;
 
+                // A hyperlink, and in a *draw* shape's text that is a field rather than a
+                // character property. `txtparai.cxx`:1352-1370 asks the cursor for a
+                // `HyperLinkURL` property and builds an `XMLImpHyperlinkContext_Impl` when it has
+                // one and an `XMLUrlFieldImportContext` when it does not — Writer's text cursor has
+                // it and Draw's, Impress's and Calc's do not, so every slide's `text:a` becomes a
+                // `com.sun.star.text.TextField.URL` whose `Representation` is the element's own
+                // content (`txtfldi.cxx`:2907-2918).
+                //
+                // Two things follow and neither is visible in the formatting: the field is one
+                // portion, so an over-long one is filled to the *character* rather than moved down
+                // or broken at a separator, and the lines it spills onto are stacked one ascent
+                // apart. Both live in `SlideTextLayout`; all that is read here is which characters
+                // are the field.
+                //
+                // The content is flattened, which is what the reference does — a
+                // `XMLTextFieldImportContext` overrides `characters` and nothing else, so a
+                // `text:span` nested inside a `text:a` contributes no formatting of its own. No
+                // document of the converted corpus has one: 665 `text:a` in 156 of the 302 `.odp`
+                // and not a single nested span.
+                case "a":
+                    string linked = child.Value;
+                    if (linked.Length == 0) break;
+
+                    runs.Add(Run(file, cascade, text.Length, linked.Length) with { IsField = true });
+                    text.Append(linked);
+                    break;
+
                 default:
                     // A field, a bookmark, a note anchor: whatever text it carries is its own.
-                    Collect(file, child, cascade, text, runs);
+                    Collect(file, child, cascade, text, runs, fields, ref lastSpan);
                     break;
             }
         }
     }
 
+    /// <summary>
+    /// What a <c>presentation:header</c>, <c>-footer</c> or <c>-date-time</c> field draws on
+    /// this slide, or null when it draws nothing.
+    /// </summary>
+    /// <remarks>
+    /// These three elements are always empty in the file. The text is the document-level
+    /// declaration the slide names through <c>presentation:use-footer-name</c> and its siblings —
+    /// <c>SdXMLGenericPageContext::endFastElement</c> (<c>xmloff/source/draw/ximppage.cxx</c>:301-360)
+    /// copies it onto the page, and <c>SdModule::CalcFieldValueHdl</c>
+    /// (<c>sd/source/ui/app/sdmod2.cxx</c>:374-425) is what reads it back for the field. A slide
+    /// naming no declaration leaves the field empty, which is why a master's footer can be present
+    /// on a page and still draw nothing.
+    /// </remarks>
+    private static string? Field(string name, OdpRunningObjects? fields) => name switch
+    {
+        "header" => fields?.Header,
+        "footer" => fields?.Footer,
+        "date-time" => fields?.DateTime,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether a <c>text:page-number</c> asks for the page it is on rather than its neighbour.
+    /// </summary>
+    /// <remarks>
+    /// <c>text:select-page</c> takes <c>previous</c>, <c>current</c> and <c>next</c>, and absent
+    /// is <c>current</c>. Only the current page is substituted here: the other two are a
+    /// word-processing construct that no presentation LibreOffice writes uses, and drawing the
+    /// stored placeholder for them is at least visibly a placeholder.
+    /// </remarks>
+    private static bool Current(XElement field)
+    {
+        string? select = field.Attribute(XName.Get("select-page", OdfNamespaces.Text))?.Value;
+        return select is null or "current";
+    }
+
+    /// <summary>
+    /// Why an empty paragraph's line is measured against its last <c>text:span</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's export writes an empty line as <c>&lt;text:p&gt;&lt;text:span
+    /// text:style-name="T15"/&gt;&lt;/text:p&gt;</c> — a span carrying the character formatting
+    /// and no characters — and EditEngine measures such a line from the character attributes at
+    /// the paragraph's own position: <c>ImpEditEngine::CreateLines</c> builds a dummy portion
+    /// from <c>SeekCursor(rParaPortion.GetNode(), 0, aTmpFont)</c> and gives it
+    /// <c>ImplCalculateFontIndependentLineSpacing(aTmpFont.GetFontHeight())</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:1896-1902), so the empty span's own size is
+    /// what sets the height.
+    /// </para>
+    /// <para>
+    /// Reading the paragraph's cascade instead gives the shape's <em>default</em> size, which on
+    /// a presentation placeholder is far larger than the run it stands in for. Measured on
+    /// <c>0335fab9-79f0-4944-b92c-f223837ca2d8.odp</c> against 26.2.4.2, one 16 pt empty span
+    /// between two 16 pt paragraphs: the reference advances 23.19 pt over it and we advanced
+    /// 42.41, because the placeholder's default is 32 pt and 1.2 × (32 − 16) is 19.2 — the
+    /// "constant excess on every inter-paragraph gap" that a visual reading of that slide
+    /// reported. A <em>bare</em> <c>&lt;text:p/&gt;</c> with no span at all does take the
+    /// paragraph's default, and both renderers agree on it at 42.41.
+    /// </para>
+    /// <para>
+    /// The span that wins is the last one <em>entered</em>, not the largest and not the
+    /// outermost: over four one-attribute variants of the same slide, 26.2.4.2 answers 8 pt for
+    /// a 40 pt span followed by an 8 pt one, 40 pt for the reverse order, and 8 pt for an 8 pt
+    /// span nested inside a 40 pt one. See <c>probes/odp-embed-r79/</c>.
+    /// </para>
+    /// </remarks>
     private static SlideTextRun Run(
         OdfFile file, IReadOnlyList<OdfStyleReference> cascade, int start, int length)
     {
@@ -395,6 +600,14 @@ internal static class OdfTextBody
             format.IsBold ? 700 : 400,
             format.IsItalic,
             format.Colour ?? Colour.Black,
+            // `style:text-underline-style` and `style:text-line-through-style`, which
+            // `OdfTextFormat` has resolved since it was written and which nothing passed on: a
+            // slide's hyperlinks came out the right colour with no rule under them. ODF states
+            // the decoration explicitly on the link's own text style -- LibreOffice's export
+            // writes `style:text-underline-style="solid"` beside `fo:color` -- so there is no
+            // implicit "a hyperlink is underlined" rule here as there is in DrawingML.
+            IsUnderlined: format.IsUnderlined,
+            IsStruckThrough: format.IsStruckThrough,
             Escapement: Escaped(format.Position));
     }
 
@@ -426,10 +639,15 @@ internal static class OdfTextBody
     private static string? Family(OdfFile file, string? fontName)
     {
         if (fontName is null) return null;
-        if (!file.Styles.FontFaces.TryGetValue(fontName, out OdfFontFace? face)) return fontName;
 
-        string? family = face.FontFamily;
-        if (string.IsNullOrEmpty(family)) return fontName;
+        // `fo:font-family` states the list directly and `style:font-name` names a declaration that
+        // holds one, so the same trimming has to happen on both paths: a level writing
+        // `fo:font-family="&apos;Wingdings 2&apos;"` — 721 of the converted corpus's bullet levels
+        // do — asks for a family whose name is not `'Wingdings 2'`.
+        string family = file.Styles.FontFaces.TryGetValue(fontName, out OdfFontFace? face)
+                        && !string.IsNullOrEmpty(face.FontFamily)
+            ? face.FontFamily
+            : fontName;
 
         int comma = family.IndexOf(',', StringComparison.Ordinal);
         if (comma >= 0) family = family[..comma];

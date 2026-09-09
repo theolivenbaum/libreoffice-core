@@ -56,6 +56,29 @@ public sealed record GlyphRun
     /// structure.
     /// </summary>
     public bool IsRightToLeft { get; init; }
+
+    /// <summary>
+    /// How far each glyph is squeezed or stretched across, 1.0 for a face drawn as it is drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A font whose width is set to something other than its height: VCL's <c>Font::SetAverageFontWidth</c>,
+    /// which a word processor reaches through <c>w:rPr/w:w</c> and RTF through <c>\charscalex</c>. It is
+    /// <em>not</em> tracking, which puts a fixed gap between glyphs and leaves them their own shape, and it
+    /// is not a font size, which would change the line's height too.
+    /// </para>
+    /// <para>
+    /// The glyph positions and advances in <see cref="Glyphs"/> are already scaled — they are where the
+    /// glyphs go on the page — so a consumer that only reads positions needs to know nothing about this.
+    /// What it carries is the <em>shape</em>: at 0.5 a backend must draw each glyph half as wide about its
+    /// own origin, and drawing it at its natural width would overlap the one after it.
+    /// </para>
+    /// <para>
+    /// Both backends have the operator for it exactly: PDF's text matrix takes it as its <c>a</c> term, and
+    /// Skia's <c>SKFont.ScaleX</c> is the same number.
+    /// </para>
+    /// </remarks>
+    public double WidthScale { get; init; } = 1.0;
 }
 
 /// <summary>One glyph placed relative to a <see cref="GlyphRun"/>'s origin.</summary>

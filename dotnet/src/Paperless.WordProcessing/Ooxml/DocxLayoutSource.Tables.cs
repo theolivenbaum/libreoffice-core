@@ -270,6 +270,13 @@ public sealed partial class DocxLayoutSource
             rows.Count > 0 && rows[0].Cells.Count > 0 ? rows[0].Cells[0].Definition : null;
         Length border = first?.Borders.Left.Width ?? Length.Zero;
 
+        // A positioned table is placed by `w:tblpX` and not by `w:tblInd`, and it is corrected twice
+        // over rather than once — see `PositionedLeftEdge`.
+        if (Word.Child(properties, "tblpPr") is { } floated && !isNested)
+        {
+            return PositionedLeftEdge(floated, first, border);
+        }
+
         if (isNested || _compatibilityMode >= 15)
         {
             // A nested table's indent is relative to the enclosing cell's text area, which cannot be to the
@@ -286,6 +293,70 @@ public sealed partial class DocxLayoutSource
             : Length.Max(border / 2, first?.Padding.Left ?? Length.Zero);
 
         return stated - distance;
+    }
+
+    /// <summary>
+    /// Where a positioned table's left edge sits, from <c>w:tblpX</c> rather than <c>w:tblInd</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A floated table becomes a frame, and <c>DomainMapperTableHandler::endTableGetTableStyle</c>
+    /// moves that frame left twice: by the first cell's left margin when the file's
+    /// <c>compatibilityMode</c> is below 15
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapperTableHandler.cxx</c>:543), and by half the first
+    /// cell's left border always (:612). Both are <c>lcl_DecrementHoriOrientPosition</c>, and they are
+    /// a <em>sum</em> — unlike the <c>w:tblInd</c> rule beside this, which takes the larger of the two.
+    /// </para>
+    /// <para>
+    /// Measured against 24.2.7.2 on an authored probe: a two-cell table floated with
+    /// <c>w:horzAnchor="margin"</c> and no <c>w:tblpX</c> draws its first cell's text at
+    /// <b>x = 71.65 pt</b> against the same table in the flow at <b>78.00</b> — 6.35 pt left, which is
+    /// the 108-twip cell margin plus half a one-point border. Adding <c>w:tblpX="-594"</c> moves it to
+    /// <b>41.95</b>, exactly 29.7 pt further, so the offset itself is applied unchanged.
+    /// </para>
+    /// <para>
+    /// It is worth 35 pt on <c>087_Printable_Graph_Paper_Template_Green_Theme</c>, whose grid the
+    /// reference draws from x = 35.3 and which we drew from 70.6 — a dense grid a whole page across,
+    /// so every line of it landed between two of the reference's.
+    /// </para>
+    /// <para>
+    /// Only the offset form. A table stating <c>w:tblpXSpec</c> is aligned rather than placed, and
+    /// <c>lcl_DecrementHoriOrientPosition</c> writes a position that a non-<c>NONE</c> orientation then
+    /// ignores — which is why <see cref="HorizontalPositionOf"/> answering non-null takes this out of
+    /// the picture.
+    /// </para>
+    /// <para>
+    /// <b><c>w:horzAnchor="page"</c> measures from the sheet's own left edge</b>, so the section's left
+    /// margin comes off before the offset joins the text area's coordinates —
+    /// <see cref="SectionLeftMargin"/>, which is the one piece of page geometry this reader carries. An
+    /// earlier round excluded the page anchor outright on the grounds that nothing here knew the margin,
+    /// and that left the offset unapplied rather than misapplied: measured on authored fixtures against
+    /// <em>both</em> installed references, which agree to a tenth of a point, <c>w:tblpX="705"</c> draws
+    /// its first cell's text at <b>x = 35.1</b> anchored to the page and at <b>107.1</b> anchored to the
+    /// margin — 72 pt apart, which is the margin exactly. The two decrements above apply either way.
+    /// </para>
+    /// <para>
+    /// It is worth 37 pt on <c>Case-Study-Heathrow-Airport.docx</c>, whose whole first page is one such
+    /// table: the reference draws its first cell at x = 40.50, which is 705 twips from the sheet plus
+    /// the cell's own 108-twip margin, and we drew it at 77.65 — at the page margin, as though the
+    /// offset were not there. See <c>probes/words-page-anchored-table/</c>.
+    /// </para>
+    /// </remarks>
+    private Length PositionedLeftEdge(XElement position, PageTableCell? first, Length border)
+    {
+        Length stated = Twips(position, "tblpX") ?? Length.Zero;
+
+        Length margin = _compatibilityMode >= 15
+            ? Length.Zero
+            : first?.Padding.Left ?? Length.Zero;
+
+        // The sheet's edge is `SectionLeftMargin` to the left of the text area every other length here
+        // is measured from.
+        Length origin = Word.Attribute(position, "horzAnchor") is "page"
+            ? SectionLeftMargin
+            : Length.Zero;
+
+        return stated - origin - margin - (border / 2);
     }
 
     /// <summary>The grid's column widths, in order.</summary>
@@ -477,10 +548,26 @@ public sealed partial class DocxLayoutSource
 
             _tableStyleRun = _styles.TableStyleRunProperties(styleId, conditions);
 
+            // Read before the cell, because the cell's paragraphs are read inside `ReadCell` and a
+            // continuation cell's must not count in their lists — see `_inCoveredCell`.
+            VerticalMerge merge = Merge(cellProperties);
+            bool outerCovered = _inCoveredCell;
+            _inCoveredCell = outerCovered || merge == VerticalMerge.Continue;
+
+            List<PageBlock> cellBlocks;
+            try
+            {
+                cellBlocks = ReadCell(child);
+            }
+            finally
+            {
+                _inCoveredCell = outerCovered;
+            }
+
             cells.Add(new PendingCell(
                 new PageTableCell
                 {
-                    Blocks = ReadCell(child),
+                    Blocks = cellBlocks,
                     Column = column,
                     ColumnSpan = span,
                     Padding = Padding(Word.Child(cellProperties, "tcMar"), tablePadding),
@@ -489,7 +576,7 @@ public sealed partial class DocxLayoutSource
                     Shading = Shading(cellProperties)
                               ?? ConditionalShading(styleId, conditions),
                 },
-                Merge(cellProperties),
+                merge,
                 OwnBorders(cellProperties)));
 
             // By the span, because DOCX writes no placeholder for a swallowed column.
@@ -500,7 +587,7 @@ public sealed partial class DocxLayoutSource
             cells,
             IsHeading: Word.IsOn(Word.Child(properties, "tblHeader"))
                        || Word.Child(properties, "tblHeader") is not null,
-            RowHeight(properties),
+            RowHeight(properties, children),
             // `w:cantSplit` is on when it is present without a `w:val`, which is how Word writes it, and
             // LibreOffice reads the same element the same way — "row can't break across pages if
             // nIntValue == 1" (`dmapper/TablePropertiesHandler.cxx`).
@@ -619,18 +706,29 @@ public sealed partial class DocxLayoutSource
     /// A row's declared height, as a floor.
     /// </summary>
     /// <remarks>
-    /// <c>w:hRule</c> distinguishes three cases and only two are honoured here: <c>atLeast</c> and the
-    /// absent-rule default are floors, and <c>auto</c> states no height at all. <c>exact</c> is a real
-    /// height that clips its content, which is not modelled — such a row gets the taller of the two
-    /// instead, which is wrong in the direction of showing the text rather than hiding it.
+    /// <para>
+    /// <c>w:hRule</c> names three cases and Writer honours two: <c>exact</c> is a fixed height, and
+    /// <em>everything else is a floor</em> — <c>atLeast</c>, an absent rule, and <c>auto</c> alike.
+    /// <c>MeasureHandler</c> opens at <c>SizeType::MIN</c> and its <c>LN_CT_Height_hRule</c> case tests
+    /// only for <c>exact</c> (<c>sw/source/writerfilter/dmapper/MeasureHandler.cxx</c>:35, 70-76), so
+    /// the word <c>auto</c> never reaches the layout at all and the stated <c>w:val</c> stands.
+    /// </para>
+    /// <para>
+    /// Reading <c>auto</c> as "no height at all" was this reader's own invention and is refuted by both
+    /// reference versions at once. Six rows stating <c>w:trHeight w:val="480" w:hRule="auto"</c>
+    /// (<c>probes/words-row-height/pitch.py</c>): 24.2.7.2 draws them 480 twips apart and 26.2.4.2 draws
+    /// them 489.6 to 740.4 apart depending on the border and the margins — its own <c>atLeast</c>
+    /// figures exactly — while we drew them 241.2, which is the empty paragraph and nothing else.
+    /// <b>No corpus document does it</b>: 11 230 <c>w:trHeight</c> elements across the DOCX corpus, and
+    /// not one states <c>auto</c>.
+    /// </para>
     /// </remarks>
-    private static (Length Height, bool IsExact) RowHeight(XElement? properties)
+    private (Length Height, bool IsExact) RowHeight(XElement? properties, List<XElement> cells)
     {
         XElement? height = Word.Child(properties, "trHeight");
         if (height is null) return (Length.Zero, false);
 
         string? rule = Word.Attribute(height, "hRule");
-        if (rule == "auto") return (Length.Zero, false);
 
         // `w:val`, not `w:w`. A row height is a bare measurement rather than a `w:tblWidth`, so it carries
         // neither a type nor a `w:w` — and reading it with the width helper returns nothing at all, which for
@@ -642,7 +740,123 @@ public sealed partial class DocxLayoutSource
                 ? Length.FromTwips(Math.Abs(twips))
                 : Length.Zero;
 
-        return (measured, rule == "exact");
+        return (measured, rule == "exact" || (measured > Length.Zero && MarkIsHidden(cells)));
+    }
+
+    /// <summary>
+    /// True when the row's <c>w:trHeight</c> is a height rather than a floor because every cell hides
+    /// its end mark and none of them holds anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is the difference between a graph-paper grid and a wall of oblongs.</strong>
+    /// <c>DomainMapperTableHandler::endTableGetRowProperties</c> — "we have CellHideMark on all cells,
+    /// and also all cells are empty: force the row height to be exactly as specified, and not just as
+    /// the minimum suggestion" (<c>sw/source/writerfilter/dmapper/DomainMapperTableHandler.cxx</c>
+    /// :1157-1162, with <c>lcl_hideMarks</c> at :1027 and <c>lcl_emptyRow</c> at :1085). Measured on
+    /// <c>084_Printable_Graph_Paper_Template_Editable_Layout</c>, whose 48 rows declare
+    /// <c>w:trHeight w:val="180"</c> — 9 pt, well under the 13.7 pt an 11 pt Calibri line asks for.
+    /// Both references draw the row pitch at <b>9.00 pt</b> and we drew it at <b>14.40</b>, which is a
+    /// grid 60% too tall and the <em>Title:</em> and <em>Date:</em> rules pushed off the sheet.
+    /// </para>
+    /// <para>
+    /// <strong>A cell holding nothing but blanks counts as empty, and only below compatibility mode
+    /// 15.</strong> That is a second rule feeding this one: <c>DomainMapper_Impl</c> trims trailing
+    /// spaces, tabs and no-break spaces from a table cell's paragraph when
+    /// <c>0 &lt; mode &lt;= 14</c> (tdf#77417, <c>DomainMapper_Impl.cxx</c>:3032-3045), so an
+    /// all-blank cell in a Word 2010 file <em>is</em> empty by the time the row is measured and the
+    /// same cell in a Word 2013 file is not. It is load-bearing rather than a nicety: every one of
+    /// <c>084</c>'s 1728 cells holds a single no-break space, and it declares
+    /// <c>compatibilityMode 14</c>. Probed across both binaries and four modes in
+    /// <c>probes/words-hidemark-rowheight</c> — 24 documents, 24.2.7.2 and 26.2.4.2 agreeing on every
+    /// one.
+    /// </para>
+    /// <para>
+    /// <strong>Only the emptiness test reads that trim, not the layout.</strong> Trimming trailing
+    /// blanks from every table-cell paragraph in every file below mode 15 is what LibreOffice really
+    /// does, and it would reach far past this: the DOCX corpus holds 1 043 cell paragraphs ending in a
+    /// blank across 61 documents below mode 15, each one a cell width and possibly a line break. That
+    /// is a cascade to measure on its own round rather than a rider on this one.
+    /// </para>
+    /// <para>
+    /// Guarded on a stated height, which LibreOffice does not need: it sets the size <em>type</em> and
+    /// leaves the height to <c>w:trHeight</c>, so a row with no stated height keeps whatever default
+    /// the model has. Here an exact height of zero would be a row that draws nothing, so a row stating
+    /// none keeps its floor.
+    /// </para>
+    /// </remarks>
+    /// <param name="cells">The row's <c>w:tc</c> elements.</param>
+    private bool MarkIsHidden(List<XElement> cells)
+    {
+        if (cells.Count == 0) return false;
+
+        foreach (XElement cell in cells)
+        {
+            XElement? properties = Word.Child(cell, "tcPr");
+
+            // `lcl_hideMarks`: every cell must hide its mark, and none may be vertically merged —
+            // "if anything is vertically merged, the row must not be set to fixed as Writer's layout
+            // doesn't handle that well".
+            if (!Word.IsOn(Word.Child(properties, "hideMark"))) return false;
+            if (Word.Child(properties, "vMerge") is not null) return false;
+            if (!IsEmptyCell(cell)) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Whether a cell holds no text at all, in the sense the row-height rule needs.</summary>
+    /// <remarks>
+    /// One paragraph, no nested table, and nothing in it but <c>w:t</c> — a tab, a break, a picture or
+    /// a field all put something in the cell's text range and make <c>lcl_emptyRow</c> false. The text
+    /// itself must be empty, or, below compatibility mode 15, blank: see <see cref="MarkIsHidden"/>.
+    /// </remarks>
+    private bool IsEmptyCell(XElement cell)
+    {
+        // `0 < nMode && nMode <= 14`, and the lower bound is not decoration: a file stating no
+        // compatibility mode at all leaves ours at −1, and both references treat such a file the
+        // modern way — probed, `f-None-hide-nbsp` draws 13.92 pt where `f-14-hide-nbsp` draws 9.12.
+        bool trims = _compatibilityMode is > 0 and <= 14;
+        int paragraphs = 0;
+
+        foreach (XElement child in cell.Elements())
+        {
+            if (Word.Is(child, "tcPr")) continue;
+            if (!Word.Is(child, "p")) return false;
+            if (++paragraphs > 1) return false;
+
+            foreach (XElement inside in child.Descendants())
+            {
+                if (!Word.Is(inside, inside.Name.LocalName)) return false;
+
+                switch (inside.Name.LocalName)
+                {
+                    case "pPr" or "rPr" or "r" or "proofErr" or "bookmarkStart" or "bookmarkEnd"
+                         or "lastRenderedPageBreak":
+                        continue;
+
+                    case "t":
+                        string text = inside.Value;
+                        if (text.Length == 0) continue;
+                        if (!trims) return false;
+                        foreach (char character in text)
+                            if (character is not (' ' or '\t' or '\u00a0')) return false;
+                        continue;
+
+                    default:
+                        // A `w:pPr`'s or `w:rPr`'s own children are formatting, not content.
+                        if (inside.Ancestors().Any(
+                                ancestor => ancestor.Name.LocalName is "pPr" or "rPr"))
+                        {
+                            continue;
+                        }
+
+                        return false;
+                }
+            }
+        }
+
+        return paragraphs == 1;
     }
 
     /// <summary>
@@ -727,12 +941,12 @@ public sealed partial class DocxLayoutSource
             _ => CellTextDirection.LeftToRight,
         };
 
-    private static CellVerticalAlignment VerticalAlignment(XElement? properties)
+    private static VerticalTextAlignment VerticalAlignment(XElement? properties)
         => Word.Attribute(Word.Child(properties, "vAlign"), "val") switch
         {
-            "center" => CellVerticalAlignment.Middle,
-            "bottom" => CellVerticalAlignment.Bottom,
-            _ => CellVerticalAlignment.Top,
+            "center" => VerticalTextAlignment.Middle,
+            "bottom" => VerticalTextAlignment.Bottom,
+            _ => VerticalTextAlignment.Top,
         };
 
     /// <summary>
@@ -934,18 +1148,26 @@ public sealed partial class DocxLayoutSource
 
         if (stated is null) return null;
 
-        if (Word.Attribute(stated, "val") is null or "none" or "nil") return default(TableBorder);
+        string? val = Word.Attribute(stated, "val");
 
-        Length width =
+        Length stateWidth =
             Word.Integer(Word.Attribute(stated, "sz"), out int eighths) && eighths > 0
                 ? Length.FromPoints(eighths / 8.0)
                 : HairlineBorder;
+
+        // An art border draws nothing at all, the same answer `none` and `nil` give — see
+        // `BorderRules.WordStyleOf`, and `BorderRules` for why the width comes back changed.
+        if (val is null or "none" or "nil"
+            || BorderRules.FromWord(BorderRules.WordStyleOf(val), stateWidth) is not { } rule)
+        {
+            return default(TableBorder);
+        }
 
         Colour colour =
             WordThemeColour.Read(stated, _theme, "color", "themeColor", "themeTint", "themeShade")
             ?? Colour.Black;
 
-        return new TableBorder(width, colour);
+        return new TableBorder(rule.Width, colour, rule.Line);
     }
 
     /// <summary>
@@ -1276,6 +1498,41 @@ public sealed partial class DocxLayoutSource
            && Word.Integer(text, out int value)
             ? value
             : null;
+
+    /// <summary>
+    /// True while the walk is inside a cell covered by a vertical merge above it, whose paragraphs are
+    /// read but never drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Resolved"/> drops a <c>w:vMerge</c> continuation cell outright, so nothing it holds
+    /// reaches the page — but its paragraphs have already been read by then, and reading a numbered
+    /// paragraph <em>advances that list's counter</em>. The counter is the only thing that escapes a
+    /// cell that is not drawn, and it escapes into the numbers of every list item after it.
+    /// </para>
+    /// <para>
+    /// LibreOffice states the same rule from the other end: setting a cell's <c>VerticalMerge</c>
+    /// property walks every text node in the cell and clears its counted-in-list flag
+    /// (<c>sw/source/core/unocore/unotbl.cxx</c>:978-990, <em>"Hack to allow clearing of numbering from
+    /// the paragraphs in the merged cells"</em>), so a numbered paragraph in a covered cell neither
+    /// shows a number nor advances the count.
+    /// </para>
+    /// <para>
+    /// Measured on <c>B11. TE.CAO.00129 Experience logbook.docx</c>, whose ID column carries sixteen
+    /// paragraphs at <c>w:numId="16"</c>, three of them empty and in <c>w:vMerge</c> continuation cells
+    /// (table 2, rows 8, 17 and 18). The reference numbers the other thirteen 1 to 13; without this
+    /// the three covered ones consume 8, 10 and 11 and the visible column reads 1–7, 9, 12–16. The same
+    /// three-line shape mis-numbers <c>FO.FCTOA_.000129</c>'s activity sections 3.1, 3.3, 3.4, 3.6,
+    /// 3.12 against the reference's 3.1 to 3.5.
+    /// </para>
+    /// <para>
+    /// Only <em>continuation</em> cells, not the restart that begins the merge: the reference numbers
+    /// a heading in a <c>w:vMerge w:val="restart"</c> cell normally — <c>FO.FCTOA_.000129</c> prints
+    /// "2.1.1 Name and Address" and "3.1 Audit of Management …" from restart cells — because that cell
+    /// is the one that is drawn.
+    /// </para>
+    /// </remarks>
+    private bool _inCoveredCell;
 
     /// <summary>Which part of a vertical merge a cell is.</summary>
     private enum VerticalMerge

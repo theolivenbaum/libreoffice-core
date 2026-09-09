@@ -67,14 +67,22 @@ internal static class XlsxDrawings
     /// Resolves a chart sequence's <c>c:f</c> against the workbook's own cells. This is the whole
     /// difference between Calc's chart data provider and the base one — see
     /// <see cref="ChartRangeResolver"/> — and it is a parameter because only a spreadsheet reader
-    /// has a workbook to resolve in.
+    /// has a workbook to resolve in. The workbook's resolver rather than one delegate, because
+    /// each chart binds its own <c>c:plotVisOnly</c> — see
+    /// <see cref="XlsxChartRanges.Resolver"/>.
+    /// </param>
+    /// <param name="styles">
+    /// The theme's <c>a:fmtScheme</c>, which a shape's <c>xdr:style</c> indexes for its fill and
+    /// its outline. 583 of the corpus's 644 worksheet shapes state one; see
+    /// <see cref="XlsxShapeInk"/> for how much of the answer it really decides.
     /// </param>
     public static SheetDrawings Read(
         IPackage package,
         string? sheetPartName,
         DrawingTheme? theme = null,
         DrawingFontScheme? fonts = null,
-        ChartRangeResolver? ranges = null)
+        XlsxChartRanges? ranges = null,
+        DrawingStyleMatrix? styles = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         if (sheetPartName is null || package is not OpcPackage opc) return SheetDrawings.Empty;
@@ -116,8 +124,11 @@ internal static class XlsxDrawings
                 };
 
                 if (kind is not { } anchored) continue;
-                if (ReadAnchor(anchor, anchored, opc, images, theme, fonts, ranges) is { } drawing)
+                if (ReadAnchor(anchor, anchored, opc, images, theme, fonts, ranges, styles)
+                    is { } drawing)
+                {
                     drawings.Add(drawing);
+                }
             }
         }
 
@@ -131,7 +142,8 @@ internal static class XlsxDrawings
         Dictionary<string, OpcXml.Relationship> images,
         DrawingTheme? theme,
         DrawingFontScheme? fonts,
-        ChartRangeResolver? ranges)
+        XlsxChartRanges? ranges,
+        DrawingStyleMatrix? styles)
     {
         XElement? picture = Child(anchor, DrawingNamespace, "pic");
         XElement? frame = Child(anchor, DrawingNamespace, "graphicFrame");
@@ -180,7 +192,7 @@ internal static class XlsxDrawings
             To = Point(Child(anchor, DrawingNamespace, "to")),
             Extent = extent,
             Position = Position(Child(anchor, DrawingNamespace, "pos")),
-            Parts = Parts(anchored, transform),
+            Parts = Parts(anchored, transform, package, images, theme, styles),
         };
 
         // Each shape kind wraps its cNvPr in a differently named non-visual container, and they
@@ -199,6 +211,11 @@ internal static class XlsxDrawings
 
             // hidden="1" on cNvPr, which is what Excel writes for a shape the user has hidden.
             IsHidden = Attribute(properties, "hidden") is "1" or "true",
+
+            // Whether the anchor states the rectangle the shape occupies *after* its own quarter
+            // turn, which Excel writes and Calc undoes: see `SheetDrawing.QuarterTurnedAnchor`
+            // and `sc/source/filter/oox/drawingfragment.cxx`:299-330.
+            QuarterTurnedAnchor = IsQuarterTurned(transform),
         };
 
         if (frame is not null)
@@ -225,9 +242,45 @@ internal static class XlsxDrawings
         // does — so the element is looked up in the spreadsheet drawing namespace and everything
         // inside it in the main one.
         if (shape is not null && Child(shape, DrawingNamespace, "txBody") is { } body
-            && ShapeText(body, fonts) is { IsEmpty: false } shapeText)
+            && ShapeText(body, fonts, StyleFace(shape, fonts)) is { IsEmpty: false } shapeText)
         {
-            drawing = drawing with { Text = shapeText };
+            // The preset the text is laid out inside, which is not the same rectangle as the
+            // anchor: see `SheetShapeText.Preset`.
+            XElement? geometry = Child(
+                Child(shape, DrawingNamespace, "spPr"), MainNamespace, "prstGeom");
+
+            drawing = drawing with
+            {
+                Text = shapeText with
+                {
+                    Preset = Attribute(geometry, "prst"),
+                    Adjustments = Adjustments(geometry),
+                },
+            };
+        }
+
+        // The shape's own fill and outline, which nothing read in any format until round 84.
+        // Set on the *anchor* rather than on a part, except where `Parts` has already answered a
+        // part for it: a group has one fill per leaf and a turned shape's fill has to be turned
+        // with it, so both of those cases are painted from `SheetDrawingPart` instead and setting
+        // it here as well would paint the ink twice. See `SheetShapeInk`.
+        if (shape is not null && drawing.Parts.Count == 0)
+        {
+            XlsxShapeInk.Ink ink = XlsxShapeInk.Read(shape, theme, styles);
+            if (ink.HasInk)
+            {
+                drawing = drawing with
+                {
+                    Fill = ink.Fill,
+                    Gradient = ink.Gradient,
+                    Stroke = ink.Stroke,
+                    StrokeWidth = ink.StrokeWidth,
+                    Preset = ink.Preset,
+                    Adjustments = ink.Adjustments,
+                    FlipHorizontal = ink.FlipHorizontal,
+                    FlipVertical = ink.FlipVertical,
+                };
+            }
         }
 
         // A shape carries no image and no chart, so it reaches the print area and stops there.
@@ -309,7 +362,7 @@ internal static class XlsxDrawings
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> parts,
         DrawingTheme? theme,
-        ChartRangeResolver? ranges)
+        XlsxChartRanges? ranges)
     {
         string? id = Attribute(
             Child(data, OoxmlNamespaces.DrawingMLChart, "chart"),
@@ -325,8 +378,14 @@ internal static class XlsxDrawings
             ? null
             // `automaticChartAreaLine`: the grey D9D9D9 default chart-area border is skipped only
             // under the Impress filter (objectformatter.cxx:838-848, tdf#150176), and this is Calc.
+            // A hidden row or column is not chart data unless the chart says otherwise, and
+            // that is a property of the chart part rather than of the workbook — so the
+            // resolver is bound here, once the chart's own c:plotVisOnly is in hand. See
+            // XlsxChartHiddenCells.
             : DrawingChartPlot.Read(
-                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null, ranges,
+                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null,
+                ranges?.Resolver(DrawingChart.PlotsVisibleCellsOnly(
+                    chartSpace, OoxmlMetadata.IsOffice2007(package))),
                 automaticChartAreaLine: true);
     }
 
@@ -424,7 +483,8 @@ internal static class XlsxDrawings
     /// <c>oox/source/drawingml/theme.cxx:71</c>).
     /// </para>
     /// </remarks>
-    private static SheetShapeText ShapeText(XElement body, DrawingFontScheme? fonts)
+    private static SheetShapeText ShapeText(
+        XElement body, DrawingFontScheme? fonts, string? styleFace)
     {
         XElement? properties = Child(body, MainNamespace, "bodyPr");
 
@@ -434,7 +494,8 @@ internal static class XlsxDrawings
             XElement? paragraphProperties = Child(paragraph, MainNamespace, "pPr");
             XElement? defaults = Child(paragraphProperties, MainNamespace, "defRPr");
             Length inherited = Points(defaults) ?? SheetShapeText.DefaultSize;
-            string? inheritedFamily = Family(defaults, fonts);
+            string? inheritedFamily = Family(defaults, fonts) ?? styleFace;
+            bool inheritedBold = Bold(defaults) ?? false;
 
             List<SheetShapeRun> runs = [];
             foreach (XElement run in paragraph.Elements(XName.Get("r", MainNamespace)))
@@ -446,7 +507,8 @@ internal static class XlsxDrawings
                 runs.Add(new SheetShapeRun(
                     text,
                     Points(runProperties) ?? inherited,
-                    Family(runProperties, fonts) ?? inheritedFamily));
+                    Family(runProperties, fonts) ?? inheritedFamily,
+                    Bold(runProperties) ?? inheritedBold));
             }
 
             // A paragraph with nothing in it still occupies a line, and `a:endParaRPr` is what
@@ -460,7 +522,8 @@ internal static class XlsxDrawings
                 runs.Add(new SheetShapeRun(
                     string.Empty,
                     Points(ending) ?? inherited,
-                    Family(ending, fonts) ?? inheritedFamily));
+                    Family(ending, fonts) ?? inheritedFamily,
+                    Bold(ending) ?? inheritedBold));
             }
 
             // `a:br` is a line break inside a paragraph. Splitting the paragraph at one gives the
@@ -522,6 +585,79 @@ internal static class XlsxDrawings
         return fonts is { } scheme ? scheme.Resolve(stated) : (stated[0] == '+' ? null : stated);
     }
 
+    /// <summary>
+    /// The face a shape's <c>xdr:style/a:fontRef</c> names, or null when it names none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A shape's style reference is where most text boxes get their face, and every run in
+    /// them states none.</strong> <c>a:fontRef idx="minor"</c> means "the theme's minor font", and
+    /// <c>Shape::createAndInsert</c> applies it to the shape's text before any run property is
+    /// (<c>oox/source/drawingml/shape.cxx</c>, the <c>maShapeStyleRefs</c> walk). Without it a box
+    /// authored by Excel — which writes the reference and no <c>a:latin</c> anywhere — falls
+    /// through to the drawing layer's own default and is drawn in Liberation Serif where the
+    /// reference draws Carlito.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2: <c>Air_Boss_Master_List.xlsx</c>'s note box states
+    /// <c>&lt;a:fontRef idx="minor"&gt;</c> against a Calibri theme and nothing else, and the
+    /// reference draws it in Carlito-Bold.
+    /// </para>
+    /// </remarks>
+    private static string? StyleFace(XElement shape, DrawingFontScheme? fonts)
+        => fonts is { } scheme
+           && Child(shape, DrawingNamespace, "style") is { } style
+           && Child(style, MainNamespace, "fontRef") is { } reference
+            ? scheme.ForReference(reference.Attribute("idx")?.Value, "latin")
+            : null;
+
+    /// <summary>
+    /// The adjustment values a shape states for its preset, by guide name, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// <c>a:avLst/a:gd</c> states them as <c>fmla="val N"</c>, in the preset's own units — a
+    /// hundred-thousandth of the shape for a fraction, a sixtieth of a degree for an angle — and
+    /// the evaluator wants the bare number. Anything that is not a <c>val</c> is skipped rather
+    /// than guessed at, which leaves the preset's own default in force.
+    /// </remarks>
+    private static Dictionary<string, double>? Adjustments(XElement? geometry)
+    {
+        if (Child(geometry, MainNamespace, "avLst") is not { } list) return null;
+
+        Dictionary<string, double> values = [];
+        foreach (XElement guide in list.Elements(XName.Get("gd", MainNamespace)))
+        {
+            if (guide.Attribute("name")?.Value is not { Length: > 0 } name) continue;
+            if (guide.Attribute("fmla")?.Value is not { Length: > 4 } formula) continue;
+            if (!formula.StartsWith("val ", StringComparison.Ordinal)) continue;
+
+            if (double.TryParse(
+                    formula.AsSpan(4).Trim(),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out double value))
+            {
+                values[name] = value;
+            }
+        }
+
+        return values.Count == 0 ? null : values;
+    }
+
+    /// <summary>A run's <c>b</c>, or null where it states none and inherits.</summary>
+    /// <remarks>
+    /// Three spellings, because DrawingML's boolean is an <c>xsd:boolean</c> and all of them
+    /// appear in the corpus. Absent is not false: it means "take what the paragraph or the body
+    /// said", which is why this answers null rather than defaulting here.
+    /// </remarks>
+    private static bool? Bold(XElement? properties)
+        => properties?.Attribute("b")?.Value switch
+        {
+            "1" or "true" or "on" => true,
+            "0" or "false" or "off" => false,
+            _ => null,
+        };
+
     /// <summary>A run's <c>sz</c>, in hundredths of a point, or null where it states none.</summary>
     private static Length? Points(XElement? properties)
         => properties?.Attribute("sz")?.Value is { } text
@@ -561,7 +697,13 @@ internal static class XlsxDrawings
     /// alone is the smaller error than pretending the two add.
     /// </para>
     /// </remarks>
-    private static List<SheetDrawingPart> Parts(XElement? shape, XElement? transform)
+    private static List<SheetDrawingPart> Parts(
+        XElement? shape,
+        XElement? transform,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> images,
+        DrawingTheme? theme,
+        DrawingStyleMatrix? styles)
     {
         if (shape is null || transform is null) return [];
 
@@ -582,11 +724,15 @@ internal static class XlsxDrawings
         if (frameWidth <= 0 || frameHeight <= 0) return [];
 
         List<SheetDrawingPart> parts = [];
-        Collect(shape, frameX, frameY, frameWidth, frameHeight, 0);
+        Collect(shape, frameX, frameY, frameWidth, frameHeight, 0, default);
         return parts.Count == 0 ? [] : parts;
 
         // (x, y, width, height) are the container's own rectangle, in the anchored shape's EMUs.
-        void Collect(XElement container, double x, double y, double width, double height, int depth)
+        // `inherited` is the enclosing group's own fill, which is what a leaf saying `a:grpFill`
+        // takes; it is resolved on the way down for that reason.
+        void Collect(
+            XElement container, double x, double y, double width, double height, int depth,
+            XlsxShapeInk.Ink inherited)
         {
             XElement? own = Transform(container);
             XElement? childOffset = Child(own, MainNamespace, "chOff");
@@ -599,12 +745,16 @@ internal static class XlsxDrawings
             {
                 if (own is null) return;
 
-                parts.Add(new SheetDrawingPart(
-                    (x - frameX) / frameWidth,
-                    (y - frameY) / frameHeight,
-                    width / frameWidth,
-                    height / frameHeight,
-                    Degrees(own)));
+                parts.Add(Inked(
+                    Painted(
+                        container, package, images,
+                        new SheetDrawingPart(
+                            (x - frameX) / frameWidth,
+                            (y - frameY) / frameHeight,
+                            width / frameWidth,
+                            height / frameHeight,
+                            Degrees(own))),
+                    container, theme, styles, inherited));
                 return;
             }
 
@@ -615,6 +765,11 @@ internal static class XlsxDrawings
             double originY = Long(childOffset, "y");
             double scaleX = width / Long(childExtent, "cx");
             double scaleY = height / Long(childExtent, "cy");
+
+            // The group's own fill, for whichever of its children says `a:grpFill`. A group that
+            // itself says so takes its parent's, which is why this is resolved from `inherited`
+            // rather than from nothing.
+            XlsxShapeInk.Ink groupFill = XlsxShapeInk.Read(container, theme, styles, inherited);
 
             foreach (XElement child in container.Elements())
             {
@@ -635,9 +790,146 @@ internal static class XlsxDrawings
                     y + ((Long(at, "y") - originY) * scaleY),
                     Long(size, "cx") * scaleX,
                     Long(size, "cy") * scaleY,
-                    depth + 1);
+                    depth + 1,
+                    groupFill);
             }
         }
+    }
+
+    /// <summary>
+    /// A part with whatever picture its leaf shape holds, or the part unchanged when it holds none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A picture inside an <c>xdr:grpSp</c> was read for its bounds and never drawn.</strong>
+    /// <see cref="ReadAnchor"/> looks for an <c>xdr:pic</c> directly under the anchor; a group is
+    /// none, so the anchor came back with no image, no vector, no chart and no text, and
+    /// <see cref="Layout.SheetPageGraphics"/> skipped it — while
+    /// <see cref="Layout.SheetDrawingArea"/> still counted it, so the group widened the printed
+    /// block and put nothing in it. Calc makes no such distinction:
+    /// <c>GroupShapeContext::createShapeContext</c> takes <c>sp</c>, <c>cxnSp</c>, <c>grpSp</c>,
+    /// <c>graphicFrame</c> and <c>pic</c> alike (<c>sc/source/filter/oox/drawingfragment.cxx:198</c>)
+    /// and every leaf ends up on the drawing layer.
+    /// </para>
+    /// <para>
+    /// Measured on <c>SIL_TDB648.xlsx</c>: its eleven sheet drawings hold one group each, of
+    /// fourteen turned, faded copies of the same <c>Honeywell</c> wordmark. <c>pdfimages -list</c>
+    /// counts that image on 86 of the reference's 88 pages and on <b>none</b> of our 90.
+    /// </para>
+    /// <para>
+    /// Only a picture is read here; a leaf's fill and outline are <see cref="Inked"/>'s, which the
+    /// model grew a <see cref="SheetDrawingPart.Fill"/> for in round 84. A leaf's <em>text</em>
+    /// body is still not read — <see cref="Layout.SheetDrawing.Text"/> carries one for the whole
+    /// anchor and a group has many.
+    /// </para>
+    /// </remarks>
+    private static SheetDrawingPart Painted(
+        XElement leaf,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> images,
+        SheetDrawingPart part)
+    {
+        if (leaf.Name.LocalName != "pic") return part;
+
+        XElement? blipFill = Child(leaf, DrawingNamespace, "blipFill");
+        XElement? blip = Child(blipFill, MainNamespace, "blip");
+        if (blip is null) return part;
+
+        BlipReference.Choice choice = BlipReference.Choose(blip);
+        DrawingBlipFill? fill = DrawingFill.ReadBlip(blipFill);
+
+        (RasterImage? raster, Lazy<VectorImage>? vector) =
+            LoadImage(package, images, choice.RelationshipId);
+
+        // The `svgBlip` case: the vector is what to draw and the raster beside it is the fallback,
+        // so an empty decode still leaves a picture. The same choice `ReadAnchor` makes.
+        if (choice.IsVector && choice.FallbackRelationshipId is { } fallback)
+        {
+            (raster, _) = LoadImage(package, images, fallback);
+        }
+
+        if (raster is null && vector is null) return part;
+
+        return part with
+        {
+            Image = vector is null ? KnockedOut(fill, raster) : raster,
+            Vector = vector,
+            Opacity = fill?.Opacity ?? 1,
+            Crop = fill is null || fill.SourceRect.IsWhole
+                ? PictureCropFractions.None
+                : new PictureCropFractions(
+                    fill.SourceRect.Left, fill.SourceRect.Top,
+                    fill.SourceRect.Right, fill.SourceRect.Bottom),
+        };
+    }
+
+    /// <summary>
+    /// A part with its leaf shape's own fill and outline, or the part unchanged when it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The ink of a grouped or turned shape belongs on the part rather than on the
+    /// anchor.</strong> An <c>xdr:grpSp</c> anchor holds many shapes with many fills, and the
+    /// anchor carries one — censused whole-corpus, <b>174 of the 644 worksheet <c>xdr:sp</c> sit
+    /// inside a group</b>, in 6 documents. A turned top-level shape reaches this by the same road:
+    /// <see cref="Parts"/> already answers a single part restating the frame whenever the
+    /// transform states a <c>rot</c>, and only a part carries an angle, so painting the fill from
+    /// the anchor would draw it upright inside the turned shape's bounding box.
+    /// </para>
+    /// <para>
+    /// <c>a:grpFill</c> is what makes the group's own fill worth resolving on the way down rather
+    /// than at the leaf: it is a reference to the enclosing group's fill, and <b>98 corpus shapes
+    /// in 2 documents</b> state one.
+    /// </para>
+    /// </remarks>
+    private static SheetDrawingPart Inked(
+        SheetDrawingPart part,
+        XElement leaf,
+        DrawingTheme? theme,
+        DrawingStyleMatrix? styles,
+        XlsxShapeInk.Ink inherited)
+    {
+        if (leaf.Name.LocalName is not ("sp" or "cxnSp" or "grpSp")) return part;
+
+        XlsxShapeInk.Ink ink = XlsxShapeInk.Read(leaf, theme, styles, inherited);
+        if (!ink.HasInk) return part;
+
+        return part with
+        {
+            Fill = ink.Fill,
+            Gradient = ink.Gradient,
+            Stroke = ink.Stroke,
+            StrokeWidth = ink.StrokeWidth,
+            Preset = ink.Preset,
+            Adjustments = ink.Adjustments,
+            FlipHorizontal = ink.FlipHorizontal,
+            FlipVertical = ink.FlipVertical,
+        };
+    }
+
+    /// <summary>
+    /// Whether a shape's own rotation falls in the two quarter-turn ranges Excel rewrites an
+    /// anchor for.
+    /// </summary>
+    /// <remarks>
+    /// The test is <c>drawingfragment.cxx</c>:300-301 exactly: <c>[45°, 135°)</c> and
+    /// <c>[225°, 315°)</c> of the raw <c>@rot</c>, in sixtieth-thousandths, which is a
+    /// half-open partition of the circle into the two anchor conventions Excel uses. A negative
+    /// or over-turn value is brought into one revolution first, because <c>@rot</c> is not
+    /// normalised in real files.
+    /// </remarks>
+    private static bool IsQuarterTurned(XElement? transform)
+    {
+        const long Revolution = 360 * 60000L;
+
+        if (transform?.Attribute("rot")?.Value is not { } text) return false;
+        if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long raw))
+            return false;
+
+        long rotation = ((raw % Revolution) + Revolution) % Revolution;
+
+        return (rotation >= 45 * 60000L && rotation < 135 * 60000L)
+               || (rotation >= 225 * 60000L && rotation < 315 * 60000L);
     }
 
     /// <summary>How far a transform turns its shape clockwise, in degrees.</summary>

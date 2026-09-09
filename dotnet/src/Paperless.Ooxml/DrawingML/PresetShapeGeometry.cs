@@ -54,10 +54,14 @@ public static class PresetShapeGeometry
         List<PresetCommand> commands = [];
         string pathWidth = "0";
         string pathHeight = "0";
+        string pathFill = "norm";
+        bool pathStroke = true;
 
         void FlushPath()
         {
-            if (commands.Count > 0) paths.Add(new PresetPath(pathWidth, pathHeight, commands));
+            if (commands.Count > 0)
+                paths.Add(new PresetPath(pathWidth, pathHeight, commands, pathFill, pathStroke));
+
             commands = [];
         }
 
@@ -71,6 +75,10 @@ public static class PresetShapeGeometry
             guides = [];
             rectangle = null;
             paths = [];
+            pathWidth = "0";
+            pathHeight = "0";
+            pathFill = "norm";
+            pathStroke = true;
         }
 
         while (reader.ReadLine() is { } line)
@@ -114,6 +122,15 @@ public static class PresetShapeGeometry
                     string[] fields = rest.Split(' ');
                     pathWidth = fields.Length > 0 ? fields[0] : "0";
                     pathHeight = fields.Length > 1 ? fields[1] : "0";
+
+                    // Fields three and four are the subpath's own fill mode and whether it is
+                    // stroked, both written as "-" when the source states nothing. They were
+                    // reduced into the table with the rest of the record and then dropped here,
+                    // which is why every subpath was filled and stroked alike: 96 of the 320
+                    // subpaths in the table say `fill="none"` -- every connector among them -- and
+                    // 84 say `stroke="false"`.
+                    pathFill = fields.Length > 2 && fields[2] != "-" ? fields[2] : "norm";
+                    pathStroke = fields.Length <= 3 || fields[3] != "false";
                     break;
                 }
 

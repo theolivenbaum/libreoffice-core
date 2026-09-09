@@ -49,7 +49,7 @@ public sealed partial class OdtLayoutSource
     /// <summary>Reads a table, or returns null when it declares no usable grid.</summary>
     private PageTable? Table(XElement element)
     {
-        List<Length?> declared = Columns(element);
+        List<DeclaredColumn> declared = Columns(element);
         if (declared.Count == 0) return null;
 
         List<PageTableRow> rows = [];
@@ -60,13 +60,15 @@ public sealed partial class OdtLayoutSource
 
         string? styleName = element.Attribute(XName.Get("style-name", OdfNamespaces.Table))?.Value;
 
-        List<Length> columns = [.. declared.Select(width => width ?? Length.Zero)];
+        List<Length> columns = [.. declared.Select(column => column.Width ?? Length.Zero)];
 
         return new PageTable
         {
             SectionIndex = _sectionIndex,
             ColumnWidths = columns,
             ColumnFit = Fit(declared, styleName),
+            RelativeWidth = RelativeWidth(styleName),
+            HorizontalPosition = HorizontalPosition(styleName),
             Rows = rows,
             HeaderRowCount = headerRows,
             LeftIndent = TableMeasure(styleName, OdfNamespaces.FoCompatible, "margin-left")
@@ -87,9 +89,9 @@ public sealed partial class OdtLayoutSource
     /// <see cref="TableColumnFit"/>'s arithmetic. Reading the second as the first is what made a width-less
     /// table lay out with no columns at all.
     /// </remarks>
-    private List<Length?> Columns(XElement table)
+    private List<DeclaredColumn> Columns(XElement table)
     {
-        List<Length?> widths = [];
+        List<DeclaredColumn> widths = [];
         Collect(table, 0);
         return widths;
 
@@ -99,7 +101,7 @@ public sealed partial class OdtLayoutSource
 
             foreach (XElement child in element.Elements())
             {
-                if (child.Name.Namespace != OdfNamespaces.Table) continue;
+                if (!OdfNamespaces.IsTable(child.Name.NamespaceName)) continue;
 
                 switch (child.Name.LocalName)
                 {
@@ -111,7 +113,7 @@ public sealed partial class OdtLayoutSource
                         break;
 
                     case "table-column":
-                        Length? width = ColumnWidth(child);
+                        DeclaredColumn width = ColumnWidth(child);
                         int repeat = Repeat(child, "number-columns-repeated");
 
                         for (int i = 0; i < repeat && widths.Count < PageTable.MaxColumns; i++)
@@ -125,15 +127,73 @@ public sealed partial class OdtLayoutSource
         }
     }
 
-    private Length? ColumnWidth(XElement column)
+    /// <summary>What one <c>table:table-column</c> states about its width.</summary>
+    /// <param name="Width">
+    /// The number the file stated, or null when it stated neither spelling. A proportion is carried here
+    /// too, as a length in twips, because that is the unit Writer keeps it in — a column's relative width
+    /// and its absolute one are the same <c>SwFormatFrameSize</c> field and are told apart by the size
+    /// type beside it, not by their magnitude.
+    /// </param>
+    /// <param name="IsProportion">
+    /// True when the number is <c>style:rel-column-width</c>'s proportion rather than
+    /// <c>style:column-width</c>'s length. See <see cref="TableColumnFit.IsRelative"/>.
+    /// </param>
+    private readonly record struct DeclaredColumn(Length? Width, bool IsProportion);
+
+    /// <summary>
+    /// One column's stated width, absolute or proportional.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The absolute spelling wins when both are present, which is Writer's order rather than a choice:
+    /// <c>aTableColItemMap</c> maps <c>style:column-width</c> onto <c>MID_FRMSIZE_COL_WIDTH</c> and
+    /// <c>style:rel-column-width</c> onto <c>MID_FRMSIZE_REL_COL_WIDTH</c>
+    /// (<c>sw/source/filter/xml/xmlitemm.cxx</c>:121-122), and the relative one sets the size type to
+    /// <c>Variable</c> while the absolute one sets <c>Fixed</c> — so whichever is applied last decides,
+    /// and the item map applies them in attribute order. Only 84 columns of the converted corpus state
+    /// both, none of them in a document this round moved, so the tie-break is a correctness matter
+    /// rather than a measured one.
+    /// </para>
+    /// <para>
+    /// A proportion is <c>2677*</c>: an integer and a star, clamped to <c>[MINLAY, 65535]</c>
+    /// (<c>xmlimpit.cxx</c>:971-986). The star is required — a value without one sets nothing at all, and
+    /// the column stays width-less.
+    /// </para>
+    /// </remarks>
+    private DeclaredColumn ColumnWidth(XElement column)
     {
         string? styleName = column.Attribute(XName.Get("style-name", OdfNamespaces.Table))?.Value;
 
-        return OdfWriterUnits.ToCore(
+        Length? absolute = OdfWriterUnits.ToCore(
             OdfValue.ParseLength(
                 _styles.ResolveProperty(
                     styleName, OdfStyleFamily.TableColumn, OdfPropertyKind.TableColumn,
                     OdfNamespaces.Style, "column-width").Value));
+
+        if (absolute is not null) return new DeclaredColumn(absolute, IsProportion: false);
+
+        string? relative = _styles.ResolveProperty(
+            styleName, OdfStyleFamily.TableColumn, OdfPropertyKind.TableColumn,
+            OdfNamespaces.Style, "rel-column-width").Value;
+
+        return Proportion(relative) is { } share
+            ? new DeclaredColumn(Length.FromTwips(share), IsProportion: true)
+            : new DeclaredColumn(null, IsProportion: false);
+    }
+
+    /// <summary>The number in a <c>2677*</c>, clamped as Writer clamps it, or null when there is none.</summary>
+    private static int? Proportion(string? stated)
+    {
+        if (stated is null) return null;
+
+        int star = stated.IndexOf('*', StringComparison.Ordinal);
+        if (star < 0) return null;
+
+        return int.TryParse(
+                stated.AsSpan(0, star).Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int value)
+            ? Math.Clamp(value, TableColumnFit.MinLay, ushort.MaxValue)
+            : null;
     }
 
     /// <summary>
@@ -156,24 +216,113 @@ public sealed partial class OdtLayoutSource
     /// </remarks>
     /// <param name="declared">The columns, with null for each that stated no width.</param>
     /// <param name="styleName">The table's own style name.</param>
-    private TableColumnFit? Fit(List<Length?> declared, string? styleName)
+    private TableColumnFit? Fit(List<DeclaredColumn> declared, string? styleName)
     {
-        if (declared.All(width => width is not null)) return null;
+        // A proportional column needs the distribution as much as a width-less one does: its number is a
+        // share of the table rather than a length, so a grid of them cannot be used as it stands.
+        if (declared.All(column => column is { Width: not null, IsProportion: false })) return null;
 
-        string? align = _styles.ResolveProperty(
-            styleName, OdfStyleFamily.Table, OdfPropertyKind.Table,
-            OdfNamespaces.Table, "align").Value;
-
-        bool oriented = align is "left" or "center" or "right";
-        Length? width = oriented ? TableMeasure(styleName, OdfNamespaces.Style, "width") : null;
+        Length? width = IsOriented(styleName)
+            ? TableMeasure(styleName, OdfNamespaces.Style, "width")
+            : null;
 
         return new TableColumnFit
         {
-            IsAuto = [.. declared.Select(column => column is null)],
+            IsAuto = [.. declared.Select(column => column.Width is null)],
+            IsRelative = [.. declared.Select(column => column.IsProportion)],
             TableWidth = width,
             Rule = TableWidthRule.OpenDocument,
         };
     }
+
+    /// <summary>
+    /// The percentage of the surrounding width the table is laid out at, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>style:rel-width</c> on the table's <c>style:table-properties</c>, which
+    /// <c>aTableItemMap</c> maps onto <c>RES_FRM_SIZE</c>'s <c>MID_FRMSIZE_REL_WIDTH</c>
+    /// (<c>sw/source/filter/xml/xmlitemm.cxx</c>:47) and <c>SvXMLImportItemMapper</c> turns into
+    /// <c>SwFormatFrameSize::SetWidthPercent</c>, <b>clamped to 1..100</b>
+    /// (<c>sw/source/filter/xml/xmlimpit.cxx</c>:936-949) — the same clamp OOXML's <c>w:tblW</c>
+    /// percentage gets, so <see cref="PageTable.RelativeWidth"/> means one thing for both formats.
+    /// </para>
+    /// <para>
+    /// <b>Only for a table with a real horizontal orientation.</b>
+    /// <c>SwXMLTableContext::MakeTable_</c> (<c>sw/source/filter/xml/xmltbli.cxx</c>:2540-2582) reads the
+    /// size — percentage included — only in the <c>default:</c> arm of its orientation switch: under
+    /// <c>FULL</c> and <c>NONE</c>, which is <c>table:align="margins"</c> and an absent
+    /// <c>table:align</c>, it sets <c>m_nWidth = MAX_WIDTH</c> and the percentage is never read. That is
+    /// the same condition <see cref="Fit"/> already applies to <c>style:width</c>.
+    /// </para>
+    /// <para>
+    /// Reading it is not cosmetic. LibreOffice's own <c>.odt</c> export writes a Word table's width as a
+    /// percentage far more often than as a length: <b>29 of the 338 converted <c>.odt</c> hold an
+    /// oriented <c>style:rel-width</c> table</b>, the two FAA Holdover Tables 115 and 101 of them each.
+    /// A table laid out at the full measure where the file asks for 70% of it puts more text on every
+    /// line of every cell, which is not a visible defect until the rows it shortens let a block onto a
+    /// page the reference sends to the next one.
+    /// </para>
+    /// </remarks>
+    /// <param name="styleName">The table's own style name.</param>
+    private int? RelativeWidth(string? styleName)
+    {
+        if (!IsOriented(styleName)) return null;
+
+        string? stated = _styles.ResolveProperty(
+            styleName, OdfStyleFamily.Table, OdfPropertyKind.Table,
+            OdfNamespaces.Style, "rel-width").Value;
+
+        if (stated is null) return null;
+
+        string trimmed = stated.Trim().TrimEnd('%');
+
+        return double.TryParse(
+                trimmed, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double percent)
+            ? (int)Math.Clamp(Math.Round(percent), 1, 100)
+            : null;
+    }
+
+    /// <summary>Where the table sits across its area, or null to take <c>fo:margin-left</c> instead.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>table:align</c> through <c>aXMLTableAlignMap</c>
+    /// (<c>sw/source/filter/xml/xmlithlp.cxx</c>:307-316): <c>center</c> and <c>right</c> are real
+    /// orientations and place the table against the middle and the far edge of the area.
+    /// </para>
+    /// <para>
+    /// <c>left</c> is deliberately answered as null rather than as
+    /// <see cref="FrameHorizontalAlignment.Left"/>. A left-aligned table that also states an
+    /// <c>fo:margin-left</c> is <c>LEFT_AND_WIDTH</c> rather than <c>LEFT</c>
+    /// (<c>xmltbli.cxx</c>:2521-2527), which keeps the margin; null takes
+    /// <see cref="PageTable.LeftIndent"/>, which is that margin, and is the same answer as
+    /// <c>Left</c> for the far commoner table that states no margin at all.
+    /// </para>
+    /// <para>
+    /// It matters only for a table narrower than its area, so it is invisible until
+    /// <see cref="RelativeWidth"/> or a stated <c>style:width</c> makes one.
+    /// </para>
+    /// </remarks>
+    /// <param name="styleName">The table's own style name.</param>
+    private FrameHorizontalAlignment? HorizontalPosition(string? styleName)
+        => Align(styleName) switch
+        {
+            "center" => FrameHorizontalAlignment.Centre,
+            "right" => FrameHorizontalAlignment.Right,
+            _ => null,
+        };
+
+    /// <summary>The table's <c>table:align</c>, or null when it states none.</summary>
+    private string? Align(string? styleName)
+        => _styles.ResolveProperty(
+            styleName, OdfStyleFamily.Table, OdfPropertyKind.Table,
+            OdfNamespaces.Table, "align").Value;
+
+    /// <summary>
+    /// True when the table has a real horizontal orientation, which is what makes its stated width count.
+    /// </summary>
+    private bool IsOriented(string? styleName) => Align(styleName) is "left" or "center" or "right";
 
     /// <summary>
     /// Reads a table's rows, following the grouping elements and noting which rows are headings.
@@ -191,7 +340,7 @@ public sealed partial class OdtLayoutSource
 
         foreach (XElement child in element.Elements())
         {
-            if (child.Name.Namespace != OdfNamespaces.Table) continue;
+            if (!OdfNamespaces.IsTable(child.Name.NamespaceName)) continue;
             if (rows.Count >= PageTable.MaxRows) return;
 
             switch (child.Name.LocalName)
@@ -226,7 +375,7 @@ public sealed partial class OdtLayoutSource
 
         foreach (XElement child in element.Elements())
         {
-            if (child.Name.Namespace != OdfNamespaces.Table) continue;
+            if (!OdfNamespaces.IsTable(child.Name.NamespaceName)) continue;
 
             // A covered cell is a column the merge to its left or above swallowed. It carries no content
             // and gets no cell, but it advances the column counter — which is the whole reason ODF writes
@@ -256,6 +405,7 @@ public sealed partial class OdtLayoutSource
                     RowSpan = rowSpan,
                     Padding = Padding(styleName),
                     VerticalAlignment = VerticalAlignment(styleName),
+                    TextDirection = TextDirection(styleName),
                     Shading = Shading(styleName),
                     Borders = Borders(styleName),
                 });
@@ -366,15 +516,85 @@ public sealed partial class OdtLayoutSource
     /// <c>automatic</c> is a real value and means the top, which is also what an unstated alignment means —
     /// so both fall through to the same answer rather than one of them being treated as unknown.
     /// </remarks>
-    private CellVerticalAlignment VerticalAlignment(string? styleName)
+    private VerticalTextAlignment VerticalAlignment(string? styleName)
         => _styles.ResolveProperty(
             styleName, OdfStyleFamily.TableCell, OdfPropertyKind.TableCell,
             OdfNamespaces.Style, "vertical-align").Value switch
         {
-            "middle" => CellVerticalAlignment.Middle,
-            "bottom" => CellVerticalAlignment.Bottom,
-            _ => CellVerticalAlignment.Top,
+            "middle" => VerticalTextAlignment.Middle,
+            "bottom" => VerticalTextAlignment.Bottom,
+            _ => VerticalTextAlignment.Top,
         };
+
+    /// <summary>
+    /// Which way a cell's text runs, from <c>writing-mode</c> on its <c>style:table-cell-properties</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's own ODF filter maps <em>both</em> spellings of the attribute onto one item: its table-cell
+    /// item map holds <c>style:writing-mode</c> and <c>loext:writing-mode</c> side by side, each against
+    /// <c>RES_FRAMEDIR</c> (<c>sw/source/filter/xml/xmlitemm.cxx</c>:281-282), and the value handler takes
+    /// <c>bt-lr</c> as <c>SvxFrameDirection::Vertical_LR_BT</c> and <c>tb-rl90</c> as
+    /// <c>Vertical_RL_TB90</c> whichever namespace carried them
+    /// (<c>sw/source/filter/xml/xmlimpit.cxx</c>:1008-1030), leaving every other value to the ordinary
+    /// <c>XML_TYPE_TEXT_WRITING_MODE_WITH_DEFAULT</c> handler.
+    /// </para>
+    /// <para>
+    /// So here the extension namespace is chosen by the <em>value</em> and not by the property, which is a
+    /// shape none of this project's recorded ODF namespace surprises has: the exporter writes the attribute
+    /// as <c>style:</c> for every value ODF 1.3 defines and as <c>loext:</c> for the two it does not —
+    /// <c>sw/source/filter/xml/xmlexpit.cxx</c>:193-220 for this item, and
+    /// <c>SvXMLExportPropertyMapper::_exportXML</c>'s <c>CheckExtendedNamespace</c>
+    /// (<c>xmloff/source/style/xmlexppr.cxx</c>:947-952 and :1108-1118) for every other, under a comment
+    /// saying there is no generic mechanism for it. Measured on 26.2.4.2 with one cell per spelling in one
+    /// table: <c>style:writing-mode="bt-lr"</c> and <c>loext:writing-mode="bt-lr"</c> are drawn identically,
+    /// so the extension namespace is an export convention and not an import requirement — and reading only
+    /// the specification's spelling finds none of the 86 turned cells the converted corpus holds.
+    /// </para>
+    /// <para>
+    /// The two spellings are therefore one property and are resolved together, the <em>level</em> before the
+    /// spelling, so an outer style's spelling cannot beat an inner style's.
+    /// </para>
+    /// <para>
+    /// <c>tb-lr</c> is a third direction and not one of the two: 26.2.4.2 turns it clockwise like
+    /// <c>tb-rl</c> but stacks the lines <em>rightwards</em>. It is answered as
+    /// <see cref="CellTextDirection.TopToBottomRightToLeft"/>, which is right about the glyphs and about the
+    /// break and wrong only about which way a second line goes; upright — what LibreOffice's own DOCX
+    /// importer does with the corresponding <c>tbLrV</c>, <em>"we can't handle these"</em> — would be wrong
+    /// about all three. No document of the converted corpus states it on a cell.
+    /// </para>
+    /// </remarks>
+    private CellTextDirection TextDirection(string? styleName)
+    {
+        OdfProperty stated = _styles.ResolveWithoutDefaults(
+            styleName, OdfStyleFamily.TableCell, OdfPropertyKind.TableCell, WritingModeSpellings, out _);
+
+        if (!stated.HasValue)
+        {
+            stated = _styles.ResolveFromDefaults(
+                OdfStyleFamily.TableCell, OdfPropertyKind.TableCell, OdfNamespaces.Style, "writing-mode");
+        }
+
+        return stated.Value switch
+        {
+            "bt-lr" => CellTextDirection.BottomToTopLeftToRight,
+            "tb-rl" or "tb-rl90" or "tb-lr" or "tb" => CellTextDirection.TopToBottomRightToLeft,
+            _ => CellTextDirection.LeftToRight,
+        };
+    }
+
+    /// <summary>
+    /// The two spellings of <c>writing-mode</c>, the extension one first.
+    /// </summary>
+    /// <remarks>
+    /// Order decides only what a single style stating both would answer, which no exporter writes; the
+    /// extension spelling leads because it is the one that carries a turned value.
+    /// </remarks>
+    private static readonly (string Namespace, string Name)[] WritingModeSpellings =
+    [
+        (OdfNamespaces.LoExt, "writing-mode"),
+        (OdfNamespaces.Style, "writing-mode"),
+    ];
 
     /// <summary>
     /// The colour behind a cell's text, or null when it has none.

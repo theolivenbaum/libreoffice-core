@@ -77,7 +77,14 @@ public enum ChartLabelField
 /// <param name="Field">What it stands for.</param>
 /// <param name="Text">
 /// Its literal text, which for a field is the placeholder and is used only when the field cannot
-/// be resolved — a <see cref="ChartLabelField.CellRange"/>, whose cached string is all there is.
+/// be resolved.
+/// <para>
+/// <strong>A <see cref="ChartLabelField.CellRange"/> is not such a field, and reading it as one
+/// draws the placeholder.</strong> Its <c>a:t</c> is the literal <c>[CELLRANGE]</c>; the text it
+/// stands for is in the series' <c>c15:datalabelsRange/c15:dlblRangeCache</c>, by point index, and
+/// the reader substitutes it there before the label is composed. See
+/// <c>DrawingChartPlot.DataLabelsRangeOf</c>.
+/// </para>
 /// </param>
 public readonly record struct ChartLabelPart(ChartLabelField Field, string Text);
 
@@ -287,6 +294,17 @@ public sealed record ChartDataLabel
 
                 case ChartLabelField.NewLine:
                     built.Append('\n');
+                    break;
+
+                // A CELLRANGE that survives to here is one the reader could not resolve, and an
+                // unresolved one draws *nothing*. LibreOffice reaches that answer down both of
+                // its paths: with a c15:datalabelsRange present it takes the cached string for
+                // this point and substitutes the empty string where the cache has no entry
+                // (oaLabelText.value_or(""), seriesconverter.cxx:366-410), and with none present
+                // it leaves setDataLabelsRange false, whereupon VSeriesPlotter writes an empty
+                // string for the field (VSeriesPlotter.cxx:535-541). Neither path can reach the
+                // a:t, which is the localised placeholder "[CELLRANGE]" and never a value.
+                case ChartLabelField.CellRange:
                     break;
 
                 default:

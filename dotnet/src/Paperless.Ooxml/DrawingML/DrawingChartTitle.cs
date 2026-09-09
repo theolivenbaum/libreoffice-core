@@ -73,6 +73,15 @@ internal static class DrawingChartTitle
     internal const string DiagramTitle = "Chart Title";
 
     /// <summary>
+    /// LibreOffice's <c>STR_DIAGRAM_AXISTITLE</c>, in the same en-US resource.
+    /// </summary>
+    /// <remarks>
+    /// The axis counterpart of <see cref="DiagramTitle"/> and localized in the same way; see
+    /// <c>DrawingChartPlot.AxisTitleText</c> for the condition, which is not this one's.
+    /// </remarks>
+    internal const string AxisTitle = "Axis Title";
+
+    /// <summary>
     /// The text to put in a chart title the part leaves empty, or null when the reference draws
     /// no title.
     /// </summary>

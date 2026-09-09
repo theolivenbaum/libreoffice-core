@@ -15114,6 +15114,14 @@ controls.
 
 ### `plotVisOnly` is refuted; a chart range stops before an Excel table's totals row
 
+***The heading is too strong and round 75 corrects it: `plotVisOnly` is refuted for
+`029_Annual_budget` and for no other document.*** A hidden row or column really is excluded from a
+chart's range unless the chart states `val="0"` — `ScChart2DataSequence::BuildDataCache`
+(`chart2uno.cxx:2636-2646`), three lines below the totals-row test this section is about — and it
+is what decides `053_Personal_asset_inventory`, `026_Monthly_cash_flow_statement` and
+`027_Simple_personal_cash_flow_statement`. Both rules are real and they live in the same loop. See
+`probes/chart-resid-r75/results.md` §2.
+
 Round 52 handed over *"measure whether `029_Annual_budget`'s source rows are hidden"*. **They are
 not** — the sheet carries no `hidden` attribute anywhere and the reference prints rows 18 and 39 in
 its body — and an authored `plotVisOnly="0"` variant renders with the observable unchanged.

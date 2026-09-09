@@ -127,6 +127,88 @@ public class SlidePresetGeometryTests
         text.Height.Points.ShouldBe(2 * 36 * 0.7071, 0.05);
     }
 
+    [Fact]
+    public void AConnectorIsStrokedAndNotFilled()
+    {
+        // straightConnector1 is one open subpath declaring fill="none", so filling the outline
+        // draws a triangle between the two ends of what is meant to be a line. Every connector in
+        // the table is this shape, and the corpus holds 863 of them across 66 decks.
+        CustomShapeGeometry.Geometry geometry = SlidePresetGeometry.Of("straightConnector1", Box);
+        GraphicsPath placed = geometry.Outline;
+
+        PaintedGeometry painted =
+            SlidePresetGeometry.Painted(geometry, AffineTransform.Identity, placed);
+
+        painted.Fill.Commands.ShouldBeEmpty();
+        painted.Stroke.ShouldBeSameAs(placed);
+        painted.ShadedParts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void AFoldedCornerIsStrokedOnlyAlongTheOutlineItStates()
+    {
+        // Three subpaths: the body and the fold are filled and not stroked, and a third states
+        // the pen line. Stroking all three rules the fold's two hidden edges across the corner.
+        CustomShapeGeometry.Geometry geometry = SlidePresetGeometry.Of("foldedCorner", Box);
+        IReadOnlyList<PresetSubpath> subpaths = geometry.Subpaths.ShouldNotBeNull();
+        subpaths.Count.ShouldBe(3);
+
+        PaintedGeometry painted =
+            SlidePresetGeometry.Painted(geometry, AffineTransform.Identity, geometry.Outline);
+
+        painted.Stroke.Commands.Count.ShouldBe(subpaths[2].Outline.Commands.Count);
+
+        // The body takes the fill unchanged and the fold takes it darkened by a fifth, so they are
+        // two paints and not one path.
+        painted.Fill.Commands.Count.ShouldBe(subpaths[0].Outline.Commands.Count);
+        painted.ShadedParts.Count.ShouldBe(1);
+        painted.ShadedParts[0].Brightness.ShouldBe(-0.2);
+        painted.ShadedParts[0].Outline.Commands.Count.ShouldBe(subpaths[1].Outline.Commands.Count);
+    }
+
+    [Fact]
+    public void AShapeWhoseSubpathsAllAgreeIsPaintedWhole()
+    {
+        // The common case, and the one the split must not cost anything: a single default subpath
+        // returns the placed outline itself rather than a copy of it.
+        CustomShapeGeometry.Geometry geometry = SlidePresetGeometry.Of("rect", Box);
+        GraphicsPath placed = geometry.Outline;
+
+        PaintedGeometry painted =
+            SlidePresetGeometry.Painted(geometry, AffineTransform.Identity, placed);
+
+        painted.Fill.ShouldBeSameAs(placed);
+        painted.Stroke.ShouldBeSameAs(placed);
+        painted.ShadedParts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void APresetTheTableDoesNotKnowIsAWholeRectangle()
+    {
+        CustomShapeGeometry.Geometry geometry = SlidePresetGeometry.Of("noSuchPreset", Box);
+
+        geometry.Subpaths.ShouldBeNull();
+        Vertices(geometry.Outline).Count.ShouldBe(4);
+        geometry.TextRectangle.Width.ShouldBe(Box.Width);
+        geometry.TextRectangle.Height.ShouldBe(Box.Height);
+    }
+
+    [Fact]
+    public void ACubesTwoFacesTakeTheFillDarkenedAndLightened()
+    {
+        // The magnitudes are LibreOffice's own (EnhancedCustomShape2d.cxx:2112-2121) and are what
+        // 26.2.4.2 draws: a 4472C4 cube comes out with faces 365B9C and 698ECF, which is
+        // c x 0.8 and c x 0.8 + 51.
+        CustomShapeGeometry.Geometry geometry = SlidePresetGeometry.Of("cube", Box);
+
+        PaintedGeometry painted =
+            SlidePresetGeometry.Painted(geometry, AffineTransform.Identity, geometry.Outline);
+
+        painted.ShadedParts.Count.ShouldBe(2);
+        painted.ShadedParts[0].Brightness.ShouldBe(-0.2);
+        painted.ShadedParts[1].Brightness.ShouldBe(0.2);
+    }
+
     /// <summary>The on-curve points of a path, which for a polygon are its vertices.</summary>
     private static List<DocPoint> Vertices(GraphicsPath path)
         => [.. path.Commands.Where(c => c.Verb != PathVerb.Close).Select(c => c.Point)];

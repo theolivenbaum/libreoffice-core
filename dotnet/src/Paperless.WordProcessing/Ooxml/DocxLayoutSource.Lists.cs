@@ -53,7 +53,12 @@ public sealed partial class DocxLayoutSource
 
         // Advanced whether or not the level draws anything, so that a level formatted `none` still
         // counts — a numbered heading that shows no number is still the third heading.
-        string? drawn = _numbering.Advance(numId, level);
+        //
+        // The exception is a paragraph in a cell covered by a vertical merge: it is not drawn at all,
+        // and LibreOffice clears its counted-in-list flag for exactly that reason
+        // (`sw/source/core/unocore/unotbl.cxx`:978-990). Not counted, so not advanced and not labelled;
+        // `drawn` stays null and the branch below returns the paragraph's own first-line indent.
+        string? drawn = _inCoveredCell ? null : _numbering.Advance(numId, level);
 
         XElement? levelProperties = definition.ParagraphProperties;
         XElement? indent = Word.Child(levelProperties, "ind");

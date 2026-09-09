@@ -96,6 +96,35 @@ reference's 393, exactly 52 bullets, now 393 against 393.
 
 ## Document model
 
+- **[DONE] An ODF shape in text-path mode is drawn as warped outlines, on the Impress side.**
+  ODF is the format LibreOffice's Fontwork model is native to and it shows in how little there is
+  to read: `draw:type` is the type name `FontworkPresets` is already keyed by, `draw:modifiers` is
+  already in the 21600 viewbox the tables use, and `draw:text-path-scale` is `TextPathScaleX`
+  outright — where the DrawingML filter has to map, convert and derive all three
+  (`oox/source/drawingml/fontworkhelpers.cxx:95-179`). `OdfFontwork` reads it and `OdpSlideLayout`
+  replaces the shape with the curves, as `PptxSlideLayout` already did.
+
+  **Zero corpus reach, and it is worth being exact about why**: the 945-document corpus holds no
+  OpenDocument file of *any* kind, so the gate structurally cannot see this path. Measured instead
+  on `FAAAIandtheArtandScienceofV&Vfinal.pptx` converted to `.odp` by 26.2.4.2, whose eight arch
+  labels are genuine ODF fontwork — 100 dpi mean ink against that reference, slide 13 **8.63 →
+  5.06**, slide 14 **7.32 → 3.74**, whole deck 8.699 → 8.461, extracted words 1289 → 1213 against
+  the reference's 1219. Before the change the labels were laid out as flat overlapping text, which
+  is worse than drawing nothing.
+
+  Two things left undone, with their reasons:
+
+  - **`draw:text-path-same-letter-heights` is not implemented.** It is honoured at
+    `EnhancedCustomShapeFontWork.cxx:488`, LibreOffice writes it only when true, and nothing
+    measured sets it — not the corpus, which has no ODF, and not any of its five binary Escher
+    WordArt shapes, every one of which leaves bit 0x80 of `DFF_Prop_gtextFStrikethrough` clear.
+  - **The Writer ODF side is untouched, because fontwork is not its gap.** `OdfFrames.Read` takes
+    a frame's text only from a `draw:text-box` and reads no geometry for a `draw:custom-shape`, so
+    on the 41-preset fixture converted to `.odt` every one of the 41 shapes draws nothing at all —
+    not even the unwarped one's text. Warping into frames that draw nothing and are the wrong
+    height would be building a leaf of a missing branch. Write-up in
+    `dotnet/probes/odf-fontwork/results.md`.
+
 - [ ] Slides, layouts, masters, notes pages, handouts. **Slides are done**; a notes page and a
       handout are separate page kinds and neither is produced.
 - [x] Shape tree: rectangles, paths, groups, placeholders and pictures, in document order, which
@@ -802,10 +831,10 @@ Two reference artefacts worth knowing before chasing them:
 - [x] Solid fills, including themed ones, and lines with width, cap and join. Drop shadows too,
       as a hard-edged offset copy — see the shadow note below for what blur costs.
 - [x] **Gradient fills**, for both formats: `a:gradFill` and `draw:gradient`, linear, axial,
-      radial, elliptical and rectangular. `Layout/SlideGradients.cs` holds the geometry, which is
-      LibreOffice's rather than either format's — both importers converge on `basegfx::BGradient`
-      and everything that decides where the ends land happens after that. See **Two gradient
-      conventions that are invisible except in colour** below.
+      radial, elliptical and rectangular. `Paperless.Core`'s `Graphics/GradientGeometry.cs` holds
+      the geometry, which is LibreOffice's rather than either format's — both importers
+      converge on `basegfx::BGradient` and everything that decides where the ends land happens
+      after that. See **Two gradient conventions that are invisible except in colour** below.
 - [x] **Bitmap fills**, tiled or stretched: `a:blipFill` and `draw:fill="bitmap"`. A tile's size
       is the picture's *natural* size scaled by `a:tile/@sx`, so the reader has to know how large
       a picture is without decoding it — twenty bytes of header, in `Layout/SlideImages.cs`.
@@ -1467,7 +1496,7 @@ against the reference PDF's own `rg` operators. The colour map comes from the sl
       (`lineproperties.cxx:91-140`) — so a faithful port has to reproduce the guessing as well as
       the folding, and nothing in the corpus carries one.
 - [x] **Arrowheads.** `a:headEnd`/`a:tailEnd`, all five marker types, in
-      `Layout/SlideLineEnds.cs`. A marker is a *filled polygon* beside the shaft rather than a
+      `Paperless.Core`'s `Graphics/LineEnds.cs`. A marker is a *filled polygon* beside the shaft rather than a
       property of the stroke, which is why the display list needed no new record.
 - [ ] **Compound lines.** `cmpd="dbl"`, `"thickThin"`, `"tri"`. A double line is two strokes with
       a gap, and the widths are fractions of the stated one; nothing in the corpus carries one.
@@ -1555,7 +1584,7 @@ Two more, smaller, both from `initEllipticalGradientInfo` and `init1DGradientInf
   gradient's corners flat.
 - `draw:border` shortens the ramp rather than shifting it, and which end it holds depends on which
   end the format put first — so after the ODF swap a centred gradient's border is at the far end
-  of the stop list. `SlideGradients.WithBorder` takes that as a parameter for exactly that reason.
+  of the stop list. `GradientGeometry.WithBorder` takes that as a parameter for exactly that reason.
 
 ### A tile's size needs the picture's size, and the picture must not be decoded
 
@@ -2216,8 +2245,26 @@ which is the honest state of them.
 
 ### Small differences that are measured and not yet closed
 
-- [ ] **The largest unexplained group on the track is not a chart at all: it is a `.ppt` outline
-      placeholder we do not shrink and the reference does.** Written down as a *measurement with
+- [x] **The largest unexplained group on the track is not a chart at all: it is a `.ppt` outline
+      placeholder we do not shrink and the reference does.** ***Closed in round 85 — the seat is
+      the line EditEngine *appends*, and it is in `SlideTextLayout` rather than in `SlideAutofit`.***
+      `ImpEditEngine::CreateAndInsertEmptyLine` (`impedit3.cxx`:1851-1996) measures an empty
+      paragraph's line, and the line after a trailing hard break, with its own copy of the
+      line-spacing arms: **no `SvxInterLineSpaceRule::Off` arm at all**, no `scaleYSpacingValue`
+      anywhere, whole-percent truncating integer arithmetic for `Prop`, and `Prop` skipped for the
+      body's first paragraph. So such a line keeps its full height while every other line in the
+      body is tightened by the fit's `fSpacingY`. Beside it, a paragraph's own space is a whole
+      hundredth of a millimetre and the scale **truncates** it (`impedit2.cxx`:4792-4802).
+      Established at the reference on the witness's own bullet pitches — 75.912 pt and 68.741 pt
+      resolve to 1029 / 1143 / 253 units with no free parameter, and the last baseline then lands
+      within **0.010 pt** of 26.2.4.2's. Row 0 goes from 12758 (fits by 113) to 13239 (overflows)
+      and the reference's row 1 is taken. **Slides 293 of 302 and `.odp` 295 of 302 before and
+      after, no page count and no verdict moved; 15 of the 56 differing dominant sizes fixed and
+      none newly wrong, total absolute size error 222.92 → 159.96 pt over 4530 pages.**
+      `probes/ppt-fit-r85/results.md`.
+
+      *The measurement that stood here, kept because the corrections below are the round's
+      result:* Written down as a *measurement with
       no diagnosis attached*, because it was found while choosing what to work and nothing has
       instrumented our own autofit against it.
 
@@ -2240,6 +2287,78 @@ which is the honest state of them.
       how much; which of the two is wrong here is unmeasured, and the first move is to print our
       own scale for that shape beside the reference's 0.9691 rather than to theorise about
       either.
+
+      ***Instrumented in round 84, and four of the numbers above are wrong.***
+      `probes/ppt-autofit-r84/results.md` §2.
+
+      - **The `.ppt` reach is 25 pages over 18 documents, not 303 over 91** — that figure is the
+        whole slides track's, and its two named worst documents contribute two pages each.
+        Measured over all 1534 pages of the 51 `.ppt`, none failing on either side
+        (`size-sweep.sh`, `size-census.tsv`): the reference is smaller on 19 and larger on 6, and
+        **22 of the 25 are one `constScaleLevels` step apart.**
+      - **The 31.01 pt is stale.** 26.2.4.2 draws that shape at **29.99**, which is
+        `round(32 × 0.925)` — row 1 of the table — and the stated size really is 32 pt, read out
+        of LibreOffice's own `--convert-to odp`. **0.9691 is not producible by any row of
+        `constScaleLevels` under `setRoundFontSizeToPt(true)`** (`svdotext.cxx`:1231), which is
+        what should have flagged it: the figure predates round `slides-r52`, which replaced
+        24.2.7.2's bisection with the table.
+      - **`Autofits` is right on the worked case and `SlideAutofit` is wrong, by 0.32 pt.**
+        Instrumenting `Solve` prints `size=32.00 unscaled=14176 avail=12871 row=0`: the fit does
+        fire, and row 0's height — `14176 × 0.9 = 12758` — fits the 12871 box by **113 units of a
+        hundredth of a millimetre, 0.875% of it**, where the reference finds it overflows. So the
+        defect is the *height measured at row 0*, not the table and not the decision to fit. Over
+        899 traced fits on those 18 documents, only **6 of the 124 row-0 answers** fit by less
+        than 2%, so it is a small error deciding a handful of nearly-full boxes rather than a
+        systematic offset. `SlideTextLayout.Spaced` scaling **every** line's height by `fSpacingY`
+        is the first thing to check against `impedit3.cxx`:1555-1600, which scales a *stated*
+        proportional line spacing and the paragraph's own space.
+
+      ***Closed in round 85, and the last of those bullets is wrong.*** `Spaced` is a faithful
+      transcription and LibreOffice does apply `fSpacingY` to every **ordinary** line's height
+      (`impedit3.cxx`:1583-1600). The line it does not apply it to is the one
+      `CreateAndInsertEmptyLine` appends, which never reaches those arms at all — the witness's
+      body holds four such lines among ten and `4 × (1220 − 1098) = 488` less seven units of
+      truncated paragraph space is the whole of round 84's 113. `SlideAutofit` itself is
+      correct as it stands.
+
+- [x] ~~**`Autofits`' wrap test is wrong for an outline placeholder, and the seat's own comment
+      denies the reach it has.**~~ ***Refuted in round 85: the seat's comment is right and this
+      entry is withdrawn.*** The wrap decides `bAutoGrowWidth` only for a shape whose text kind was
+      rewritten to Rectangle, and that rewrite has exactly one condition —
+      `!aTextObj.GetOEPlaceHolderAtom() || nPlaceholderId == PptPlaceholder::NONE`
+      (`svdfppt.cxx`:1043-1047). **All 55 of the `wrapNone` Body shapes carry no
+      `OEPlaceholderAtom` at all**, which is precisely the case where the reference takes the wrap,
+      so the two rules never disagree on this corpus
+      (`probes/ppt-fit-r85/placeholder-census.py`). Corroborated at the reference: over every page
+      of both decks the drawn text sizes match 26.2.4.2 exactly, the sole exception being two
+      classes on page 6 of `Fundamentals_Module_1_basics.ppt` that are an **embedded chart** we
+      draw as text and the reference does not draw at all — so that page is not a fit case either.
+      The withdrawn reading follows.
+
+      **`Autofits`' wrap test is wrong for an outline placeholder, and the seat's own comment
+      denies the reach it has.** `svdfppt.cxx`:1053-1055 derives `bAutoGrowWidth = !bWordWrap`
+      **only** for a custom shape whose text kind resolved to Rectangle; every other branch — which
+      is every real Body, HalfBody or QuarterBody placeholder — sets `bAutoGrowWidth = false` at
+      `:1084` whatever the wrap says. `PptSlideLayout.Autofits` requires `Wraps(shape)` and its
+      doc-comment says *"No deck in the slides corpus holds that combination"*. It does: of the
+      **1401** body-kind shapes in the 51 `.ppt`, **55 state `wrapNone` in 2 documents** —
+      `Architecture.ppt` and `Fundamentals_Module_1_basics.ppt` — and **25** of those also leave
+      `fFitShapeToText` clear, so they would newly autofit. The census does not yet test "is a
+      custom shape with no placeholder atom", which is the one case where the wrap really decides,
+      so 25 is an upper bound. `Fundamentals_Module_1_basics.ppt` page 6 is one of the three pages
+      in the size census whose ratio is no table step at all.
+      `probes/ppt-autofit-r84/wrap-census.py`.
+
+- [x] **A `.ppt` text-range hyperlink is an EditEngine field, and this reader read no
+      `InteractiveInfo` at all.** Closed in round 84: `PptHyperlinks`, `PptHyperlinkRange`,
+      `PptTextBody`'s split at the link boundaries, the scheme's hyperlink slot, the forced
+      underline, the emphasis replacement and the bullet's pre-link colour. The condition is not
+      the record but whether the deck *declares* the hyperlink the record names — three of the 51
+      `.ppt` state 60 ranges and declare none, and 26.2.4.2 draws all 60 as ordinary text.
+      Confinement is exact: 20 of 51 `.ppt` move, they are exactly the 20 the census predicts,
+      no page count moves and the other six tracks are byte-identical. **+30 reference spans over
+      the 23 documents that state a range, 9 better and 5 worse.** The five that worsen are the
+      open residual recorded in `dotnet/CLAUDE.md`. `probes/ppt-autofit-r84/results.md` §1.
 
 - [x] **An OOXML chart's automatic text is 18 pt bold for the main title and 10 pt bold for an
       axis title; we drew 13 pt and 9 pt with no weight at all.** `ChartPlot.TitleSize`'s 13 pt
@@ -2631,14 +2750,42 @@ which is the honest state of them.
       fill it is told is opaque — but the same shape renders differently in the two formats,
       which is the sharpest kind of evidence there is. The slides corpus holds no `.odp`, so
       this cannot be measured there; the feature corpus can.
-- [ ] **`a:prstTxWarp` is not read, and it is narrower than it looks.** The attribute appears on
-      39 of the 112 corpus `pptx` decks, 722 times — which reads as a wide gap and is not one:
-      **709 of those are `textNoShape`**, the identity, and 3 more are `textPlain`. Only ten
-      occurrences bend anything, across two decks: `FAAAIandtheArtandScienceofV&Vfinal.pptx`
-      (eight, `textArchUp`/`textArchDown` round a dial, and the reason it scores 1201 words
-      against 1145 — the labels are laid straight, wrap, and collide) and
-      `redac-sas-201403-ppt-portfolio-rev-sim.pptx` (two). Worth doing for the shape of the
-      feature rather than for its reach; read the count before budgeting for it.
+- [x] **`a:prstTxWarp` is read and drawn, and it was narrower than it looked.** The attribute
+      appears on 39 of the 112 corpus `pptx` decks, 722 times — which reads as a wide gap and is not
+      one: **709 of those are `textNoShape`**, the identity, and 3 more are `textPlain`. Only ten
+      occurrences bend anything, across two decks. `SlideFontwork` now builds the warped outlines
+      through `Paperless.Ooxml.DrawingML.Fontwork` and *replaces the shape* with them, which is what
+      `EnhancedCustomShapeEngine::render2` does — so the box, its own fill, its pen and its shadow
+      all go, and the fill comes from the first non-empty run's character properties
+      (`lcl_copyCharPropsToShape`, `oox/source/drawingml/shape.cxx:721-905`). That last part is not
+      a detail: every one of `FAAAIandtheArtandScienceofV&Vfinal.pptx`'s dial labels states
+      `<a:noFill/>` on the shape and a white `a:solidFill` on the run, so taking the shape's fill
+      would draw nothing at all.
+
+      Measured, 100 dpi mean absolute grey difference against 26.2.4.2:
+
+      | | page | before | after |
+      |---|---|---:|---:|
+      | `FAAAIandtheArtandScienceofV&Vfinal.pptx` | 13 | 3.05 | **2.18** |
+      | | 14 | 2.16 | **1.29** |
+      | `redac-sas-201403-ppt-portfolio-rev-sim.pptx` | 6 | 5.83 | **5.81** |
+      | | 7 | 3.73 | **3.47** |
+
+      Page 13's ink is now 19.34 against the reference's 19.34. No word moved on either deck,
+      because the slides side already drew nothing for a warped body.
+
+      Two arms of the reference are reached by exactly one shape between them and are implemented
+      anyway, because the alternative is a visibly wrong page rather than a slightly wrong one: the
+      per-preset vertical anchor (`shape.cxx:863-874`) and the parallel-rail placement for a
+      multi-line "follow path" warp (`EnhancedCustomShapeFontWork.cxx:801-970`). The shape is the
+      two-line `Automation / Autonomy` label on slides 13 and 14 of the FAA deck.
+
+      **What is still not drawn**: the four `*Pour` presets and the two `textRing*` ones, whose
+      geometry uses `ANGLEELLIPSE` and a radius handle rather than the four opcodes
+      `FontworkGeometry` decodes, and any warp set in a face with no `glyf` outlines. No corpus
+      document is either. Both fall back to drawing nothing, and the words side now falls back the
+      same way, so the two families agree.
+
 - [ ] **A wrapped line is one glyph shorter here than in the reference.** LibreOffice draws the
       space a line broke at as part of that line's run; the shared layouter stops at the last
       *visible* character (`LineBox.VisibleEnd`). Nothing is visibly missing — it is a space at

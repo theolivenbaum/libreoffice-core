@@ -217,13 +217,18 @@ public sealed class LineFiller
     /// case, where every line but the first gets the same width; it exists for text flowing round a
     /// floating frame, where the width depends on how far down the paragraph the line sits.
     /// </param>
+    /// <param name="cellBroken">
+    /// The stretches that break between characters rather than between words, or null when there are
+    /// none — which is every paragraph a word processor lays out. See <see cref="CellBrokenSpan"/>.
+    /// </param>
     public List<TextLine> Fill(
         MeasuredParagraph measured,
         Length availableWidth,
         Length? firstLineWidth = null,
         string? language = null,
         ParagraphFormat? tabs = null,
-        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null)
+        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null,
+        IReadOnlyList<CellBrokenSpan>? cellBroken = null)
     {
         ArgumentNullException.ThrowIfNull(measured);
 
@@ -234,7 +239,8 @@ public sealed class LineFiller
             language,
             measured.WidthBetween,
             tabs,
-            widthOfLine);
+            widthOfLine,
+            cellBroken);
     }
 
     /// <summary>
@@ -304,17 +310,29 @@ public sealed class LineFiller
         string? language,
         Func<int, int, Length> widthBetween,
         ParagraphFormat? tabs = null,
-        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null)
+        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null,
+        IReadOnlyList<CellBrokenSpan>? cellBroken = null)
     {
         List<TextLine> lines = [];
         if (text.Length == 0)
         {
-            lines.Add(new TextLine(0, 0, 0, Length.Zero, EndsParagraph: true));
+            // Not zero. A paragraph with no text at all can still carry an as-character object — a
+            // logo on a line of its own is written that way by every reader but the OOXML one — and
+            // that line's width is what its alignment is measured against.
+            lines.Add(new TextLine(0, 0, 0, widthBetween(0, 0), EndsParagraph: true));
             return lines;
         }
 
         IReadOnlyList<int> opportunities = _breaker.FindBreakOpportunities(text, language);
         HashSet<int> mandatory = [.. _breaker.FindMandatoryBreaks(text, language)];
+
+        // A field's own stretches break at every cell, which is a break the iterator does not
+        // offer and cannot be asked for: it is added here rather than in the breaker because it
+        // belongs to the *content* — one range of one paragraph — and not to the language's rules.
+        if (cellBroken is { Count: > 0 })
+        {
+            opportunities = CellBreaks.Merge(opportunities, cellBroken, text);
+        }
 
         // A justified paragraph in a file that asks for Word 2013's justification may overrun its room
         // by whatever squeezing its blanks recovers. Resolved once per paragraph rather than per
@@ -336,6 +354,7 @@ public sealed class LineFiller
             Length chosenWidth = Length.Zero;
             int chosenVisibleEnd = lineStart;
             Length chosenAllowance = Length.Zero;
+            Length chosenBlanks = Length.Zero;
 
             // Where a tab ends the line whatever the break iterator offered, or the text's end when
             // none does. Writer's portions are built in document order and a tab that reaches the
@@ -363,16 +382,31 @@ public sealed class LineFiller
 
                 // The allowance belongs to the candidate rather than to the line already chosen: the
                 // word being tried brings a blank with it, and that blank can be squeezed too.
+                Length blanks = shrinks
+                    ? JustificationShrink.BlanksOn(text, lineStart, visibleEnd, widthBetween)
+                    : Length.Zero;
                 Length allowance = shrinks
                     ? JustificationShrink.AllowanceFor(text, lineStart, visibleEnd, widthBetween)
                     : Length.Zero;
 
                 if (width > limit + allowance && chosen >= 0) break;
 
+                // Reaching the floor is what lets this word onto the line; it is not what decides it.
+                // Word 2013's justification weighs the blanks this candidate would squeeze against the
+                // blanks the candidate already chosen would stretch, and keeps the shorter line when
+                // stretching wins — see <see cref="JustificationShrink.PrefersShrinking"/>.
+                if (shrinks && chosen >= 0 && width > limit
+                    && !JustificationShrink.PrefersShrinking(
+                        limit, chosenWidth, chosenBlanks, width, blanks))
+                {
+                    break;
+                }
+
                 chosen = end;
                 chosenWidth = width;
                 chosenVisibleEnd = visibleEnd;
                 chosenAllowance = allowance;
+                chosenBlanks = blanks;
                 probe++;
 
                 // A required break ends the line whether or not the text would have fitted: a manual
@@ -424,7 +458,8 @@ public sealed class LineFiller
             int chopEnd = chosen;
             bool forceChop = false;
 
-            if (chosen > lineStart && chosen < text.Length && text[chosen - 1] == '/')
+            if (chosen > lineStart && chosen < text.Length && text[chosen - 1] == '/'
+                && !CellBreaks.BreaksInside(cellBroken, chosen))
             {
                 int glued = GluedAcrossSolidus(text, chosen);
 

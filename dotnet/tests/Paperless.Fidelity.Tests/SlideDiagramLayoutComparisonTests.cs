@@ -108,7 +108,7 @@ public sealed class SlideDiagramLayoutComparisonTests : IDisposable
     [Fact]
     public void EveryNodeIsFilledWhereLibreOfficeFillsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         string ourPdf = Ours(path);
@@ -146,7 +146,7 @@ public sealed class SlideDiagramLayoutComparisonTests : IDisposable
     [Fact]
     public void EveryLabelIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

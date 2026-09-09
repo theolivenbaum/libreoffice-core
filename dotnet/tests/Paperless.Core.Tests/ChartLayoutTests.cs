@@ -142,8 +142,9 @@ public class ChartLayoutTests
         points[^1].X.ShouldBe(line.PlotArea.Right);
 
         ChartDrawing bars = Place(Bars());
-        bars.Boxes.Count.ShouldBe(4);
-        bars.Boxes[0].Bounds.Left.ShouldBeGreaterThan(bars.PlotArea.Left);
+        List<ChartShape> columns = bars.Filled();
+        columns.Count.ShouldBe(4);
+        columns[0].Bounds().Left.ShouldBeGreaterThan(bars.PlotArea.Left);
     }
 
     [Fact]

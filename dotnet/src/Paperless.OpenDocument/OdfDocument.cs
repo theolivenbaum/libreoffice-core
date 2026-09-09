@@ -42,6 +42,10 @@ public sealed class OdfDocument : IDocument
     public ContentDocument Content { get; }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The file's live list, so that a problem found during layout reaches a caller as readily as
+    /// one found while opening the document. <c>OdfReader</c> appends to that same list.
+    /// </remarks>
     public IReadOnlyList<Diagnostic> Diagnostics { get; }
 
     /// <summary>

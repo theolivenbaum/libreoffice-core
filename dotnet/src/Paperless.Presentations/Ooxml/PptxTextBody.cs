@@ -172,6 +172,8 @@ internal static class PptxTextBody
             if (Drawing.Child(source, "noAutofit") is not null) break;
         }
 
+        (string? Preset, IReadOnlyList<FontworkAdjustment> Adjustments) warp = Warp(bodyChain);
+
         return new SlideTextBody
         {
             Paragraphs = paragraphs,
@@ -196,7 +198,8 @@ internal static class PptxTextBody
             Wraps = Stated(bodyChain, "wrap") != "none" || resizes,
             AutoFit = autofit is not null,
             FontScale = Thousandth(autofit, "fontScale", 1.0),
-            WarpPreset = Warp(bodyChain),
+            WarpPreset = warp.Preset,
+            WarpAdjustments = warp.Adjustments,
 
             // a:normAutofit/@lnSpcReduction is deliberately not read: neither does the reference,
             // whose normAutofit handler takes @fontScale alone. See SlideTextBody.AutoFit.
@@ -348,17 +351,38 @@ internal static class PptxTextBody
     /// inherited exactly as an anchor or an inset is.
     /// </para>
     /// </remarks>
-    private static string? Warp(List<XElement> chain)
+    private static (string? Preset, IReadOnlyList<FontworkAdjustment> Adjustments) Warp(
+        List<XElement> chain)
     {
         foreach (XElement source in chain)
         {
             if (Drawing.Child(source, "prstTxWarp") is not { } warp) continue;
 
             string? preset = warp.Attribute("prst")?.Value;
-            return string.IsNullOrEmpty(preset) || preset == "textNoShape" ? null : preset;
+            if (string.IsNullOrEmpty(preset) || preset == "textNoShape") return (null, []);
+
+            List<FontworkAdjustment> adjustments = [];
+            foreach (XElement guide in Drawing.Children(Drawing.Child(warp, "avLst"), "gd"))
+            {
+                string name = guide.Attribute("name")?.Value ?? string.Empty;
+                string formula = guide.Attribute("fmla")?.Value ?? string.Empty;
+
+                // Every guide inside a `prstTxWarp` is a literal: `fmla="val 10800000"`.
+                if (!formula.StartsWith("val ", StringComparison.Ordinal)) continue;
+                if (!double.TryParse(
+                        formula.AsSpan(4), NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out double value))
+                {
+                    continue;
+                }
+
+                adjustments.Add(new FontworkAdjustment(name, value));
+            }
+
+            return (preset, adjustments);
         }
 
-        return null;
+        return (null, []);
     }
 
     /// <summary>
@@ -884,12 +908,19 @@ internal static class PptxTextBody
         Colour? colour = sources.Resolve(
             runProperties, style => style.Colour, element => RunColour(element, theme));
 
-        // A run's own a:hlinkClick redecorates it: see HyperlinkColour and the underline below.
-        // The run's *own* a:rPr is what decides, not the inherited chain, because LibreOffice
-        // tests maTextCharacterProperties — the run's properties before the defaults are merged
-        // in — rather than the merged set (oox/source/drawingml/textrun.cxx:88, :162-168).
+        // A run's own a:hlinkClick makes the run a *field*, and redecorates it: see IsField,
+        // HyperlinkColour and the underline below. The run's *own* a:rPr is what decides, not the
+        // inherited chain, because LibreOffice tests maTextCharacterProperties — the run's
+        // properties before the defaults are merged in — rather than the merged set
+        // (oox/source/drawingml/textrun.cxx:88, :162-168).
+        //
+        // And the element is not the test: what textrun.cxx:88 asks is whether the run's
+        // hyperlink property *map* is empty, which an a:hlinkClick stating nothing leaves it.
+        // See DrawingHyperlink, and probes/pptx-field-r82 for the pair of variants that settle
+        // it at the reference.
         XElement? hyperlink = Drawing.Child(runProperties, "hlinkClick");
-        if (hyperlink is not null && Drawing.Child(hyperlink, "extLst") is null)
+        bool field = DrawingHyperlink.MakesField(hyperlink);
+        if (field && !DrawingHyperlink.StatesItsOwnColour(hyperlink))
         {
             colour = HyperlinkColour(runProperties, sources, theme) ?? colour;
         }
@@ -932,13 +963,16 @@ internal static class PptxTextBody
             // "of its own" is again the run's a:rPr and not the chain behind it, so a defRPr
             // saying u="none" above a linked run does not stop the rule
             // (oox/source/drawingml/textrun.cxx:167-168).
-            IsUnderlined: (hyperlink is not null && Drawing.Attribute(runProperties, "u") is null)
+            IsUnderlined: (field && Drawing.Attribute(runProperties, "u") is null)
                           || underline is not null and not "none",
             IsStruckThrough: strike is not null and not "noStrike",
             Escapement: baseline == 0
                 ? SlideEscapement.None
                 : new SlideEscapement(baseline / 1000, SlideEscapement.AutomaticProportion),
-            SymbolFont: symbolFont);
+            SymbolFont: symbolFont,
+            // A hyperlink run is an EditEngine field, which changes how it breaks and how the
+            // lines it spills onto are stacked — see SlideTextRun.IsField and SlideTextLayout.
+            IsField: field);
     }
 
     /// <summary>

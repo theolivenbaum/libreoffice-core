@@ -41,6 +41,20 @@ internal static partial class FontSubsetter
     /// <summary><c>HB_SUBSET_SETS_DROP_TABLE_TAG</c>.</summary>
     private const int DropTableTagSet = 3;
 
+    /// <summary>
+    /// The tables an embedded PDF font program keeps; everything else is dropped.
+    /// </summary>
+    /// <remarks>
+    /// LibreOffice's own list, in its own order, with one deliberate difference: <c>cmap</c> is
+    /// not on it here either, because <see cref="WithIdentityCharacterMap"/> writes the one this
+    /// writer needs afterwards and <c>SfntTables.Replace</c> inserts a table that is absent.
+    /// </remarks>
+    private static readonly string[] KeptTables =
+    [
+        "head", "hhea", "hmtx", "loca", "maxp", "glyf", "CFF ",
+        "post", "name", "OS/2", "cvt ", "fpgm", "prep", "CFF2",
+    ];
+
     private static readonly Lazy<bool> Availability = new(Probe);
 
     /// <summary>True when the native harfbuzz library is present and exposes the subsetter.</summary>
@@ -94,14 +108,26 @@ internal static partial class FontSubsetter
                 hb_map_set(mapping, glyphsByCode[code], (uint)code);
             }
 
-            // The layout tables describe substitutions and positioning that shaping has already
-            // applied; carrying them into the PDF would embed rules nothing will run, and on a
-            // large face they are most of the file. Measured on Carlito with five glyphs
-            // retained: 4964 bytes with them and 2664 without.
+            // Everything but the tables a PDF font program needs is dropped, by inverting the
+            // drop set and deleting the keepers from it — which is what LibreOffice does, tag
+            // for tag (`PhysicalFontFace::CreateFontSubset`,
+            // `vcl/source/font/PhysicalFontFace.cxx`:546-562, *"Keep only tables needed for PDF
+            // embedding, drop everything else"*).
+            //
+            // Naming the *droppers* instead — GSUB, GPOS and GDEF, which was the whole list —
+            // was not merely leaving weight in the file. **A zero-length `hdmx` makes
+            // `hb_subset_or_fail` fail outright**, and a failed subset is a face this writer
+            // names and does not embed: the PDF then draws the reader's substitute for a family
+            // the document carried with it. Measured on the four `Font_Verdana_*.ttf` inside
+            // `Sean Monogue.odp`, whose `hdmx` and `VDMX` are both present at length zero —
+            // subsetting returns null on all four as they stand and succeeds on all four with
+            // `hdmx` removed, and `VDMX` and `LTSH` are not what decides it. See
+            // `probes/odp-embed-r79/`.
             nint drop = hb_subset_input_set(input, DropTableTagSet);
             if (drop != 0)
             {
-                foreach (string table in (string[])["GSUB", "GPOS", "GDEF"]) hb_set_add(drop, SfntTables.Tag(table));
+                hb_set_invert(drop);
+                foreach (string table in KeptTables) hb_set_del(drop, SfntTables.Tag(table));
             }
 
             subset = hb_subset_or_fail(face, input);
@@ -194,6 +220,12 @@ internal static partial class FontSubsetter
 
     [LibraryImport(Library)]
     private static partial void hb_set_add(nint set, uint value);
+
+    [LibraryImport(Library)]
+    private static partial void hb_set_del(nint set, uint value);
+
+    [LibraryImport(Library)]
+    private static partial void hb_set_invert(nint set);
 
     [LibraryImport(Library)]
     private static partial void hb_map_set(nint map, uint key, uint value);

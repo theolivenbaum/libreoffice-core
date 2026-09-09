@@ -412,7 +412,7 @@ public static partial class ChartLayout
         DocRect area,
         ChartScaleResult scale,
         int categories,
-        List<ChartBox> boxes,
+        List<ChartShape> shapes,
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
@@ -462,8 +462,11 @@ public static partial class ChartLayout
                 Length upper = area.Bottom - area.Height * scale.Fraction(closed);
                 Length lower = area.Bottom - area.Height * scale.Fraction(opened);
 
-                boxes.Add(new ChartBox(
-                    new DocRect(middle - candle / 2, upper, candle, lower - upper),
+                // A path rather than a ChartBox, for the reason ChartDrawing.Shapes gives: a
+                // candle is a series mark and paints over the grid, not under it.
+                shapes.Add(new ChartShape(
+                    GraphicsPath.Rectangle(
+                        new DocRect(middle - candle / 2, upper, candle, lower - upper)),
                     fell
                         ? plot.StockLossFill ?? StockLoss
                         : plot.StockGainFill ?? StockGain,

@@ -316,7 +316,8 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
 
         DocxLayoutSource source = new(
             _file.Styles, _file.Settings, footnotes: _file.Footnotes, endnotes: _file.Endnotes,
-            theme: _file.Theme, pictures: new DocxPictures(_file, _laidOut),
+            theme: _file.Theme, shapeStyles: _file.ShapeStyles,
+            pictures: new DocxPictures(_file, _laidOut),
             numbering: _file.Numbering, fontTable: _file.FontTable,
             constants: new ConstantFields(_fileName, Content.Metadata.Title))
         {
@@ -333,6 +334,21 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
 
         PaginationOptions pagination = PaginationOptions.Word with
         {
+            // `WriterFilter.cxx`:332 sets `DoNotCaptureDrawObjsOnPage` for every writerfilter import,
+            // and a DOCX is one — so an anchored object here is not pulled back inside the page the
+            // way a `.doc`'s or an ODF document's is. See
+            // `PaginationOptions.CapturesAnchoredObjectsOnPage`.
+            CapturesAnchoredObjectsOnPage = false,
+
+            // ...but that flag exempts a *wrap-through* object and nothing else:
+            // `IsDraggingOffPageAllowed` (`sw/source/core/layout/anchoredobject.cxx`:790-801) is
+            // `bDisablePositioning && bIsWrapThrough`, a conjunction. A DOCX text box stating
+            // `wp:wrapSquare` is still pulled back inside its area, and under `compatibilityMode` 15
+            // that area is the *body* rather than the sheet
+            // (`anchoredobjectposition.cxx`:562-573). Applied only to the two margin bands here, for
+            // the reason `PaginationOptions.CapturesMarginBandObjects` measures.
+            CapturesMarginBandObjects = compatibility.CompatibilityMode >= 15,
+
             // LibreOffice's PARA_SPACE_MAX means the two spacings *add*; when it is off the larger
             // wins, which is Word's behaviour. Its OOXML exporter writes
             // w:doNotUseHTMLParagraphAutoSpacing exactly when the flag is on (docxexport.cxx), so
@@ -359,6 +375,12 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // read from the document, exactly as `AddsCellLineSpacing` above is not. The RTF reader
             // shares `PaginationOptions.Word` and must *not* set it; see the flag's own remarks.
             UsesWordNoteSeparator = true,
+
+            // The same two filters, the same place, one line further down: `setTargetDocument` also sets
+            // `ContinuousEndnotes`, which puts the document's endnotes after its last body content rather
+            // than on pages of their own. 26.2.4.2 sets it and 24.2.7.2 did not — see the flag's remarks
+            // for the measurement, which is a page count on this repository's own `endnotes.docx`.
+            EndnotesFollowTheBody = true,
             // Zero means no face could be read, in which case Writer's fixed reservation is a better
             // answer than reserving nothing: a note area with no room above it would overprint.
             NoteSeparatorHeight = source.DefaultParagraphLineHeight > Core.Units.Length.Zero
@@ -405,11 +427,12 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
 
         for (int i = 0; i < Sections.Count; i++)
         {
-            sections.Add(new PaginatedSection(
-                Sections[i],
-                i < properties.Count
-                    ? Furniture(source, properties[i], headers, footers)
-                    : null));
+            bool statesOwn = false;
+            PageFurnitureSet? furniture = i < properties.Count
+                ? Furniture(source, properties[i], headers, footers, out statesOwn)
+                : null;
+
+            sections.Add(new PaginatedSection(Sections[i], furniture, statesOwn));
         }
 
         return sections;
@@ -438,12 +461,23 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
     /// section names replaces what was there, and one it does not name is inherited.
     /// </param>
     /// <param name="footers">The footers in force, by the same rule.</param>
+    /// <param name="statesOwnFurniture">
+    /// Set true when the <c>w:sectPr</c> names a reference of its own for any slot, which is the
+    /// negation of writerfilter's six <c>m_b*LinkToPrevious</c> flags and the whole of what decides
+    /// whether a continuous section gets a page descriptor at all — see
+    /// <see cref="Layout.ContinuousPageDescriptors"/>. A reference naming an empty part still counts:
+    /// "link to previous" is the absence of a reference, and the importer clears the flag in
+    /// <c>PopPageHeaderFooter</c> for every reference it reads.
+    /// </param>
     private PageFurnitureSet? Furniture(
         DocxLayoutSource source,
         XElement sectionProperties,
         FurnitureCarry headers,
-        FurnitureCarry footers)
+        FurnitureCarry footers,
+        out bool statesOwnFurniture)
     {
+        statesOwnFurniture = false;
+
         // Before this section names anything of its own, drop the slots the section above cannot pass
         // down — see <see cref="FurnitureCarry"/> for which those are and how the rule was measured.
         headers.DropUninheritable();
@@ -455,6 +489,8 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             if (!isHeader && !Word.Is(reference, "footerReference")) continue;
 
             if (SlotOf(Word.Attribute(reference, "type")) is not { } slot) continue;
+
+            statesOwnFurniture = true;
             string? relationshipId = Word.RelationshipId(reference);
             if (_file.LoadHeaderOrFooter(relationshipId) is not { } part) continue;
 

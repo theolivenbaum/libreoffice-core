@@ -68,7 +68,8 @@ public sealed class PdfRenderer
         ArgumentNullException.ThrowIfNull(destination);
 
         PdfDocumentWriter writer = new();
-        PdfFontCatalogue fonts = new(Options.FontProvider ?? FileFontProvider.Instance, Options.EmbedFonts);
+        PdfFontCatalogue fonts = new(
+            Options.FontProvider ?? FileFontProvider.Instance, Options.EmbedFonts, Options);
 
         // Reserved before anything is drawn: a page names its resources, and so does a form XObject
         // written in the middle of a page, so the number has to exist before the content does.

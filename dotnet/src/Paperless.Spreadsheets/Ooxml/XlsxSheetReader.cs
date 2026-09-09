@@ -69,6 +69,7 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
         _pivotLabels = XlsxPivotLabels.Read(_file, sheet, worksheet);
 
         List<ContentTableRow> rows = [];
+        ColumnStyles columnStyles = ColumnStyles.Read(worksheet);
         int columnCount = 0;
         int expectedRow = 0;
         int pendingEmptyRows = 0;
@@ -83,7 +84,15 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
             if (rowIndex > expectedRow) pendingEmptyRows += rowIndex - expectedRow;
             expectedRow = rowIndex + 1;
 
-            List<ContentTableCell> cells = ReadCells(rowElement, rowIndex, merges);
+            // A row's own format reaches the cells that state none of their own, and only when
+            // the row says customFormat: measured on both binaries, a `<row s="3">` without it
+            // leaves its cells on the sheet default. See ColumnStyles.
+            int? rowStyle = Xlsx.Flag(rowElement, "customFormat")
+                ? Xlsx.Integer(rowElement, "s")
+                : null;
+
+            List<ContentTableCell> cells =
+                ReadCells(rowElement, rowIndex, merges, rowStyle, columnStyles);
             if (cells.Count == 0)
             {
                 pendingEmptyRows++;
@@ -249,7 +258,9 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     /// a row holding only A5 and D5 must read "Grand total\t\t\t£85.50", not
     /// "Grand total\t£85.50". Trailing gaps are padding and are dropped.
     /// </remarks>
-    private List<ContentTableCell> ReadCells(XElement rowElement, int rowIndex, MergeMap merges)
+    private List<ContentTableCell> ReadCells(
+        XElement rowElement, int rowIndex, MergeMap merges,
+        int? rowStyle, ColumnStyles columnStyles)
     {
         List<ContentTableCell> cells = [];
         int expectedColumn = 0;
@@ -282,7 +293,9 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
                 cells.Add(new ContentTableCell { Row = rowIndex, Column = gap });
             }
 
-            ContentTableCell cell = ReadCell(cellElement, rowIndex, column, merges);
+            ContentTableCell cell = ReadCell(
+                cellElement, rowIndex, column, merges,
+                rowStyle ?? columnStyles.At(column));
             if (!IsEmpty(cell)) lastWithContent = cells.Count;
             cells.Add(cell);
         }
@@ -295,9 +308,14 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     private static bool IsEmpty(ContentTableCell cell)
         => cell.Value is null && cell.Formula is null && cell.Children.Count == 0;
 
-    private ContentTableCell ReadCell(XElement element, int row, int column, MergeMap merges)
+    private ContentTableCell ReadCell(
+        XElement element, int row, int column, MergeMap merges, int? inherited)
     {
-        NumberFormatCode format = _file.Styles.FormatFor(Xlsx.Integer(element, "s"));
+        // The cell's own s wins, then the row's, then the column's, then the Default cell
+        // style — measured on both installed binaries over a probe workbook giving all four
+        // different formats (dotnet/probes/numfmt-r68/make-default.py).
+        NumberFormatCode format =
+            _file.Styles.FormatFor(Xlsx.Integer(element, "s") ?? inherited);
         (object? value, string display) = ReadValue(element, format);
         (int columnSpan, int rowSpan) = merges.SpanAt(row, column);
 
@@ -605,5 +623,59 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
 
         public (int Columns, int Rows) SpanAt(int row, int column)
             => _anchors.TryGetValue((row, column), out (int Columns, int Rows) span) ? span : (1, 1);
+    }
+
+    /// <summary>
+    /// The cell format each column's <c>&lt;col style=…&gt;</c> gives the cells that state none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A column's default pattern reaches a cell with no <c>s</c> of its own, and a row's reaches
+    /// it in preference to the column's. Measured on both installed binaries over a probe
+    /// workbook giving the column, the row, the cell and the Default cell style four
+    /// distinguishable formats (<c>dotnet/probes/numfmt-r68/make-default.py</c>): a cell in a
+    /// styled column shows the column's, the same cell inside a <c>customFormat</c> row shows the
+    /// row's, and a cell with its own <c>s</c> shows its own in both.
+    /// </para>
+    /// <para>
+    /// Ranges rather than an array, because <c>&lt;col&gt;</c> legitimately spans to the sheet's
+    /// last column and a per-column array would be sixteen thousand entries for one statement.
+    /// </para>
+    /// </remarks>
+    private sealed class ColumnStyles
+    {
+        private static readonly ColumnStyles Empty = new();
+        private readonly List<(int First, int Last, int Style)> _ranges = [];
+
+        public static ColumnStyles Read(XElement worksheet)
+        {
+            ColumnStyles styles = new();
+            foreach (XElement column in Xlsx.Children(Xlsx.Child(worksheet, "cols"), "col"))
+            {
+                if (Xlsx.Integer(column, "style") is not { } style || style < 0) continue;
+
+                int first = (Xlsx.Integer(column, "min") - 1) ?? 0;
+                int last = (Xlsx.Integer(column, "max") - 1) ?? first;
+                if (first < 0) first = 0;
+                if (last < first) continue;
+
+                styles._ranges.Add((first, Math.Min(last, MaxColumns - 1), style));
+            }
+
+            return styles._ranges.Count == 0 ? Empty : styles;
+        }
+
+        /// <summary>The style index a column names, or null when it names none.</summary>
+        public int? At(int column)
+        {
+            // Last statement wins: <cols> may overlap, and a later, narrower run is the one a
+            // producer writing a whole-sheet default followed by exceptions means.
+            for (int at = _ranges.Count - 1; at >= 0; at--)
+            {
+                (int first, int last, int style) = _ranges[at];
+                if (column >= first && column <= last) return style;
+            }
+            return null;
+        }
     }
 }

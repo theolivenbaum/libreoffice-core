@@ -408,6 +408,28 @@ unmeasured. **ODS is not wired at all** — `style:print="… annotations …"` 
 `office:annotation` on the cells would be the two halves, and no corpus spreadsheet asks for it
 there. Worth doing for symmetry, not for a number.
 
+> **"No corpus spreadsheet asks for it there" was a claim about the original corpus, and the
+> converted one refutes it — round 88.** Two of the 307 converted `.ods` state
+> `style:print="annotations …"` on their page layout, **and both are in the failing set**:
+> `Hazard Analysis Template.ods` (`pages,words`, 2 pages against 3, −35.68 % of glyphs) and
+> `RMP 2011-2014 and Inventory.ods` (`pages`, 36 against 38, −0.44 %). The reference's extra
+> pages hold exactly the note text and nothing else — `RMP`'s page 38 is
+> `Inventory / B54: / Elina Zheleva: / ex OPS.026 / …`, four notes with the sheet's own header
+> and footer. The seat on the Calc side is the one this entry already names,
+> `ATTR_PAGE_NOTES` → `aTableParam.bNotes` (`sc/source/ui/view/printfun.cxx`:944), gating
+> `CountNotePages` (`:2557-2600`) and `PrintNotes`/`DoNotes` (`:2004-2067`); on the ODF side it
+> is `PROP_PrintAnnotations` from `style:print`'s `annotations` token
+> (`xmloff/source/style/PageMasterStyleMap.cxx`:80,
+> `xmloff/source/style/PageMasterPropHdlFactory.cxx`:85). So it is worth **two page counts**,
+> and the SpreadsheetML half above still has no witness.
+>
+> **The expensive half is already built.** These two are the ODF twins of the very `.xls` files
+> the section above closed: the `DoNotes` port, the `"GW99999:"` column width, the column-major
+> order and the 200-twip advance all exist and are proven exact on
+> `Hazard Analysis Template.xls`. What the ODF path is missing is only its two *inputs* — the
+> page layout's `style:print` token and the cells' `office:annotation` text, of which
+> `Hazard Analysis Template.ods` holds 16 and `RMP` 12. `probes/ods-track-r88/results.md` §4.
+
 One instrument note for the next agent: **LibreOffice's flat-ODS export drops cell annotations
 entirely.** Measured on two documents whose notes demonstrably print — `office:annotation` appears
 zero times in the `.fods` and twenty-four times in the `.ods` of the same workbook. So the
@@ -2021,8 +2043,13 @@ Nothing in `Paperless.MsBinary` changed. **`apron-area.xls` was 294 words agains
 431/431, exactly, page for page.** Twenty-six of the sixty-two corpus `.xls` files carry a drawing
 and twenty carry a `TXO`.
 
-Only the text is drawn, not the shape's fill or its outline — which is the SpreadsheetML path's
-limit too, so the two formats produce the same page from the same document.
+~~Only the text is drawn, not the shape's fill or its outline — which is the SpreadsheetML path's
+limit too, so the two formats produce the same page from the same document.~~ **Closed in round
+84**: all three spreadsheet readers now read a shape's fill, outline and geometry, and paint it
+through the shape's own preset. `probes/sheet-fill-r84/results.md`. What the BIFF path still does
+not do is Escher's rotation (property 4), a group's leaves (they carry no `ftCmo`), and keeping a
+shape that carries no ink at all — the last of which is measured and deliberate; see
+`XlsShapeInkTests`.
 
 **A ruled but empty cell is inside the printed area, and a workbook of forms is mostly that.**
 `ScTable::GetPrintArea` runs two passes over the same columns: the first finds the last row and
@@ -2079,7 +2106,9 @@ Left open, and found while doing the above:
   state `DIRECTLY` and want no series, so nothing here reaches it — but an embedded worksheet chart
   would, and those are not read at all yet either (they arrive through `OBJ` type 5 and the chart
   substream that follows it, which the drawing collector now sees and ignores).
-- **A shape's fill and outline are not drawn**, on either Excel path.
+- ~~**A shape's fill and outline are not drawn**, on either Excel path.~~ Closed in round 84 for
+  both, and for ODF beside them. Left: `a:blipFill` and `a:pattFill` on a shape, an
+  `a:effectRef` shadow, an `a:ln/a:tailEnd` arrowhead, and Escher's own rotation.
 - **`CHLINEFORMAT`'s palette colour is not read**, so a gridline is always black.
 - **A merge anchored in a hidden *row* is still lost.** `GetMergeOrigin` walks up as well as left
   and the port still only walks left. No corpus document reaches it.
@@ -2394,13 +2423,92 @@ Deliberate deviations from the port, both narrow:
 
 Not yet, and why:
 
-- **A header or footer taller than its declared height is under-measured.** Calc recomputes a
-  dynamic band's height from the text in it and floors the result at the declared height
-  (`UpdateHFHeight`, `printfun.cxx:846`). Every file LibreOffice writes declares 0.75 cm and puts
-  one line of ten-point text in it, which measures well under that — so the declared value is the
-  answer for all of them, and a header of several lines is the case this gets wrong. Fixing it
-  needs the header's field language parsed and its text laid out, which is the same work as
-  drawing it.
+- ~~**A header or footer taller than its declared height is under-measured.**~~ **Done, and the
+  brief this round inherited was right about the rule and wrong about two things around it.**
+  `SheetBandHeight.Dynamic` is `max(fo:min-height, textHeight + gap)` — Calc's
+  `rParam.nHeight = nMaxHeight + rParam.nDistance` floored at `nManHeight` (`UpdateHFHeight`,
+  `sc/source/ui/view/printfun.cxx`:838 and :848-849), with `fo:min-height` reaching `nManHeight`
+  through `ATTR_PAGE_SIZE` (`lcl_FillHFParam`, :666 and :683) and the header's
+  `fo:margin-bottom` reaching `nDistance` through `ATTR_ULSPACE` (:898, :913).
+
+  **The text term has a floor and the floor is one line of the workbook's own default cell
+  font**, because an area holding nothing is still an `EditTextObject` of one empty paragraph
+  rather than a null pointer — `TextHeight` returns zero only for a null one (:777-785) — and
+  `UpdateHFHeight` maximises over all nine areas (:817-836). A 6 pt header in a 20 pt workbook
+  takes the 20 pt line; two 6 pt lines in one still take one 20 pt line, which is what says the
+  floor is the band's and not each line's.
+
+  **`svg:height` is the fixed case and must not grow**: the two spellings are one property with
+  two special items, `svg:height` filling `HeaderIsDynamicHeight` with false and `fo:min-height`
+  with true (`xmloff/source/style/PageMasterImportPropMapper.cxx`:324-330), that property is
+  `ATTR_PAGE_DYNAMIC` (`sc/source/ui/unoobj/styleuno.cxx`:341-343), and `UpdateHFHeight` returns
+  before it measures anything when the flag is off (:793).
+
+  Two things the brief had wrong. **The seat is the reader, not the layout** — the reason given
+  for putting it in the layout was that "the readers do not have the header font's metrics", and
+  all three of the other readers have called `SheetBandHeight`, which calls
+  `SheetBandText.LineHeightAt`, since round 56. And **the band's own text was not readable at
+  all**: `OdsCellDecoration.ReadBand` dropped every `text:span`'s formatting, so an ODF band was
+  sized *and drawn* in one size and one face whatever the file said. Both are fixed;
+  `probes/ods-band-r75/results.md` has the 73 authored probes, which reproduce 26.2.4.2 to a
+  worst error of 0.23 pt.
+
+- ~~**A sheet's `draw:frame` is not read when it states `draw:transform` instead of
+  `svg:x`/`svg:y`.**~~ **Done, and the transform was the second gate rather than the first.**
+  `OdsDrawings` walked a cell's own `draw:frame` children only, and **72 of `SIL_TDB648.ods`'s 74
+  frames are inside a `draw:g`** — so a grouped frame stating a plain `svg:x` was missed too and
+  the transform never came into it. Two wrappers stand between a cell and its pictures and
+  neither has a rectangle of its own: `draw:g`, and `draw:a`, which is ODF's spelling for *this
+  shape is a hyperlink*. Censused over the 307 converted `.ods`: **89 frames inside a `draw:g` in
+  3 documents and 33 inside a `draw:a` in 13**, of 504.
+
+  A turned frame's rectangle is the axis-aligned **bounding box** of the transform applied to its
+  own `svg:width` × `svg:height`, because that is what both of Calc's page-deciding questions ask
+  for — `ScDrawLayer::GetPrintArea` (`sc/source/core/data/drwlayer.cxx`:1400-1424) and
+  `ScDocument::HasAnyDraw` (`documen9.cxx`:382-404) both go through `GetCurrentBoundRect` — and
+  the picture's own size and angle ride inside it as a `SheetDrawingPart`, which is the shape the
+  SpreadsheetML reader already builds for a grouped, turned watermark. `OdfTransform` is the
+  parser, moved down into `Paperless.OpenDocument` from `OdpSlideLayout` so that both families
+  read the attribute once. `SIL_TDB648.ods` **60 → 92 pages against 88**.
+  `probes/ods-page-r77/results.md` §2.
+
+  ~~**What is still not read is every other `draw:` element.**~~ **Read now, round 82.**
+  `OdsDrawings.Shapes` yields every `draw:` element a cell holds rather than `draw:frame` alone.
+  Round 77's figures here were counted over a cell's *direct* children and one of them was
+  doubled; recounted, the direct-child census is **371 `draw:custom-shape`, 72 `draw:a`, 72
+  `draw:control`, 31 `draw:connector` and 17 `draw:line`**, and descending through the two
+  transparent wrappers it is **604 custom shapes, 41 lines, 31 connectors and 72 controls**.
+  **All of the text is in the custom shapes** — 137 of the 604 carry ink, in 32 documents — and
+  none of the other three kinds carries a single character, which is why this round drew the text
+  and left the fill and the outline. See the two entries below.
+
+- **An ODF sheet's automatic row heights are recalculated for its first 200 rows only, and this
+  tree recalculates every one of them.** `ScXMLTableRowContext` excludes a block ending past row
+  200 from the recalc ranges whenever its style carries a stored height *and* the optimal flag —
+  `if (nCurrentRow > 200 && ptmpStyle && !ptmpStyle->FindProperty(CTF_SC_ROWHEIGHT))` then
+  `rRecalcRanges.at(nSheet).maRanges.setFalse(nFirstRow, nCurrentRow)`,
+  `sc/source/filter/xml/xmlrowi.cxx`:218-243, *"recalc only the first 200 row in case of optimal
+  document loading"*. The test fires for exactly such a style because
+  `ScXMLRowImportPropertyMapper::finished` removes `CTF_SC_ROWHEIGHT` from one that states both,
+  passing the height through as the optimal one (`xmlstyli.cxx`:245-258).
+
+  It is what makes the natural companion to `SheetLayout.CellBreaksStartLines` wrong: a
+  non-wrapping multi-paragraph cell **is** measured at its paragraphs' height by
+  `ScColumn::GetNeededSize` (`column2.cxx`:487-491, 519), so a four-row probe gets all three
+  lines from 26.2.4.2 — and `Capability_List_9-14-2022_Dallas_Combined-Aircraft_Manuf_unsorted.ods`,
+  whose fifteen identical cells sit far past row 200, keeps its stored 14.23 pt and draws the
+  second line over the row beneath. Giving those rows the paragraphs' height took that document
+  from the reference's 147 pages to 150. **The two rules have to land together or not at all**;
+  `SheetVerbatimCellTextTests.TheParagraphsAreDrawnALineApartAndTheRowKeepsItsHeight` pins both
+  halves and names the figure to assert when they do.
+
+- **A cell's first printed row sits about a point lower than the reference's.** Measured on the
+  band probes: with no band at all, 26.2.4.2 puts the first row's *text* 0.97 pt **above** the
+  body's top edge and this tree puts it 0.02 pt below, on a 2 cm top margin and a 0.5 cm row. It
+  is constant across every probe of both families, so it cancels out of a band measurement taken
+  as a *shift* — which is what made the previous round's `activespecs` figure a point out —
+  and it is worth about a point of body height on every page.
+
 - **The paper size default is locale-dependent and A4 is assumed.** Calc's is
   `SvxPaperInfo::GetDefaultPaperSize()`, which is Letter in an American locale; the same missing
   locale infrastructure that keeps the two built-in number-format tables apart is what keeps this
@@ -2418,6 +2526,40 @@ Not yet, and why:
   exists, the binary says what it does, and the reference PDF settles it — `fy20-may20-sep20.xlsx`
   has a second column band whose content stops at row 76, and LibreOffice prints two pages of that
   band against a full 94.
+- ~~**A shape anchored in a cell reaches that cell's text, and the layout measures it.**~~
+  **Done, round 82.** `OdfContentReader` wraps a spreadsheet cell's `draw:` child in a
+  `SectionKind.Frame` section, `ContentTableCell.GetOwnText()` skips it, and every cell question in
+  this module asks that instead of `GetText()` — the used range, the last data row per column, the
+  optimal row height and the print-area overflow, plus the HTML writer and a chart's cached range.
+  Extraction is unchanged. `EHEST-Pre-departure-checklist` went 27 pages against 24 to **24**, and
+  `SSRO_Quarterly_Statistical_Bulletin_Q3201617_DATA` 11 against 4 to **4**.
+  `dotnet/probes/ods-draw-r82/results.md` §1.
+- **A worksheet shape with no text and no picture is not drawn and does not widen the block.**
+  `OdsDrawings.Read` answers null for one, so it is absent from `SheetDrawingArea` as well —
+  and `ScDrawLayer::GetPrintArea` (`drwlayer.cxx`:1344-1424) widens the printed block to cover
+  **every** object on the draw page, whatever it holds. **467 of the 604 `draw:custom-shape` in
+  the cells of the converted `.ods` carry no ink**, along with 72 `draw:control`, 41 `draw:line`
+  and 31 `draw:connector`. Giving them an extent means giving them something to paint at the same
+  time, which is the fill and outline item below; doing the first without the second adds blank
+  paper.
+- **An ODF shape's fill and outline are read for nothing.** `OdsShapeText` already resolves the
+  shape's `draw:style-name` graphic style for its insets and adjustments, and that style states
+  `draw:fill`, `draw:fill-color`, `draw:fill-gradient-name`, `draw:stroke` and `svg:stroke-color`
+  beside them — 137 of 137 inked shapes state the first two. `SheetDrawing.Fill` and `.Stroke`
+  exist and are set only by `XlsxNoteCaptions`. No gate column can see a fill, which is why this
+  is recorded rather than done.
+- **A preset's adjustment values are not carried across from ODF.** `OdsShapeText.Preset` maps
+  `draw:type="ooxml-roundRect"` onto `CustomShapeGeometry`'s `roundRect` and resolves it at the
+  preset's *default* adjustment, because ODF states the adjustments as `draw:modifiers` in the
+  shape's own coordinate space where DrawingML's guides are hundred-thousandths. A round rectangle
+  at the wrong adjustment gets a text rectangle a few points too wide, which changes where its
+  text wraps and — on a shape stating `style:overflow-behavior="clip"` — how many of its lines
+  survive. `076_Inventory_list_accessibility_guide…ods` draws 4932 characters against 26.2.4.2's
+  4782 and its fourteen shapes are all `roundRect` or `round1Rect`.
+- **A `text:tab` inside a sheet shape contributes nothing.** Measured on 26.2.4.2 as 1.09 pt of
+  advance and no character, on a shape whose paragraph style states no tab stops; a shape that
+  *does* state tab stops is unreached by the corpus and unimplemented. 30 tabs in 5 of the 307.
+  `OdsShapeText.Append`.
 - **The used area counts cells with content only.** Calc's own search also counts a cell carrying
   nothing but a style, because its attribute array knows about it. The content tree records no
   formatting, so a sheet whose last two columns are empty-but-shaded comes out narrower here.
@@ -2938,6 +3080,17 @@ file's margins alone would give and matches LibreOffice's 21.11 pt to within 0.1
       output area (`sc/source/ui/view/output2.cxx:1595-2290`). The fix is a per-page lead-in of
       the columns left of the band, drawn for their overflow alone. **Not chart-related**: that
       sheet holds no drawing at all
+
+      > **REFUTED 2026-09-08 — do not implement this fix.** A later round measured that the
+      > lead-in loop is behind `!bTaggedPDF` (`sc/source/ui/view/output2.cxx`:1541-1543),
+      > `UseTaggedPDF` defaults **true**, and every reference PDF this project compares against is
+      > therefore tagged. `Layout/SpreadsheetPages.cs`:325-365 carries the measurement in full,
+      > including the control: rendering `essd-16-3433-2024-t02.xlsx` through the same 26.2.4.2
+      > with only that filter option changed gives `439 / 0 / 0 / 0` tagged and
+      > `439 / 315 / 152 / 49` untagged, and the untagged figures are ours to within a word.
+      > Drawing the lead-in anyway put **617 words of another column's spill on five pages of
+      > `RCO_VOR_Master_List_082824.xlsx` that LibreOffice leaves blank**. The entry is kept
+      > because the *diagnosis* above is correct and worth reading; only its proposed fix is wrong.
 - [ ] **Two smaller word-count differences from the same whole-corpus sweep**, neither a cascade:
       `sheet-features.ods` renders **46 words against the reference's 45** — one *more*, the
       direction that usually means a cell the reference suppresses rather than one we invent — and
@@ -3380,9 +3533,17 @@ Not yet, and why:
   A rectangle that misses the paper is dropped rather than drawn off the edge. Measured on
   `Air_Boss_Master_List.xlsx`, whose note box is anchored in column E and straddles the column
   break: its right half is on LibreOffice's page 3 and was on none of ours, 514 words against 527.
-- **A rotated picture is not expressible.** `IDrawingSink.DrawImage` takes a rectangle rather than
-  a matrix, so `xdr:spPr/a:xfrm/@rot` and ODF's `draw:transform` are read past. Recorded rather
-  than fixed: four agents are building against that IR at once.
+- ~~**A rotated picture is not expressible.**~~ **Half true, and the half that is not is the one
+  this said.** `IDrawingSink.DrawImage` does take a rectangle rather than a matrix, but
+  `SheetPageGraphics.DrawParts` turns the sink itself, so a `SheetDrawingPart` carrying `Degrees`
+  is drawn turned — ours emits `0.866 0.5 -0.5 0.866 … cm` for a 30° ODF frame and lands within
+  0.02 pt of 26.2.4.2 on `sheet-grouped-frames.fods`. ODF's `draw:transform` is read
+  (`OdfTransform`); `xdr:spPr/a:xfrm/@rot` on a *picture* still is not.
+
+  Worth knowing before comparing content streams: **the reference turns the pixels rather than
+  the pen.** 26.2.4.2 places that picture with an axis-aligned `160.696 0 0 134.362 … cm` over a
+  bitmap it has already rotated into the bounding box. Same ink, same box, different
+  representation.
 - **A crop is not applied.** SpreadsheetML states one as `a:srcRect` fractions and ODF as
   `fo:clip`. The drawing model has clipping and no crop, so the shape is a larger destination
   rectangle clipped to the frame's outline rather than a new IR primitive.

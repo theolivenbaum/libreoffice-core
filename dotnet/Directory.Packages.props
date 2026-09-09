@@ -24,13 +24,19 @@
     is wanted regardless, because matching LibreOffice's line heights needs raw hhea/OS-2
     access and our own precedence rules rather than a library's interpretation of them.
 
-    This note used to claim that sharing the shaper made advance widths "agree by
-    construction". That is measurably false and the claim has been removed rather than
-    softened: a Fidelity round found a real ~0.1% advance divergence, with tab stops exact
-    to 0.0000 pt — so the pen is right and the drift accumulates between them — and both
-    sides starting from the same unkerned sum while LibreOffice kerns 19% harder on the
-    line measured. Choosing the same shaper narrows the gap; it does not close it, and
-    nothing about a shared dependency guarantees the same kerning decisions.
+    This note claimed for a while that sharing the shaper made advance widths "agree by
+    construction"; then, for four rounds, that a Fidelity round had disproved it and found
+    a real ~0.1% advance divergence. Measured 2026-09-06 over 5 faces x 6 units x up to 11
+    sizes, through the reference's own stated pen rather than through a PDF's glyph
+    positioning, the two stacks agree to a worst case of 0.011% — the instrument's floor.
+    The "divergence" was the LibreOffice PDF writer's declared widths, which are truncated
+    integer thousandths of an em and accumulate along a run. See CLAUDE.md rule 3 and
+    probes/advance-ppem/.
+
+    So the widths do agree — but not "by construction", and the difference matters: they
+    agree because both stacks shape unhinted against hmtx and neither quantises, which is
+    a fact about the two implementations that has to be re-measured when either moves, not
+    a guarantee that follows from a shared dependency.
   -->
 
   <PropertyGroup>

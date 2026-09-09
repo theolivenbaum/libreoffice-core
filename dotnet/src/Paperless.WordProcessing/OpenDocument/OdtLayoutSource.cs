@@ -1,6 +1,7 @@
 using System.Text;
 using System.Xml.Linq;
 using Paperless.Core.Graphics;
+using Paperless.Core.Units;
 using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
 using Paperless.Text.Fonts;
@@ -61,6 +62,7 @@ public sealed partial class OdtLayoutSource
     private const char AnchorCharacter = '\u0001';
 
     private readonly OdfStyles _styles;
+    private readonly IReadOnlyList<Length> _sectionMargins;
     private readonly OdfPictures? _pictures;
     private readonly SystemFontResolver _fonts;
     private readonly Dictionary<(string? Family, int Weight, bool Italic), OpenTypeFace> _faces = [];
@@ -96,16 +98,30 @@ public sealed partial class OdtLayoutSource
     /// The document's <c>office:settings</c>, or null for one that states none. Only the compatibility
     /// flags are read from it; see <see cref="_blanksAreTransparentToHeight"/>.
     /// </param>
+    /// <param name="sectionMargins">
+    /// Each section's left margin, in the order the masters are in, or null for a caller that states no
+    /// geometry. Read only by <see cref="SectionLeftMargin"/>, for a floating table whose fly measures its
+    /// offset from the sheet's own edge.
+    /// </param>
+    /// <param name="sectionCount">
+    /// How many sections the caller will lay out — one per master page. A <c>text:section</c> that changes
+    /// the geometry is numbered from here upwards, so a caller that leaves this at nought gets the old
+    /// behaviour, in which such a section is transparent. See <see cref="ColumnSections"/>.
+    /// </param>
     public OdtLayoutSource(
         OdfStyles styles,
         SystemFontResolver? fonts = null,
         IReadOnlyDictionary<string, int>? masterPages = null,
         XElement? stylesRoot = null,
         OdfPictures? pictures = null,
-        XElement? settings = null)
+        XElement? settings = null,
+        IReadOnlyList<Length>? sectionMargins = null,
+        int sectionCount = 0)
     {
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
+        _sectionMargins = sectionMargins ?? [];
+        _sectionCount = sectionCount;
         _pictures = pictures;
         _fonts = fonts ?? new SystemFontResolver(SystemFontIndex.Build());
         _masterPages = masterPages ?? new Dictionary<string, int>(StringComparer.Ordinal);
@@ -113,6 +129,9 @@ public sealed partial class OdtLayoutSource
         _endnotes = NumberingIn(stylesRoot, "endnote", NoteNumbering.Endnotes);
         _blanksAreTransparentToHeight =
             Setting(settings, "IgnoreTabsAndBlanksForLineCalculation") == "true";
+        _shrinksJustifiedBlanks = ShrinksJustifiedBlanks(settings);
+        _breaksWrappedTables = BreaksWrappedTables(settings);
+        _tabsRelativeToIndent = TabsRelativeToIndent(settings);
     }
 
     /// <summary>
@@ -125,6 +144,26 @@ public sealed partial class OdtLayoutSource
     /// instead of quietly diverging from it. See <see cref="PageParagraph.BlanksAreTransparentToHeight"/>.
     /// </remarks>
     private readonly bool _blanksAreTransparentToHeight;
+
+    /// <summary>
+    /// Whether a justified line may squeeze its blanks below their natural width, as the document's
+    /// settings say.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="ShrinksJustifiedBlanks(XElement?)"/>, which is where the rule is stated; the value
+    /// is resolved once per document because the setting is document-wide.
+    /// </remarks>
+    private readonly bool _shrinksJustifiedBlanks;
+
+    /// <summary>
+    /// Whether a tab stop's position is measured from the paragraph's own indent, as the document's
+    /// settings say.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="TabsRelativeToIndent(XElement?)"/>; the value is resolved once per document because
+    /// the setting is document-wide.
+    /// </remarks>
+    private readonly bool _tabsRelativeToIndent;
 
     /// <summary>
     /// Whether two consecutive paragraphs' spacings add rather than the larger one winning, as the
@@ -177,6 +216,47 @@ public sealed partial class OdtLayoutSource
         => Setting(settings, "AddParaTableSpacing") != "false";
 
     /// <summary>
+    /// Whether a page-anchored fly may run past the body's bottom into the margin, as the settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The deadline a split fly is cut at is <c>GetFlyAnchorBottom</c>
+    /// (<c>sw/source/core/layout/fly.cxx</c>:113-162), and it has two arms. The Word &gt;= 2013 one is the
+    /// body frame's print bottom; the Word &lt;= 2010 one is the <em>page's</em> bottom, limited so the fly
+    /// still fits the body's height. <c>isLegacyBehavior</c> (:101-110) picks between them, and its first
+    /// test is <c>DocumentSettingId::TAB_OVER_MARGIN</c> — which ODF spells <c>TabOverMargin</c> and which
+    /// the Word import filters set for a file below <c>compatibilityMode</c> 15.
+    /// </para>
+    /// <para>
+    /// Absent means <em>false</em>: <c>mbTabOverMargin(false)</c>
+    /// (<c>sw/source/core/doc/DocumentSettingManager.cxx</c>:92), and the item is in none of
+    /// <c>SwXMLImport::SetConfigurationSettings</c>' "use the old behaviour when it is missing" cases.
+    /// <b>177 of the 338 converted <c>.odt</c> state it true and 161 false</b>, so it is not a rarity —
+    /// and it is what separates the three graph-paper templates, whose fly runs 9.75 pt past the body's
+    /// bottom and is not split, from the six documents the reference does split.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool FliesMayOverlapTheBottomMargin(XElement? settings)
+        => Setting(settings, "TabOverMargin") == "true";
+
+    /// <summary>
+    /// Whether a fly holding a table may be broken across pages at all, as the settings say.
+    /// </summary>
+    /// <remarks>
+    /// <c>SwFlyFrame::IsFlySplitAllowed</c> refuses outright while
+    /// <c>DocumentSettingId::DO_NOT_BREAK_WRAPPED_TABLES</c> holds
+    /// (<c>sw/source/core/layout/fly.cxx</c>:696-700), before it looks at the fly at all — so it is a
+    /// document-level veto over every <c>loext:may-break-between-pages</c> the file states. Absent means
+    /// the flag is off and splitting is allowed; <b>30 of the 338 converted <c>.odt</c> state it true</b>,
+    /// and <c>SwXMLImport::SetConfigurationSettings</c> sets the property only when they do
+    /// (<c>sw/source/filter/xml/xmlimp.cxx</c>:1627-1630).
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool BreaksWrappedTables(XElement? settings)
+        => Setting(settings, "DoNotBreakWrappedTables") != "true";
+
+    /// <summary>
     /// Whether a paragraph keeps its space-before at the top of the first page and after a page break,
     /// as the document's settings say.
     /// </summary>
@@ -213,6 +293,78 @@ public sealed partial class OdtLayoutSource
     /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
     internal static bool KeepsParagraphSpacingAtPages(XElement? settings)
         => Setting(settings, "AddParaTableSpacingAtStart") != "false";
+
+    /// <summary>
+    /// Whether a justified line may squeeze its blanks below their natural width to fit another word, as
+    /// the document's settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>JUSTIFY_LINES_WITH_SHRINKING</c>, which ODF spells <c>JustifyLinesWithShrinking</c> and
+    /// which <c>SwXMLImport::SetConfigurationSettings</c> (<c>sw/source/filter/xml/xmlimp.cxx</c>:1238)
+    /// sets straight through as a document property — it is in none of that function's exclusion lists and
+    /// none of its "use the old behaviour when the item is missing" cases, so an absent item leaves the
+    /// member at its own default. That default is <b>false</b>
+    /// (<c>mbJustifyLinesWithShrinking = false</c>, <c>sw/source/core/inc/DocumentSettingManager.hxx</c>:180),
+    /// which is why this is the one compatibility flag in this file whose absent case is <em>off</em>
+    /// rather than on.
+    /// </para>
+    /// <para>
+    /// It is the ODF spelling of what <c>compatibilityMode</c> 15 gives a DOCX
+    /// (<see cref="ParagraphFormat.ShrinksJustifiedBlanks"/>), and LibreOffice's own export writes it into
+    /// <c>settings.xml</c> for every Word file it converts — <b>161 of the 338 converted <c>.odt</c></b>
+    /// state it true. Reading it wrongly does not move a line by a fraction of a point: a line that cannot
+    /// squeeze holds one word fewer, so the paragraph sets in more lines and the document paginates longer.
+    /// </para>
+    /// <para>
+    /// The <em>paragraph</em>-level spelling of the same thing, <c>loext:word-spacing-minimum</c>, is a
+    /// second and independent way in: <c>SwTextPortion::Format_</c>
+    /// (<c>sw/source/core/text/portxt.cxx</c>:546-562) shrinks when the document setting is on
+    /// <em>and</em> the paragraph states no word-spacing bounds of its own — its <c>bOldInterop</c>, the
+    /// "support old ODT documents" case — <em>or</em> when the paragraph states bounds that are not all
+    /// 100%, whatever the document setting says. On the converted corpus the second clause adds nothing:
+    /// all 51 documents stating <c>loext:word-spacing-minimum</c> state it as <c>75%</c>, which is the
+    /// floor <see cref="JustificationShrink.MinimumBlankProportion"/> already applies, and all 51 also
+    /// state the document setting. It is deliberately not read.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool ShrinksJustifiedBlanks(XElement? settings)
+        => Setting(settings, "JustifyLinesWithShrinking") == "true";
+
+    /// <summary>
+    /// Whether a tab stop's declared position is measured from the paragraph's own left indent or from
+    /// the text area's edge, as the document's settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwTextFormatter::NewTabPortion</c> takes the tab origin as
+    /// <c>m_pFrame-&gt;getFrameArea().Left() + (bTabsRelativeToIndent ? GetTabLeft() : 0)</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>:94-98, under the comment <em>"#i24363# tab stops relative
+    /// to indent"</em>), where <c>GetTabLeft()</c> is the paragraph's own text-left margin
+    /// (<c>SwTextNode::GetLeftMarginForTabCalculation</c>, <c>ndtxt.cxx</c>:3573-3593). So the flag moves
+    /// every stop of an indented paragraph by that indent, and a tab that lands on the first stop under
+    /// one rule lands on the second under the other.
+    /// </para>
+    /// <para>
+    /// <b>Absent means true</b>: <c>mbTabRelativeToIndent(true)</c>
+    /// (<c>sw/source/core/doc/DocumentSettingManager.cxx</c>:80), which is Writer's own answer for a
+    /// document it created. Every Word-family importer turns it off — <c>ww8par.cxx</c>:1951 for a
+    /// <c>.doc</c> and <c>DomainMapper</c>'s constructor for DOCX and RTF
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:128-132) — and LibreOffice's ODF export
+    /// writes the resulting flag into <c>settings.xml</c>, so a <c>.odt</c> converted from a Word file
+    /// carries <c>false</c> and must be laid out the way the Word file is. <b>All 338 converted
+    /// <c>.odt</c> state it false</b>, which is what the corpus's provenance predicts and not a rarity.
+    /// </para>
+    /// <para>
+    /// The reach is narrower than that census, because the two rules differ only for a paragraph that
+    /// both holds a tab and carries a non-zero left indent: <b>38 of the 338 hold one, 3728 paragraphs
+    /// in all</b>. <c>probes/odt-page-r87/census-tabs.py</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool TabsRelativeToIndent(XElement? settings)
+        => Setting(settings, "TabsRelativeToIndent") != "false";
 
     /// <summary>One <c>config:config-item</c>'s value from a document's settings, or null when absent.</summary>
     /// <remarks>
@@ -308,6 +460,31 @@ public sealed partial class OdtLayoutSource
     /// </remarks>
     private int _sectionIndex;
 
+    /// <summary>
+    /// Which master page the walk is on, which is <see cref="_sectionIndex"/> except inside a
+    /// <c>text:section</c> that changed the geometry — see <see cref="EnterColumnSection"/>.
+    /// </summary>
+    private int _masterIndex;
+
+    /// <summary>The <c>text:section</c> currently open, or null when the walk is not inside one.</summary>
+    private OdfSectionGeometry? _columnGeometry;
+
+    /// <summary>How many sections the caller states, which is where the derived ones are numbered from.</summary>
+    private readonly int _sectionCount;
+
+    /// <summary>The sections the walk derived from a <c>text:section</c>, in the order allocated.</summary>
+    private readonly List<OdtColumnSection> _columnSections = [];
+
+    /// <summary>
+    /// The sections a <c>text:section</c> asked for, numbered from <see cref="_sectionCount"/> upwards.
+    /// </summary>
+    /// <remarks>
+    /// Empty for every document that holds no <c>text:section</c> changing the geometry, which is nearly
+    /// all of them. The caller turns each into a section derived from the master's own, because only the
+    /// caller has the master's geometry; see <see cref="OdtWordDocument.Layout"/>.
+    /// </remarks>
+    internal IReadOnlyList<OdtColumnSection> ColumnSections => _columnSections;
+
     /// <summary>The substitutions made while resolving the document's fonts.</summary>
     /// <remarks>
     /// Worth surfacing rather than swallowing: a substitution that is not metric-compatible changes
@@ -325,7 +502,10 @@ public sealed partial class OdtLayoutSource
         ArgumentNullException.ThrowIfNull(body);
 
         _sectionIndex = 0;
-        return WalkBlocks(body);
+        _masterIndex = 0;
+        _columnGeometry = null;
+        _columnSections.Clear();
+        return WalkBlocks(body, isBody: true);
     }
 
     /// <summary>
@@ -369,10 +549,19 @@ public sealed partial class OdtLayoutSource
     /// body left pending would otherwise be handed to the first paragraph <em>inside</em> a frame.
     /// Saved and restored rather than merely cleared, for the same reason.
     /// </remarks>
-    private List<PageBlock> WalkBlocks(XElement element)
+    /// <param name="element">The element whose block-level children to walk.</param>
+    /// <param name="isBody">
+    /// True only for the document body. A floating table is lifted out of its frame there and nowhere
+    /// else, because <c>SwFlyFrame::IsFlySplitAllowed</c> refuses a fly in a header, a footer or a
+    /// footnote outright (<c>sw/source/core/layout/fly.cxx</c>:702-721) — and those are exactly the flows
+    /// the other two walks read.
+    /// </param>
+    private List<PageBlock> WalkBlocks(XElement element, bool isBody = false)
     {
         List<XElement>? outer = _looseFrames;
+        bool outerBody = _isBody;
         _looseFrames = null;
+        _isBody = isBody;
 
         try
         {
@@ -398,8 +587,18 @@ public sealed partial class OdtLayoutSource
         finally
         {
             _looseFrames = outer;
+            _isBody = outerBody;
         }
     }
+
+    /// <summary>True while the walk is reading the document body rather than a flow or a cell.</summary>
+    private bool _isBody;
+
+    /// <summary>
+    /// Whether the document lets a fly holding a table be broken at all — see
+    /// <see cref="BreaksWrappedTables"/>. False leaves every such fly on the frame path, whole.
+    /// </summary>
+    private readonly bool _breaksWrappedTables;
 
     /// <summary>
     /// Walks the body's block-level children.
@@ -436,6 +635,11 @@ public sealed partial class OdtLayoutSource
 
             if (ns == OdfNamespaces.Text && name is "p" or "h")
             {
+                // Before the paragraph, because a fly anchored in it is drawn where the paragraph starts
+                // and the flow carries on past it: the table has to be in the block list at the anchor's
+                // own position for `Paginator.PlaceFloatedTable` to measure it against the right place.
+                if (into is List<PageBlock> body) FloatOutTables(child, body);
+
                 if (Paragraph(child) is { } paragraph && WithLooseFrames(paragraph) is T block)
                 {
                     into.Add(block);
@@ -452,6 +656,10 @@ public sealed partial class OdtLayoutSource
             // anchor that is the page, not the paragraph.
             if (OdfFrames.IsFrame(child))
             {
+                // A floating table at block level is the same object as one inside a paragraph and goes
+                // in at the place the file put it, rather than waiting for a paragraph to hang from.
+                if (into is List<PageBlock> hoisted && Floated(child, hoisted)) continue;
+
                 (_looseFrames ??= []).Add(child);
                 continue;
             }
@@ -473,6 +681,13 @@ public sealed partial class OdtLayoutSource
                 continue;
             }
 
+            if (ns == OdfNamespaces.Text && name == "section" && EnterColumnSection(child))
+            {
+                Walk(child, into, depth + 1);
+                LeaveColumnSection();
+                continue;
+            }
+
             if (ns == OdfNamespaces.Text
                 && name is "section" or "index-body"
                     or "table-of-content" or "alphabetical-index" or "illustration-index"
@@ -486,7 +701,7 @@ public sealed partial class OdtLayoutSource
                 continue;
             }
 
-            if (ns == OdfNamespaces.Table && name == "table")
+            if (OdfNamespaces.IsTable(ns) && name == "table")
             {
                 // A table goes in whole, as a grid. It is dropped when the caller is filling a flow's
                 // paragraph list, which cannot hold one — a table inside a header or inside another table
@@ -496,6 +711,147 @@ public sealed partial class OdtLayoutSource
             }
         }
     }
+
+    /// <summary>
+    /// Lifts every floating table a paragraph anchors out of its frame and into the block list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>draw:frame</c> holding nothing but a table, marked <c>loext:may-break-between-pages</c>, is
+    /// the same object a DOCX spells <c>w:tblpPr</c> — see <see cref="OdfFrames.FloatingTable"/> — and
+    /// this engine models that as a positioned block table because that is the model that <em>splits</em>.
+    /// Left as a frame the table is measured whole and its tail is drawn below the sheet, which reads as
+    /// missing text and is not.
+    /// </para>
+    /// <para>
+    /// The walk deliberately does not descend into a <c>draw:</c> subtree: a frame inside another frame's
+    /// text box belongs to that frame's own flow, and hoisting it into the body would move it to a
+    /// different page as well as to a different rectangle.
+    /// </para>
+    /// </remarks>
+    /// <param name="paragraph">The <c>text:p</c> or <c>text:h</c> about to be read.</param>
+    /// <param name="into">The block list the tables go into, in the paragraph's own place.</param>
+    private void FloatOutTables(XElement paragraph, List<PageBlock> into)
+    {
+        if (!_isBody) return;
+
+        // The block-level frames waiting for this paragraph first, since the file listed them first —
+        // and in document order, which is why this rebuilds the pending list rather than removing from
+        // it backwards.
+        if (_looseFrames is { Count: > 0 } loose)
+        {
+            List<XElement> kept = [];
+            foreach (XElement pending in loose)
+            {
+                if (!Floated(pending, into)) kept.Add(pending);
+            }
+
+            _looseFrames = kept.Count == 0 ? null : kept;
+        }
+
+        Descend(paragraph, 0);
+
+        void Descend(XElement element, int depth)
+        {
+            if (depth > 32) return;
+
+            foreach (XElement child in element.Elements())
+            {
+                if (child.Name.NamespaceName == OdfNamespaces.Draw)
+                {
+                    Floated(child, into);
+                    continue;
+                }
+
+                Descend(child, depth + 1);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads one frame as a positioned table and adds it, answering whether it was one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The frame is recorded in <see cref="_floatedFrames"/> so that <see cref="FramesOf"/> declines it:
+    /// the fly and the block table are one object, and drawing both would draw the table twice.
+    /// </para>
+    /// <para>
+    /// The fly's placement beats the table's own. A framed table states <c>table:align</c> and
+    /// <c>fo:margin-left</c> of its own — inside the fly, where they mean where it sits in the fly — and
+    /// the fly is what is positioned on the page, so those are replaced rather than added to.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The candidate frame element.</param>
+    /// <param name="into">The block list to add to.</param>
+    private bool Floated(XElement frame, List<PageBlock> into)
+    {
+        if (!_isBody || !_breaksWrappedTables) return false;
+        if (OdfFrames.FloatingTable(frame, _styles) is not { } floating) return false;
+
+        // A fly whose offset from its own anchor is negative starts *above* the paragraph it hangs on,
+        // which is a place the flow has already passed — and a positioned block table is placed at
+        // `used + VerticalOffset`, so the model would put it behind the text rather than over it. This is
+        // a limit of the model stated where it bites rather than a rule of Writer's, which simply draws
+        // the fly there. Measured on `HC-Bulletin-template`, whose second fly states
+        // `svg:y="-0.078in"`: hoisted it is cut 18.9 pt above the body's bottom and the document comes
+        // to six pages, and left in its frame it is five against the reference's five. Two of the
+        // converted corpus's 51 floating tables state a negative offset against their paragraph.
+        if (floating.VerticalOrigin == FrameVerticalOrigin.Paragraph
+            && floating.VerticalOffset < Length.Zero)
+        {
+            return false;
+        }
+
+        if (Table(floating.Table) is not { } table) return false;
+
+        bool aligned = floating.Horizontal != FrameHorizontalAlignment.Offset;
+
+        into.Add(table with
+        {
+            IsPositioned = true,
+            HorizontalPosition = aligned ? floating.Horizontal : null,
+
+            // `from-left` is the one value that uses `svg:x`, and the coordinate is measured from the
+            // sheet's own left edge under `style:horizontal-rel="page"` — the same distinction OOXML
+            // draws with `w:horzAnchor="page"`, and the same correction `PositionedLeftEdge` applies
+            // there. `PageTable.LeftWithin` works in the text area's coordinates, so the margin comes
+            // off before the offset joins them.
+            LeftIndent = aligned
+                ? Length.Zero
+                : floating.HorizontalOffset
+                  - (floating.HorizontalFromSheet ? SectionLeftMargin : Length.Zero),
+            VerticalOrigin = floating.VerticalOrigin,
+            VerticalOffset = floating.VerticalOffset,
+            LowerSpacing = floating.LowerSpacing,
+        });
+
+        _floatedFrames.Add(frame);
+        return true;
+    }
+
+    /// <summary>
+    /// The left margin of the section the walk is in, or nought when the caller stated no geometry.
+    /// </summary>
+    /// <remarks>
+    /// The one piece of page geometry this reader carries, and it is carried for one reason: a fly
+    /// positioned <c>style:horizontal-rel="page"</c> states its offset from the sheet's edge while every
+    /// other length on the way to <see cref="PageTable"/> is measured from the text area's. Eight of the
+    /// converted corpus's 51 floating tables state it.
+    /// </remarks>
+    private Length SectionLeftMargin
+        => _sectionMargins.Count == 0
+            ? Length.Zero
+            : _sectionMargins[Math.Clamp(_masterIndex, 0, _sectionMargins.Count - 1)];
+
+    /// <summary>
+    /// The frames already read as positioned tables, which must not be read as frames as well.
+    /// </summary>
+    /// <remarks>
+    /// By identity, since two frames of equal value are still two frames — the same reason
+    /// <c>FrameResolution</c> keys its anchors that way.
+    /// </remarks>
+    private readonly HashSet<XElement> _floatedFrames = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// Frames seen at block level, waiting for a paragraph to hang from.
@@ -524,6 +880,64 @@ public sealed partial class OdtLayoutSource
         return frames.Count == 0
             ? paragraph
             : paragraph with { Frames = [.. frames, .. paragraph.Frames] };
+    }
+
+    /// <summary>
+    /// Opens a <c>text:section</c> that changes the geometry, answering the section index to restore.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Answers null — and the walk then treats the element as transparent, exactly as it always has —
+    /// for a section that states one column and no indents, for one nested inside another, and for one
+    /// outside the body. A section in a header, a footer or a table cell is not laid out as its own
+    /// frame here: the flow it belongs to has no page geometry of its own to change.
+    /// </para>
+    /// <para>
+    /// Nesting is refused rather than composed because composing it would need the parent section's
+    /// area as the origin of the child's indents, and nothing in the converted corpus exercises it:
+    /// of 139 <c>text:section</c> elements in 49 of the 338 converted <c>.odt</c>, <b>none</b> is
+    /// inside another and none is inside a table.
+    /// </para>
+    /// </remarks>
+    /// <param name="section">The <c>text:section</c> element.</param>
+    /// <returns>True when the section was opened, and the walk must close it again.</returns>
+    private bool EnterColumnSection(XElement section)
+    {
+        if (!_isBody || _columnGeometry is not null || _sectionCount == 0) return false;
+
+        string? styleName = section.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value;
+        if (OdfSectionGeometry.Read(_styles, styleName) is not { } geometry) return false;
+
+        _columnGeometry = geometry;
+        _sectionIndex = AllocateColumnSection(geometry);
+        return true;
+    }
+
+    /// <summary>
+    /// Closes the section <see cref="EnterColumnSection"/> opened, returning the flow to the page.
+    /// </summary>
+    /// <remarks>
+    /// Through a section of its own rather than by restoring the outer index, because the outer index
+    /// names a section whose break is <c>NextPage</c> — returning to it would start a page where the
+    /// file merely ends a columned stretch. The restoring section is the master's geometry with a
+    /// continuous break, which is what leaving a <c>SwSectionFrame</c> does.
+    /// </remarks>
+    private void LeaveColumnSection()
+    {
+        _columnGeometry = null;
+        _sectionIndex = AllocateColumnSection(geometry: null);
+    }
+
+    /// <summary>
+    /// Allocates a section derived from the master the walk is on, and answers its index.
+    /// </summary>
+    /// <param name="geometry">
+    /// The <c>text:section</c>'s own geometry, or null for the section that restores the master's.
+    /// </param>
+    private int AllocateColumnSection(OdfSectionGeometry? geometry)
+    {
+        _columnSections.Add(new OdtColumnSection(_masterIndex, geometry));
+        return _sectionCount + _columnSections.Count - 1;
     }
 
     /// <summary>
@@ -575,8 +989,14 @@ public sealed partial class OdtLayoutSource
             .Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value;
 
         // A paragraph whose style names a master page moves the document onto that master, and everything
-        // after it follows until another paragraph says otherwise.
-        if (MasterPageOf(styleName) is { } section) _sectionIndex = section;
+        // after it follows until another paragraph says otherwise. Inside a text:section the master
+        // decides the geometry the section's own columns and indents are applied *to*, so a change of
+        // master there needs a section of its own rather than throwing the open one away.
+        if (MasterPageOf(styleName) is { } master && master != _masterIndex)
+        {
+            _masterIndex = master;
+            _sectionIndex = _columnGeometry is { } open ? AllocateColumnSection(open) : master;
+        }
 
         OdfTextStyle text = OdfParagraphFormats.ResolveText(_styles, styleName);
         OpenTypeFace? face = Face(text);
@@ -597,7 +1017,12 @@ public sealed partial class OdtLayoutSource
         _endnoteNumber += walker.EndnotesSeen;
 
         (PageLabel? label, ParagraphFormat format) =
-            ListFormatting(OdfParagraphFormats.Resolve(_styles, styleName), text, face, wantsLabel);
+            ListFormatting(
+                OdfParagraphFormats.Resolve(
+                    _styles, styleName, _shrinksJustifiedBlanks, _tabsRelativeToIndent),
+                text,
+                face,
+                wantsLabel);
 
         // The nested flows are read with the list suspended: a paragraph inside this one's footnote or
         // text box is not an item of the list this paragraph is in, and would otherwise take its indents.
@@ -900,14 +1325,16 @@ public sealed partial class OdtLayoutSource
 
         foreach (FrameAnchor anchor in anchors)
         {
+            // A floating table has already gone into the block list as a positioned table, and the fly
+            // and the table are one object — see `Floated`.
+            if (_floatedFrames.Contains(anchor.Element)) continue;
+
             Func<XElement, IReadOnlyList<PageBlock>>? content = _frameDepth < MaxFrameNesting
                 ? Content
                 : null;
 
-            if (OdfFrames.Read(anchor.Element, _styles, content, anchor.Offset, _pictures) is { } frame)
-            {
-                frames.Add(frame);
-            }
+            frames.AddRange(
+                OdfFrames.ReadAll(anchor.Element, _styles, content, anchor.Offset, _pictures));
         }
 
         return frames;

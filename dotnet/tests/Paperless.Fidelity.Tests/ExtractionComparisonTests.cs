@@ -35,12 +35,8 @@ public class ExtractionComparisonTests : IDisposable
     {
         Assert.SkipUnless(
             LibreOfficeRunner.IsAvailable,
-            "LibreOffice with its application modules is not installed, so there is no "
-            + "reference to compare against. Run "
-            + ".claude/skills/libreoffice-reference/scripts/check-env.sh for the apt-get lines. "
-            + "A container with libreoffice-core alone has an soffice that runs and then fails "
-            + "on every document, which is why this checks by converting rather than by "
-            + "finding the binary.");
+            LibreOfficeRunner.UnavailableReason
+            + " — see .claude/skills/libreoffice-reference/scripts/check-env.sh");
     }
 
     private string Reference(string corpusName)
@@ -114,6 +110,26 @@ public class ExtractionComparisonTests : IDisposable
         // The DOC needs no entry at all — LibreOffice's WW8 import keeps the cached 1.
         "bookmark-field.rtf" or "bookmark-field.docx"
             => new HashSet<string>(StringComparer.Ordinal) { "0" },
+
+        // The paragraph after the last table, which 26.2.4.2's own text filter emits **three times**
+        // for a document that contains it once. Its export of `tables.fodt` ends
+        //
+        //     Plain a	Plain b
+        //     	After the tables.	After the tables.
+        //     After the tables.
+        //
+        // where 24.2.7.2 emits the single paragraph the file has. The file is checked in and says
+        // it once — one `<text:p>After the tables.</text:p>` after the second `<table:table>` — so
+        // this is the reference inventing content, not Paperless dropping it, and copying it is
+        // explicitly a non-goal. It reproduces through all five conversions of the same content,
+        // which is what says it is the export filter and not any one import.
+        //
+        // The trigger is narrower than "a paragraph after a table": authored one-table,
+        // three-table and nested-table files with a trailing paragraph all export it once on the
+        // same binary, and removing this fixture's two `<table:covered-table-cell/>` elements does
+        // not change it either. Not narrowed further — the classification does not need it.
+        "tables.fodt" or "tables.odt" or "tables.doc" or "tables.docx" or "tables.rtf"
+            => new HashSet<string>(StringComparer.Ordinal) { "After", "the", "tables." },
         _ => new HashSet<string>(StringComparer.Ordinal),
     };
 

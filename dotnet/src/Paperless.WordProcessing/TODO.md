@@ -262,6 +262,24 @@ Order chosen so each is verifiable before the next gets harder.
       `left-margin = space + width, first-line = -width` (`xmloff/source/style/xmlnumi.cxx:433`). Reading
       only the first spelling leaves every list in a LibreOffice-written `.odt` at the margin, and the file
       contains no attribute whose absence says so.
+- [x] **`TabsRelativeToIndent`, which decides what a tab stop's position is measured from.**
+      `SwTextFormatter::NewTabPortion` takes the tab origin as
+      `m_pFrame->getFrameArea().Left() + (bTabsRelativeToIndent ? GetTabLeft() : 0)`
+      (`sw/source/core/text/txttab.cxx`:94-98, `#i24363#`), where `GetTabLeft()` is the paragraph's own
+      text-left margin (`SwTextNode::GetLeftMarginForTabCalculation`, `ndtxt.cxx`:3573-3593), and the same
+      flag moves `nLeftMarginTabPos`, the position the hanging-indent overrule falls back to
+      (`txttab.cxx`:222-285, `#i115705#`). **Absent means true** — `mbTabRelativeToIndent(true)`,
+      `DocumentSettingManager.cxx`:80 — and every Word-family importer sets it false: `ww8par.cxx`:1951
+      for a `.doc`, `DomainMapper`'s own constructor for DOCX and RTF
+      (`sw/source/writerfilter/dmapper/DomainMapper.cxx`:128-132). This tree's three Word readers each
+      set `ParagraphFormat.TabsRelativeToIndent` false by hand; **the ODF reader never set it at all**, so
+      every `.odt` LibreOffice exported from a Word file — which states the flag in `settings.xml`, all
+      338 of the converted corpus — laid its tabs out by Writer's native rule instead. The reach is
+      narrower than that census: the two rules differ only for a paragraph holding both a tab and a
+      non-zero left indent, which is **38 of the 338, 3728 paragraphs**. `A_320.odt` holds 1041 of them
+      and went **134 pages against 26.2.4.2's 118 to 118 of 118**, glyphs 89754 → 88938 against 88958,
+      with its own `.doc` spelling page- and glyph-exact throughout as the control.
+      `probes/odt-page-r87/results.md`; `OdtTabSettingsTests`.
 
 ### DOCX — extraction done
 - [x] `document.xml` body; `styles.xml`; `numbering.xml`; parts located by relationship with
@@ -702,6 +720,42 @@ Order chosen so each is verifiable before the next gets harder.
 - [x] Font family names from the font table, which the reader previously discarded because extraction
       never needs them — a run's font does not change its text. A name can arrive in several text chunks
       and ends at a semicolon, so it is accumulated rather than assigned.
+- [x] **A style named after one of Word's headings whose `\sbasedon` does not resolve keeps Writer's own
+      pool parent, which is 14 pt, 12 pt above, 6 pt below and keep-with-next.** Round 80 established that
+      a forward `\sbasedon` — a style based on one declared later in the same `{\stylesheet}` — is dropped,
+      because `getStyleName` (`rtfdocumentimpl.cxx`:873-885) turns the index into a name where the word is
+      dispatched (`rtfdispatchvalue.cxx`:131-134) and a style not yet read has no name to give. What it did
+      not have is what the importer does *instead*: `StyleSheetTable::ApplyStyleSheets`
+      (`dmapper/StyleSheetTable.cxx`:1099-1121) converts the entry's name through `ConvertStyleName`
+      (`:1620-1660`) and, where Writer already has a style of that name, reuses it, resets its own
+      properties and **leaves its parent alone** — the branch that would clear it needs
+      `m_bHasImportedDefaultParaProps`, which only an OOXML `w:docDefaults` sets (`:653-667`). `Heading 4`'s
+      parent is `Heading`, and `SwPoolFormatId::COLL_HEADLINE_BASE`
+      (`sw/source/core/doc/DocumentStylePoolManager.cxx`:768-819) states `PT_14` at `:809`,
+      `SvxULSpaceItem(PT_12, PT_6)` at `:810` and `SvxFormatKeepItem(true)` at `:814`; the per-level
+      percentages of `aHeadlineSizes` (`:107-115`) do **not** arrive with them, so all nine levels answer
+      14 pt. A `\sbasedon` that resolves replaces that parent (`:1156-1169`), and a style stating its own
+      `\fs` still reaches its paragraphs with neither — the round-80 rule. Reach **17 of the 338 converted
+      `.rtf`**; `.rtf` gate **259 → 260 of 336**, `Sample_SQMS_Program` 60/77 → 77/77, and on
+      `24-25_FAA_Holdover_Tables` it is 37 of the 67 pages. `probes/rtf-holdover-r87/results.md` §2.
+- [ ] **`REF` expands from the bookmark, and the RTF import hands the bookmarks the wrong names.** RTF
+      sends a bookmark half's *name* before its *id* (`lcl_getBookmarkProperties`,
+      `rtfdocumentimpl.cxx`:224-236, whose comment says the name "should be sent first"; the halves at
+      `:2735-2764`). `DomainMapper_Impl::SetBookmarkName` (`DomainMapper_Impl.cxx`:9426-9447) is written
+      for OOXML's opposite order — `w:bookmarkStart` states `w:id` then `w:name` — so it looks up
+      `m_sCurrentBkmkId`, *the previously opened start*, and writes the incoming name onto **that**,
+      reaching `m_sCurrentBkmkName` only when the map misses. Every name therefore lands one bookmark
+      early. A bookmark that ends up spanning into another node makes
+      `SwGetRefFieldType::FindAnchor` answer `*pEnd = -1` (`reffld.cxx`:1588) and
+      `SwGetRefField::UpdateField` read that as *to the end of the paragraph* (`:604-607`), so
+      `REF _Ref107225632 \h` draws `Table 48: Snowfall Intensities as a Function of Prevailing Visibility`
+      where the file's `\fldrslt` says `Table 48` and the `.odt` twin draws `Table 48`. Reproduced in
+      three lines of RTF by `probes/rtf-holdover-r87/genbookmarks.py`; two starts alone come out as two
+      bookmarks called `R1` and `R1 Copy 1`. **Reach is 11 of the 338 `.rtf`** and two of them are the
+      holdover pair, which state 332 and 365 `REF` fields; substituting the reference's expansions by hand
+      takes `24-25_FAA_Holdover_Tables` from 158 pages to **219 against the reference's 223**, with the
+      alphanumeric distance at 0.80 %. It moves no gate verdict on its own, which is why it is here rather
+      than built. `probes/rtf-holdover-r87/results.md` §1.
 
 ## Layout engine
 
@@ -1987,6 +2041,70 @@ is read and verified, so what remains is the filling of pages rather than the me
 
 ## Known deviations, measured
 
+- **[DONE, one half] A `draw:frame` whose stated height is a *floor* is grown to its own text.**
+  ODF states Writer's three fly height kinds by which attribute carries the length:
+  `fo:min-height` on the `draw:text-box` sets `bMinHeight` and therefore `SizeType::MIN`, and
+  `svg:height` on the `draw:frame` sets `SizeType::FIX`
+  (`xmloff/source/text/XMLTextFrameContext.cxx`:997-1010 and :655-661). **Both write the same
+  variable and the box's attributes are read first** (:1113-1116), so a frame stating both keeps
+  `svg:height` as the floor and still grows — no corpus document does, but that is the rule rather
+  than the corpus's coincidence, and it is why `GrowsToContent` asks about the box rather than
+  about the absence of a height.
+
+  The arithmetic is `SwFlyFrame::Format` (`sw/source/core/layout/fly.cxx`:1549-1570) in its own
+  order: the content height, raised to the stated minimum less the insets, raised again to
+  `MINFLY` (23 twips, `sw/inc/swtypes.hxx`:59), and the insets added back — so **the stated
+  minimum is a floor for the whole frame, insets included**. Measured over eighteen one-attribute
+  probes against 26.2.4.2 (`probes/odt-frame-r75/`): the content measure is the **ink extent**
+  and not the advance, because a text frame's area carries its own upper space and its lower space
+  is only ever realised as the upper space of what follows it — so **every paragraph's
+  space-before counts, the first included, and the last paragraph's space-after does not**.
+
+  `.odt` **261 → 264 of 338** at `0e54dba0a`, 12 renderings moved, four verdicts gained and one
+  lost; the original words track is byte-identical on all 338. The lost row is
+  `047_Visual_Product_Roadmap_Template_Professional_Layout`, and it is not this rule's defect:
+  its frame holds a table whose first column is `loext:writing-mode="bt-lr"`, which we draw one
+  glyph per line, so the cell and therefore the frame come out far too tall. 13 of the 338
+  converted `.odt` state a vertical writing mode, 92 occurrences.
+
+  **The probes had to name a parent style before they measured anything.** A `draw:frame` whose
+  `draw:style-name` names an automatic graphic style with *no parent* is imported as a drawing
+  shape rather than a Writer fly (`XMLTextFrameContext.cxx`:1374-1394, *"#i51726#"*, and
+  :1500-1507), and a shape ignores `fo:min-height` outright — which reads exactly like the
+  reference ignoring the attribute. LibreOffice's own exporter always names `Frame`.
+
+- [ ] **The other half is fly splitting, and it is worth 13 rows.** A frame taller than the room
+      left on its page draws its tail off the sheet. Measured with `paperless extract` against the
+      render over the 50 documents holding a growing frame
+      (`probes/odt-frame-r75/overflow.tsv`): **13 of the 50 draw materially less than they hold**,
+      every one of them a currently failing row — `ESPN-R - MCF - RA - Ed1` draws 43028 of the
+      58948 it holds against the reference's 65952, `Case-Study-Heathrow-Airport` 2159 of 6445
+      against 6461.
+
+      What the reference does is *split* the fly, and the two behaviours are one attribute apart.
+      Measured on 60 paragraphs in a paragraph-anchored frame on A4: with
+      `loext:may-break-between-pages="true"` the fly is cut at the body's bottom, 52 lines on page
+      one and 8 on page two, and the body resumes below the second fragment; with it false the fly
+      stays whole, runs from y 14.36 to 828.56 on an 841.89 pt sheet — captured onto the *page*
+      rather than the body — and the whole body moves to page two. The seat is
+      `SwFlyFrame::IsFlySplitAllowed` (`fly.cxx`:689-737), the deadline is `GetFlyAnchorBottom`
+      (`fly.cxx`:114-162) read at `Format`:1576-1596, and the continuation is a `SwFlowFrame`
+      follow chain (`SwFrame::GetNextFlyLeaf`, `flycnt.cxx`:1576). `IsFlySplitAllowed` is
+      consulted from 46 places in `sw/source/core`.
+
+      **Two of the three pieces are local and the third is the reason this is architectural.**
+      Reading the flag and its refusals is local to `OdfFrames`/`PageFrame`; cutting the flow at a
+      deadline is the rule `FlowLayouter.Truncated` already implements. What is not local is
+      putting the continuation on the following pages: in this engine a page exists because a
+      *block* overflowed onto it — `Paginator.EmitPage` is reached only from the block loop — and
+      a fly's obstacles are keyed by the page its **anchor paragraph starts on**, built per block
+      index from `obstaclesByPage[placement.Index]` and consulted in that one page's coordinates.
+      A paragraph that spills onto page N+1 never sees page N+1's obstacles, and a fly fragment on
+      a page no body text has reached has nothing to obstruct. **The seat is
+      `FrameResolution.ObstaclesFor(int block)` and `Paginator._obstacles`**: the obstacle set has
+      to become per *page*, consulted for whichever page each line lands on. That is a change to
+      the line filler's contract, on the track whose gate is page counts.
+
 - Two of LibreOffice's numbers are reproduced by construction rather than derived, and both are recorded
   here so a future comparison does not mistake them for bugs:
   - Its PDF export adds **two twips** to every pen position horizontally and nothing vertically. With left
@@ -2041,6 +2159,195 @@ is read and verified, so what remains is the filling of pages rather than the me
   a cascade from line heights, not a frame-positioning bug. Worth attacking from the paragraph side
   (the document is CJK, so its empty paragraphs' line heights are the suspect) rather than from the
   anchor side.
+
+- **[DONE] WordArt text warp (`a:prstTxWarp`) is drawn as warped outlines.** A body whose
+  `wps:bodyPr` carries a `prstTxWarp` other than `textNoShape` becomes a Fontwork custom shape in
+  LibreOffice — `WpsContext::onEndElement` (`oox/source/shape/WpsContext.cxx:936-1025`) takes the text
+  out of the frame, `FontworkHelpers::putCustomShapeIntoTextPathMode` puts the shape into text-path
+  mode, and `EnhancedCustomShapeEngine::render2` then *replaces the whole shape* with what
+  `svx/source/customshapes/EnhancedCustomShapeFontWork.cxx` builds: filled curves carrying no glyph
+  and no `ToUnicode`. `DocxFontwork` reproduces all of it, through `Paperless.Ooxml.DrawingML.Fontwork`.
+
+  Measured on `WordArt_Shapes_Arrows_Catalog1.docx` (24 warped shapes, one per preset, pages 17-21
+  of 52), 100 dpi mean absolute grey difference against 26.2.4.2:
+
+  | pages | 17 | 18 | 19 | 20 | 21 | document, 52 pages |
+  |---|---:|---:|---:|---:|---:|---:|
+  | before | 7.31 | 19.83 | 18.41 | 16.93 | 15.66 | 3.748 |
+  | after | **0.47** | **0.55** | **0.50** | **0.48** | **0.39** | **2.292** |
+
+  Words 2492 → **2468**, which is the reference's own count exactly, and 52/52 pages throughout.
+  Against 24.2.7.2 the after column is 0.39 / 0.52 / 0.51 / 0.52 / 0.37. Full write-up, including
+  the `wp:effectExtent` finding below, in `dotnet/probes/words-fontwork/results.md`.
+
+  Four things about it are worth carrying forward:
+
+  - **Twenty of the twenty-four presets ignore the run's font size completely.** They are envelope
+    warps: the text's own ink box is normalised to the unit square and mapped between two rails, so
+    a 25 pt run fills a 72 pt shape. Only `textArchUp`, `textArchDown`, `textCircle` and `textButton`
+    keep the stated size, and then only by shrinking it until the line fits along the curve.
+  - **The reference converts only a plain rectangle**, `sType != "ooxml-rect"`
+    (`WpsContext.cxx:966-970`), and only a *top-level* shape: a group member is not yet an
+    `SdrObjCustomShape` when `onEndElement` runs, so its first guard fails and the member keeps its
+    text. Both organogram templates in `words/chartset-005` are that case and cost two words each
+    until group members were excluded.
+  - **A warp Paperless cannot draw still leaves no text**, because the reference has already emptied
+    the frame by then. That settles the disagreement the slides side had been carrying: both
+    families now draw the curves where they can and nothing where they cannot.
+  - **`wp:effectExtent` moves a warped shape and not an unwarped one's text**, which is the one
+    open thread. See the entry two below.
+
+- **Binary DOC/PPT Escher WordArt reaches 5 shapes across 4 documents, and is not worth writing.**
+  Censused by scanning every `.doc .dot .ppt .pot .pps .xls .xlt .rtf` for an `msofbtSp` record
+  whose instance is in the WordArt shape-type range 136-175: `135.doc` 1, `644730BRI…public0.doc`
+  2, `8.16_AOD_FINAL_Provider_Training_Presentation_9_2009.ppt` 1 (type 144), `pres_ioc_phuket.ppt`
+  1. DOCX VML holds 15 and DrawingML 29 on the words side, so this is the smallest of the three
+  paths — and all four documents sit at 8.25, 23.29, 3.75 and 4.58 mean ink for reasons that have
+  nothing to do with WordArt, so one shape each would be invisible even implemented.
+
+  **It also settles the two knobs this round was briefed to expect from the VML side.**
+  `oox/source/vml/vmlformatting.cxx:966-975` writes `ScaleX` and `SameLetterHeights` as literal
+  `false` for every `v:textpath`, so they are unreachable from OOXML VML by construction; and the
+  binary path, which does read them (`msdffimp.cxx:2516-2600`, bits 0x40 and 0x80 of
+  `DFF_Prop_gtextFStrikethrough`), finds them **clear on all five shapes**, none of which hard-sets
+  `DFF_Prop_gtextFStretch` either. There is no document in this corpus, in any format, that would
+  render differently if `SameLetterHeights` were implemented.
+
+- **CFF/OTTO faces reach nothing WordArt resolves to, so no Type 2 interpreter is written.**
+  Installed set: **45 TrueType `glyf`, 11 CFF, 8 Type 1**, and every CFF face is Loma or a Unifont
+  variant. Every family named in a part carrying a real warp — Arial, Perpetua Titling MT, Kristen
+  ITC, Times New Roman, Calibri, Arial Black, Corpid E1s SCd Regular, Papyrus, Informal Roman —
+  resolves to a `glyf` face. `GlyphOutlines` answering null for a CFF face therefore costs this
+  corpus nothing. Both censuses are reproducible with
+  `dotnet/probes/fontwork-reach/census.py`; the second depends on the installed font set and
+  should be re-run before it is relied on in another container.
+
+- **[DONE] All forty `ST_TextShapeType` warps are implemented.** The previous round left eight,
+  on a rule worth keeping — *a table transcribed for a preset no document states is a transcription
+  nothing checks* — and the corpus still states none of them. What changed is that a fixture now
+  checks them: `fontwork-presets-{default,adjusted}.docx`, one shape per value authored into the
+  WordArt catalogue's own container, with reference PDFs from both binaries. Nine-page mean
+  absolute grey difference **2.584 → 0.603**, no page above 0.93, extracted words 228/228 and
+  10/10 `WORDART` tokens throughout.
+
+  **Five of the eight needed nothing but their tables, which is not what the standing note said.**
+  A `*Pour` shape is two concentric arcs with the text fitted into the ring between them, drawn
+  with the same `0xA304`/`0xA504` the arch family already used; `mso-spt142` is `0xa604 0xa504`.
+  Only `mso-spt143` needed a path builder — `ANGLEELLIPSE`, `0xA2` with a count in thirds
+  (`svx/source/svdraw/svdoashp.cxx:124-133`), taking the `bIsFromBinaryImport` arm of
+  `EnhancedCustomShape2d.cxx:2178-2286` where the second angle is a swing rather than an end, and
+  which the reference special-cases by that very name at line 2255 because its angles are plain
+  degrees where every other binary user of the opcode states 1/65536ths.
+
+  The catalogue renders **byte-identically** to the build before it, 0.0000 maximum per-page
+  difference over all 52 pages, which is the check that the shared evaluator was not disturbed.
+  Write-up in `dotnet/probes/words-fontwork-presets/results.md`.
+
+- **[DONE] VML WordArt (`v:textpath` on a `#_x0000_t136`) is drawn as warped outlines too.**
+  A `v:shape` naming a WordArt shape type becomes a Fontwork custom shape with no conversion step:
+  `oox/source/vml/vmlshape.cxx:1329` hands the number straight to
+  `SdrObjCustomShape::MergeDefaultAttributes`, which resolves it through
+  `EnhancedCustomShapeTypeNames` into the same LibreOffice type names `FontworkPresets` is keyed by,
+  and `TextpathModel::pushToPropMap` (`oox/source/vml/vmlformatting.cxx:962-1057`) puts it into
+  text-path mode. `DocxVmlFontwork` reproduces it.
+
+  The corpus holds **15 of them across 5 documents**, every one a diagonal `EASA Example Documents`
+  or `DRAFT` watermark in a `word/headerN.xml`, and none inside an `mc:Fallback`. 100 dpi mean
+  absolute grey difference over the whole document, before → after:
+
+  | document | against 24.2.7.2 | against 26.2.4.2 |
+  |---|---|---|
+  | `ABCD-FE-01-00 Flight Envelope` | 11.698 → **11.341** | 15.210 → **14.855** |
+  | `ABCD-SDE-23-00 Avionic System Description` | 5.364 → **5.003** | 6.050 → **5.694** |
+  | `ABCD-WB-08-00 Weight and Balance` | 7.081 → **6.738** | 8.515 → **8.197** |
+  | `DOA_Template_Form_Type_Certification_Programme` | 11.322 → *11.602* | 10.960 → *11.239* |
+  | `technical-architecture` | 4.976 → **4.590** | 5.884 → **5.499** |
+
+  Words and pages are unchanged everywhere: the whole `words/*` track sweeps 311/338 before and
+  after with **not one row of `parity.tsv` different**. Full write-up in
+  `dotnet/probes/words-vml-fontwork/results.md`.
+
+  Three things about it worth carrying forward:
+
+  - **The declared height is thrown away and remeasured from the text**
+    (`vmlformatting.cxx:1041-1056`), unless `trim="t"`, which nothing states. `DOA_Template` states
+    `height:53pt` and the reference imports 57.5; `technical-architecture` states 247.45 pt for the
+    five letters of `DRAFT` and the reference imports 138. Reproducing the ratio from `hhea`'s
+    ascender less its descender over the design advances lands within **0.9%** on five probed
+    (family, string) pairs.
+  - **`gtextFSameHeights` and `gtextFStretch` are *not* reachable from OOXML VML**, contrary to what
+    this round was briefed to expect. `vmlformatting.cxx:966-975` writes `ScaleX` and
+    `SameLetterHeights` as literal `false` for every `v:textpath`, whatever the shape type. They are
+    reachable only from binary Escher, `msdffimp.cxx:2516-2600`.
+  - **`rotation` is read for a WordArt shape and for nothing else**, deliberately: the words track
+    states it on **347** VML shapes across **34** documents and turning all of them is its own round.
+    Fifteen of the 347 are these watermarks, all at `rotation:315`.
+
+- **[DONE] `RelOrientation::PAGE_PRINT_AREA` runs from the header frame's bottom to the footer
+  frame's top, not from `w:top` to `w:bottom`.** Closed in `dccc5be0a` with
+  `probes/words-margin-print-area/`; the area is `LaidOutPage.BodyArea`, which is the same quantity
+  `Paginator.PushedDownBy` and `PulledUpBy` already move. `SwAnchoredObjectPosition::GetVertAlignmentValues`
+  (`sw/source/core/objectpositioning/anchoredobjectposition.cxx`:336-364) is one seat and
+  `SwToContentAnchoredObjectPosition::CalcPosition` (`tocntntanchoredobjectposition.cxx`:597-616,
+  through `SwPageFrame::PrtWithoutHeaderAndFooter()`) is the other.
+
+  **Re-measured at `6a6f18d9a` in `probes/frame-area-r85/`**: 8 of 8 fixtures agree with *both*
+  installed references within the 0.25 pt raster quantum, and
+  `DOA_Template_Form_Type_Certification_Programme` scores **9.891** against 26.2.4.2 — 1.348 below
+  the 11.239 the watermark round regressed it to and **1.069 below the 10.960 it regressed it from**.
+  All five of that round's documents are now below both of its stored figures. The 6.6 pt and 34.7 pt
+  figures above are from a tree three fixes old and do not reproduce; neither does the 16.56 pt that
+  replaced them.
+
+- **[DONE] `wp:effectExtent`'s *left* edge moves an inline drawing and its right edge does not.**
+  Closed with `probes/words-inline-effectextent/` §*Horizontally* — `make-x-fixture.py` and
+  `measure-x.py`, which the earlier fixtures never exercised because they varied `t` and `b` only.
+  `PageFrame.InlineOffset` is `(EffectExtent.Left, 0)` for an upright drawing;
+  `SwAsCharAnchoredObjectPosition::CalcPosition`
+  (`sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx`:129-133) adjusts by
+  `nLRSpaceLeft` and by `nULSpaceUpper` alike, and only the vertical half is lost again when
+  `SwTextBoxHelper` fails to carry it to a `wps:txbx`'s TextBox fly — which is why
+  `PageFrame.InlineInkOffset` is a second rectangle rather than part of the first.
+
+  **Re-measured at `6a6f18d9a` in `probes/frame-area-r85/`**: 8 of 8 horizontal fixtures agree with
+  both references, and on `WordArt_Shapes_Arrows_Catalog1.docx` the drawn ink columns agree with
+  26.2.4.2 on **52 of 52 pages** at 200 dpi. The 229.68..359.64 quoted above does not reproduce.
+
+- **A `relativeFrom` naming a margin *band* is read now, and the wider capture rule it exposed is
+  left with its seat.** `topMargin`, `bottomMargin`, `leftMargin`, `rightMargin`, `insideMargin` and
+  `outsideMargin` had all been read as the page or the margin area. They are six different
+  rectangles — `PositionHandler::lcl_attribute`
+  (`sw/source/writerfilter/dmapper/GraphicHelpers.cxx`:57-135), and VML's own crossed-over mapping at
+  `oox/source/vml/vmlshape.cxx`:616-700 — and this tree agreed with 26.2.4.2 on **10 of 34** fixtures
+  before and on **34 of 34** after. `probes/frame-area-r85/`.
+
+  **What is left is the capture, not the origins.** The reference clamps *every* non-wrap-through
+  content-anchored frame into its page — `IsDraggingOffPageAllowed`
+  (`sw/source/core/layout/anchoredobject.cxx`:790-801) is `bDisablePositioning && bIsWrapThrough`, a
+  conjunction this tree read as the flag alone — and under `compatibilityMode` 15 into the page's
+  *body* (`anchoredobjectposition.cxx`:562-573). Applied that widely it moves 10 of the 338 words
+  renderings and is net worse: `b053-19` goes 11.254 to 19.508 of page ink against 26.2.4.2 and
+  `023_Unit_Circle_Chart_Circular_Percentage` 10.820 to 16.524, while the three documents it exists
+  for improve. **The likely missing half is `bCheckBottom = !DoesObjFollowsTextFlow()`**
+  (`tocntntanchoredobjectposition.cxx`:457), which skips the *bottom* correction for a frame that
+  follows the text flow — and `PROP_FOLLOW_TEXT_FLOW` is written only for an anchor inside a table
+  (`GraphicImport.cxx`:1316-1318, :1859-1861), so the pool default decides it everywhere else. Until
+  that is established the capture is applied to the two margin bands alone, which regresses nothing
+  because no frame reached those origins before.
+
+- **`wp14:sizeRelH` and `wp14:sizeRelV` are unread, and the reach is three documents.** 1873
+  `sizeRel*` elements in 146 of the 272 corpus DOCX, of which exactly **three carry a non-zero
+  percentage**: a width on `ABCD-FE-01-00 Flight Envelope` and a height on `HC-Bulletin-template` and
+  `fleetfastfacts16nov2023`. `GraphicImport.cxx`:1455-1480 is the seat, and it maps a *relative
+  size*'s `topMargin` to `PAGE_PRINT_AREA_BOTTOM` rather than to `_TOP` — read that before
+  implementing it rather than after.
+
+- **`w14:textFill`, `w14:textOutline` and `w14:shadow` on a run are correctly ignored, and that is a
+  measurement rather than an omission.** The same catalogue states 104 `w14:textFill` (102 of them
+  gradients), 348 `w14:textOutline` and 96 `w14:shadow` on ordinary unwarped runs. LibreOffice's DOCX
+  import draws none of them: its pages 3-6 hold seven gradient-text shapes each and score **0.00**
+  unaccounted ink against ours, which draws the run's plain `w:color`. A round tempted to wire these up
+  by reading the markup would move 63 shapes away from the reference, not towards it.
 
 - [ ] A rasteriser and a PDF writer. `Paperless.Rendering`'s two backends are still stubs; the display
       list they consume is now real, which is the half that had to come first.

@@ -31,20 +31,37 @@ namespace Paperless.WordProcessing.OpenDocument;
 internal static class OdfFrames
 {
     /// <summary>
-    /// Reads a frame, or returns null when the element is not one that can be placed.
+    /// Every frame one anchored element places, which is more than one when it is a group.
     /// </summary>
-    /// <param name="element">The <c>draw:frame</c>.</param>
-    /// <param name="styles">The document's styles, for the graphic style the frame names.</param>
+    /// <remarks>
+    /// <para>
+    /// <c>draw:g</c> states no geometry of its own — no <c>svg:width</c>, no <c>svg:height</c> — so
+    /// the public <c>Read</c> answers null for one and the whole group vanishes. ODF gives a group no
+    /// coordinate system either: there is no <c>svg:viewBox</c> and no transform on the element, so
+    /// every child already carries its position in the same space the group is anchored in
+    /// (<c>xmloff/source/draw/ximpgrp.cxx</c> creates an <c>SdrObjGroup</c> and reads the children
+    /// straight into the page's coordinates). Flattening the group to its shapes is therefore the whole
+    /// of it, and the shapes need no adjustment.
+    /// </para>
+    /// <para>
+    /// What a child does <em>not</em> restate is where the group sits relative to the text —
+    /// <c>style:wrap</c> and the two <c>-pos</c>/<c>-rel</c> pairs are on the group's own graphic style
+    /// and its children's styles carry only fill and stroke. Those five values travel down; fill,
+    /// stroke and the margins do not, because ODF does not cascade a group's graphic style onto its
+    /// children.
+    /// </para>
+    /// </remarks>
+    /// <param name="element">The anchored <c>draw:</c> element.</param>
+    /// <param name="styles">The document's styles.</param>
     /// <param name="content">
-    /// How to read a text frame's own paragraphs, or null to record the frame without its content — which
-    /// is what an image needs and all the wrap ever depends on.
+    /// How to read a shape's own paragraphs, or null to record the frames without their content —
+    /// which is what an image needs and all the wrap ever depends on.
     /// </param>
-    /// <param name="anchorOffset">Where in the paragraph's text the frame is anchored.</param>
+    /// <param name="anchorOffset">Where in the paragraph's text the element is anchored.</param>
     /// <param name="pictures">
-    /// How to reach the bytes behind a <c>draw:image</c>, or null to record the frame's geometry without
-    /// them — which is all the wrap ever needed and what a caller measuring a document should pay for.
+    /// How to reach the bytes behind a <c>draw:image</c>, or null to record the geometry without them.
     /// </param>
-    public static PageFrame? Read(
+    public static List<PageFrame> ReadAll(
         XElement element,
         OdfStyles styles,
         Func<XElement, IReadOnlyList<PageBlock>>? content,
@@ -54,14 +71,161 @@ internal static class OdfFrames
         ArgumentNullException.ThrowIfNull(element);
         ArgumentNullException.ThrowIfNull(styles);
 
-        Length? width = Measure(element, "width");
-        Length? height = Measure(element, "height");
-        if (width is not { } frameWidth || height is not { } frameHeight) return null;
+        List<PageFrame> frames = [];
+        Collect(element, null, null, 0);
+        return frames;
 
-        OdfGraphicStyle style = GraphicStyle(
-            styles, element.Attribute(XName.Get("style-name", OdfNamespaces.Draw))?.Value);
+        void Collect(XElement node, OdfGraphicStyle? outer, string? anchor, int depth)
+        {
+            if (frames.Count >= MaxGroupMembers) return;
+
+            if (IsGroup(node))
+            {
+                if (depth >= MaxGroupNesting) return;
+
+                OdfGraphicStyle group = Placed(GraphicStyle(styles, StyleName(node)), outer);
+                string? groupAnchor = AnchorType(node) ?? anchor;
+                foreach (XElement child in node.Elements())
+                {
+                    if (child.Name.NamespaceName == OdfNamespaces.Draw)
+                        Collect(child, group, groupAnchor, depth + 1);
+                }
+
+                return;
+            }
+
+            if (Read(node, styles, content, anchorOffset, pictures, outer, anchor) is { } frame)
+            {
+                frames.Add(frame);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Where a fly holding nothing but a table puts that table, or null when the element is not one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <em>floating table</em> is one object with two spellings. Word states it on the table itself as
+    /// <c>w:tblpPr</c> and LibreOffice's DOCX importer turns that into a fly holding a table
+    /// (<c>TablePositionHandler::getTablePosition</c>), always splittable —
+    /// <c>sw/source/writerfilter/dmapper/DomainMapperTableHandler.cxx</c>:1765, <em>"A text frame created
+    /// for floating tables is always allowed to split"</em>. ODF states the same object the other way up:
+    /// a <c>draw:frame</c> whose <c>draw:text-box</c> holds one table and whose element carries
+    /// <c>loext:may-break-between-pages="true"</c>
+    /// (<c>xmloff/source/text/XMLTextFrameContext.cxx</c>:1104-1107 reads both that spelling and the
+    /// <c>draw:</c> one into <c>IsSplitAllowed</c>; <c>xmloff/source/text/txtparae.cxx</c>:3115-3119
+    /// writes it, in the extension namespace and only when true).
+    /// </para>
+    /// <para>
+    /// They are the same object and this engine already models it — as a <em>positioned block table</em>
+    /// rather than as a frame, because that is the model that splits: <c>Paginator.PlaceFloatedTable</c>
+    /// carries the rows a page cannot take and <c>ContinueFloatedTables</c> puts them at the top of the
+    /// next one, starting a page of its own when the flow has none left. Read as an ordinary frame
+    /// instead, the same table is measured whole and its tail is drawn off the bottom of the sheet.
+    /// </para>
+    /// <para>
+    /// The refusals are <c>SwFlyFrame::IsFlySplitAllowed</c>'s
+    /// (<c>sw/source/core/layout/fly.cxx</c>:689-737): the anchor must be at-content —
+    /// <c>text:anchor-type</c> <c>paragraph</c> or <c>char</c>, since <c>IsFlyAtContentFrame</c> is what
+    /// the first test asks — and a fly in a header, a footer, a footnote or a multi-column section is
+    /// refused whatever it states. The last three are the caller's to enforce, because only the caller
+    /// knows which flow it is walking; the anchor and the attribute are here.
+    /// </para>
+    /// <para>
+    /// <b>All 51 such frames in the converted corpus hold a table and nothing else</b> — not one holds a
+    /// paragraph — so the "or a paragraph flow" arm this could grow has no witness and is deliberately
+    /// absent rather than written blind.
+    /// </para>
+    /// </remarks>
+    /// <param name="element">The candidate <c>draw:frame</c>.</param>
+    /// <param name="styles">The document's styles, for the frame's own graphic style.</param>
+    public static FloatingTableFrame? FloatingTable(XElement element, OdfStyles styles)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        ArgumentNullException.ThrowIfNull(styles);
+
+        if (element.Name != XName.Get("frame", OdfNamespaces.Draw)) return null;
+        if (AnchorType(element) is not ("paragraph" or "char")) return null;
+        if (!MayBreakBetweenPages(element)) return null;
+        if (Measure(element, "width") is not { } width) return null;
 
         XElement? box = element.Element(XName.Get("text-box", OdfNamespaces.Draw));
+        if (box is null) return null;
+
+        XElement? table = null;
+        foreach (XElement child in box.Elements())
+        {
+            if (child.Name.LocalName != "table" || !OdfNamespaces.IsTable(child.Name.NamespaceName))
+                return null;
+            if (table is not null) return null;
+
+            table = child;
+        }
+
+        if (table is null) return null;
+
+        OdfGraphicStyle style = GraphicStyle(styles, StyleName(element));
+
+        return new FloatingTableFrame(
+            table,
+            width,
+            HorizontalAlignmentOf(style.HorizontalPosition),
+            Measure(element, "x") ?? Length.Zero,
+            style.HorizontalRelative is "page",
+            VerticalOriginOf(style.VerticalRelative),
+            Measure(element, "y") ?? Length.Zero,
+            style.Spacing.Bottom);
+    }
+
+    /// <summary>
+    /// Whether the frame says its fly may be broken across pages.
+    /// </summary>
+    /// <remarks>
+    /// Both spellings, because the importer reads both — the extension one is what LibreOffice's own
+    /// exporter writes and the <c>draw:</c> one is what a producer following a later specification would.
+    /// </remarks>
+    private static bool MayBreakBetweenPages(XElement element)
+        => element.Attribute(XName.Get("may-break-between-pages", OdfNamespaces.LoExt))?.Value == "true"
+           || element.Attribute(XName.Get("may-break-between-pages", OdfNamespaces.Draw))?.Value == "true";
+
+    /// <summary>A group nested deeper than this is not read; real documents nest two or three.</summary>
+    private const int MaxGroupNesting = 16;
+
+    /// <summary>A guard on untrusted input: one anchor cannot place more frames than this.</summary>
+    private const int MaxGroupMembers = 4096;
+
+    private static bool IsGroup(XElement element)
+        => element.Name == XName.Get("g", OdfNamespaces.Draw);
+
+    private static string? StyleName(XElement element)
+        => element.Attribute(XName.Get("style-name", OdfNamespaces.Draw))?.Value;
+
+    private static string? AnchorType(XElement element)
+        => element.Attribute(XName.Get("anchor-type", OdfNamespaces.Text))?.Value;
+
+    private static PageFrame? Read(
+        XElement element,
+        OdfStyles styles,
+        Func<XElement, IReadOnlyList<PageBlock>>? content,
+        int anchorOffset,
+        OdfPictures? pictures,
+        OdfGraphicStyle? outer,
+        string? inheritedAnchor)
+    {
+        Length? width = Measure(element, "width");
+        if (width is not { } frameWidth) return null;
+
+        OdfGraphicStyle style = Placed(GraphicStyle(styles, StyleName(element)), outer);
+
+        XElement? textBox = element.Element(XName.Get("text-box", OdfNamespaces.Draw));
+        XElement? box = textBox ?? ShapeTextBody(element);
+
+        // svg:height is optional and a frame written without one grows to its text. Read after the
+        // box, because the box is what says how tall an unstated height starts out.
+        Length? stated = Measure(element, "height");
+        if ((stated ?? AutoHeight(box)) is not { } frameHeight) return null;
+
         XElement? image = element.Element(XName.Get("image", OdfNamespaces.Draw));
         FramePicture picture =
             image is not null && pictures is not null ? pictures.Read(element) : FramePicture.None;
@@ -74,20 +238,21 @@ internal static class OdfFrames
         return new PageFrame
         {
             Size = new DocSize(frameWidth, frameHeight),
-            Anchor = AnchorOf(element.Attribute(XName.Get("anchor-type", OdfNamespaces.Text))?.Value),
+            Anchor = AnchorOf(AnchorType(element) ?? inheritedAnchor),
             AnchorOffset = anchorOffset,
             Wrap = WrapOf(style.Wrap),
             HorizontalOrigin = HorizontalOriginOf(style.HorizontalRelative),
             HorizontalAlignment = HorizontalAlignmentOf(style.HorizontalPosition),
-            HorizontalOffset = Measure(element, "x") ?? Length.Zero,
+            HorizontalOffset = Measure(element, "x") ?? Translation(element).X,
             VerticalOrigin = VerticalOriginOf(style.VerticalRelative),
             VerticalAlignment = VerticalAlignmentOf(style.VerticalPosition),
-            VerticalOffset = Measure(element, "y") ?? Length.Zero,
+            VerticalOffset = Measure(element, "y") ?? Translation(element).Y,
             Spacing = style.Spacing,
             Padding = style.Padding,
             Fill = style.Fill,
             BorderColour = style.BorderColour,
             BorderWidth = style.BorderWidth,
+            GrowsToContent = GrowsToContent(textBox, stated),
             IsImage = image is not null && chart is null,
             Image = picture.Raster,
             Vector = picture.Vector,
@@ -96,6 +261,195 @@ internal static class OdfFrames
             Blocks = box is not null && content is not null ? content(box) : [],
         };
     }
+
+    /// <summary>
+    /// The height a frame starts at when it states none, or null when it cannot grow to one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>svg:height</c> is optional on <c>draw:frame</c> (ODF 1.3 §10.4.2 makes both lengths
+    /// optional) and Writer leaves it off a frame whose height is its content's — the shape a text
+    /// box or a framed table has after "autofit height". What it writes instead is the floor, on the
+    /// box: <c>&lt;draw:text-box fo:min-height="0in"&gt;</c>. The frame is <c>SwFrameSize::Minimum</c>
+    /// vertically and grows from there.
+    /// </para>
+    /// <para>
+    /// <strong>Requiring both lengths therefore dropped the frame and everything inside it</strong>,
+    /// which for these documents is not a decoration: 49 of the 338 converted <c>.odt</c> hold 58 such
+    /// frames between them carrying <strong>50 942 alphanumeric characters</strong>, and in ten of
+    /// them the frame is the page — <c>020_Project_Timeline_Template_Modern_Theme</c> rendered 0
+    /// characters against the reference's 316, and <c>ESPN-R - MCF - RA - Ed1</c> keeps 21 623 in a
+    /// single one. Nothing reported it: an anchored element that cannot be measured is skipped, and a
+    /// page with no frame on it looks like a page whose author put no frame on it.
+    /// </para>
+    /// <para>
+    /// Null rather than zero when there is no text box at all, so a picture or a shape written without
+    /// a height keeps being skipped: those have nothing to grow from, and a zero-tall image is not an
+    /// improvement on an absent one.
+    /// </para>
+    /// </remarks>
+    private static Length? AutoHeight(XElement? box)
+    {
+        if (box is null) return null;
+
+        return OdfWriterUnits.ToCore(
+                   OdfValue.ParseLength(box.Attribute(XName.Get("min-height", OdfNamespaces.FoCompatible))?.Value))
+               ?? Core.Units.Length.Zero;
+    }
+
+    /// <summary>
+    /// Whether the frame's height is a <em>floor</em> that its own text grows past, rather than the
+    /// height it keeps.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer keeps three height kinds on a fly — <c>SwFrameSize::Fixed</c>, <c>Minimum</c> and
+    /// <c>Variable</c> — and only the first keeps the stated number. ODF states the choice by which
+    /// attribute carries the length: <c>fo:min-height</c> on the <c>draw:text-box</c> sets
+    /// <c>bMinHeight</c> and therefore <c>SizeType::MIN</c>, and <c>svg:height</c> on the
+    /// <c>draw:frame</c> sets <c>SizeType::FIX</c>
+    /// (<c>xmloff/source/text/XMLTextFrameContext.cxx</c>:997-1010 and :655-661). Both write the
+    /// <em>same</em> variable, the box's attributes first and the frame's second (:1113-1116), so a
+    /// frame stating both keeps <c>svg:height</c> as the floor and still grows — which no document in
+    /// the converted corpus does, but which is the rule rather than a simplification.
+    /// </para>
+    /// <para>
+    /// A frame that states neither is neither: the <c>SizeType</c> is left at the text frame's own
+    /// default, which is <c>Variable</c> — grow to the content with no floor at all. That is the same
+    /// behaviour as a floor of nought, which is what <see cref="AutoHeight"/> already answers, so the
+    /// two cases need not be told apart here.
+    /// </para>
+    /// <para>
+    /// Only a <c>draw:text-box</c> counts. A <c>draw:custom-shape</c> or a <c>draw:rect</c> holding
+    /// paragraphs is an <c>SdrTextObj</c> rather than a fly, and how a drawing shape fits itself to its
+    /// text is a different rule with a different seat — see the remarks on
+    /// <see cref="ShapeTextBody"/>.
+    /// </para>
+    /// </remarks>
+    private static bool GrowsToContent(XElement? textBox, Length? statedHeight)
+        => textBox is not null
+           && (statedHeight is null
+               || textBox.Attribute(XName.Get("min-height", OdfNamespaces.FoCompatible)) is not null);
+
+    /// <summary>
+    /// Where <c>draw:transform</c> puts a shape that states no <c>svg:x</c> or <c>svg:y</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A turned shape is written with a transform instead of a coordinate pair —
+    /// <c>rotate (-1.5707963267949) translate (0.1253in 5.2586in)</c> — and its <c>svg:width</c> and
+    /// <c>svg:height</c> stay on the element. Only the translation is read here: it is where the shape
+    /// ends up, and taking it is the difference between a turned label sitting where the file put it
+    /// and every turned label in the document piling up on the anchor. The rotation is deliberately
+    /// not applied to the text; drawing it upright at the right place is the smaller error of the two,
+    /// and the one a reader can still read.
+    /// </para>
+    /// <para>
+    /// Reach on the converted corpus: <strong>581 alphanumeric characters across 11 of the 338
+    /// <c>.odt</c></strong> sit in a shape placed this way, against 27 856 in 102 documents placed by
+    /// <c>svg:x</c>. Small, and it is the case where two shapes otherwise land on the same point —
+    /// which costs more than its share, because a page's extractable text counts overlapping copies
+    /// once.
+    /// </para>
+    /// </remarks>
+    private static (Length X, Length Y) Translation(XElement element)
+    {
+        string? transform = element.Attribute(XName.Get("transform", OdfNamespaces.Draw))?.Value;
+        if (string.IsNullOrWhiteSpace(transform)) return (Length.Zero, Length.Zero);
+
+        int at = transform.IndexOf("translate", StringComparison.Ordinal);
+        if (at < 0) return (Length.Zero, Length.Zero);
+
+        int open = transform.IndexOf('(', at);
+        int close = open < 0 ? -1 : transform.IndexOf(')', open);
+        if (close < 0) return (Length.Zero, Length.Zero);
+
+        string[] parts = transform[(open + 1)..close]
+            .Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2) return (Length.Zero, Length.Zero);
+
+        return (OdfWriterUnits.ToCore(OdfValue.ParseLength(parts[0])) ?? Length.Zero,
+                OdfWriterUnits.ToCore(OdfValue.ParseLength(parts[1])) ?? Length.Zero);
+    }
+
+    /// <summary>
+    /// The element whose children are a shape's text, which for a shape is the shape itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>draw:frame</c> holds its text in a <c>draw:text-box</c> child; a <c>draw:custom-shape</c>
+    /// or a <c>draw:rect</c> holds it in <c>text:p</c> children of its own, with no box in between
+    /// (ODF 1.3 §10.6.2 — the shape elements take <c>&lt;text:p&gt;*</c> directly, and
+    /// <c>SdrTextObj</c> is what the importer hangs it on). Looking only for the box therefore finds
+    /// nothing on every shape in the document and the text is silently absent: the frame is still
+    /// placed, still filled and still stroked, so nothing about the page says a paragraph is missing.
+    /// </para>
+    /// <para>
+    /// Measured on the converted corpus: <strong>2839 <c>draw:custom-shape</c> across 129 of the 338
+    /// <c>.odt</c> carry 42 773 alphanumeric characters between them</strong>, and 9 <c>draw:rect</c>
+    /// carry 45 more. No other <c>draw:</c> element carries one character — lines, connectors and
+    /// controls are all empty — which is why this looks for the paragraphs rather than for a list of
+    /// element names.
+    /// </para>
+    /// </remarks>
+    private static XElement? ShapeTextBody(XElement element)
+    {
+        if (element.Name == XName.Get("frame", OdfNamespaces.Draw)) return null;
+
+        foreach (XElement child in element.Elements())
+        {
+            if (child.Name.NamespaceName == OdfNamespaces.Text
+                && child.Name.LocalName is "p" or "h" or "list")
+            {
+                return element;
+            }
+
+            // A shape whose whole content is a table has no paragraph of its own, and a roadmap
+            // diagram's boxes are written exactly that way — see OdfNamespaces.IsTable for why the
+            // element is usually spelled `loext:table` in this position.
+            if (OdfNamespaces.IsTable(child.Name.NamespaceName) && child.Name.LocalName == "table")
+            {
+                return element;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// A shape's own style with the enclosing group's placement laid <em>over</em> it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only the five values that decide where the thing sits relative to the text travel down a group:
+    /// the wrap and the two position/relation pairs. Fill, stroke and the margins do not — ODF does not
+    /// cascade a group's graphic style onto its children, and a child that states no fill is unfilled
+    /// rather than filled like its group.
+    /// </para>
+    /// <para>
+    /// <strong>The group wins, rather than filling a gap the child left</strong>, and the difference is
+    /// not academic. A group's child is not independently anchored: the group is the one object in the
+    /// text, and the child is a drawing object inside it whose <c>svg:x</c> and <c>svg:y</c> are
+    /// coordinates in the group's space. Its graphic style is nonetheless derived from the named
+    /// <c>Frame</c> style, which states <c>style:horizontal-pos="center"</c> and
+    /// <c>style:vertical-pos="top"</c> — so a rule that only fills gaps reads that inherited default,
+    /// discards both coordinates, and stacks every shape of every group at the top centre of the page.
+    /// Measured on <c>003_Free_Genogram_Diagram_Template</c>: fourteen text boxes at fourteen distinct
+    /// positions all drawn at 386.35, 501 on an A4 landscape page, which is exactly
+    /// <c>margin + (content width − frame width) / 2</c> and the top margin.
+    /// </para>
+    /// </remarks>
+    private static OdfGraphicStyle Placed(OdfGraphicStyle style, OdfGraphicStyle? outer)
+        => outer is null
+            ? style
+            : style with
+            {
+                Wrap = outer.Wrap ?? style.Wrap,
+                HorizontalPosition = outer.HorizontalPosition ?? style.HorizontalPosition,
+                HorizontalRelative = outer.HorizontalRelative ?? style.HorizontalRelative,
+                VerticalPosition = outer.VerticalPosition ?? style.VerticalPosition,
+                VerticalRelative = outer.VerticalRelative ?? style.VerticalRelative,
+            };
 
     /// <summary>True for an element that carries a floating frame.</summary>
     public static bool IsFrame(XElement element)
@@ -361,3 +715,38 @@ internal static class OdfFrames
         }
     }
 }
+
+/// <summary>
+/// A <c>draw:frame</c> that is a floating table: the table it holds, and where its fly puts it.
+/// </summary>
+/// <remarks>
+/// The fields are exactly what <see cref="PageTable"/> needs to be a positioned table, which is this
+/// engine's model of the same object — see <see cref="OdfFrames.FloatingTable"/> for why the two
+/// spellings are one thing and for the refusals the caller still has to apply.
+/// </remarks>
+/// <param name="Table">The <c>table:table</c> — or <c>loext:table</c> — element inside the fly.</param>
+/// <param name="Width">The fly's <c>svg:width</c>, which is the room the table has across.</param>
+/// <param name="Horizontal">
+/// How the fly is aligned across whatever it is relative to. <see cref="FrameHorizontalAlignment.Offset"/>
+/// is ODF's <c>from-left</c>, the one value that uses <see cref="HorizontalOffset"/> at all.
+/// </param>
+/// <param name="HorizontalOffset">The fly's <c>svg:x</c>, meaningful only under <c>from-left</c>.</param>
+/// <param name="HorizontalFromSheet">
+/// True when <c>style:horizontal-rel="page"</c>, so the offset is measured from the sheet's own left edge
+/// rather than from the text area's — the same distinction OOXML draws with <c>w:horzAnchor="page"</c>.
+/// </param>
+/// <param name="VerticalOrigin">What <see cref="VerticalOffset"/> is measured down from.</param>
+/// <param name="VerticalOffset">The fly's <c>svg:y</c>.</param>
+/// <param name="LowerSpacing">
+/// The fly's <c>fo:margin-bottom</c>: the room it keeps clear below itself, which belongs to the frame
+/// rather than to the table and is OOXML's <c>w:bottomFromText</c>.
+/// </param>
+internal readonly record struct FloatingTableFrame(
+    XElement Table,
+    Length Width,
+    FrameHorizontalAlignment Horizontal,
+    Length HorizontalOffset,
+    bool HorizontalFromSheet,
+    FrameVerticalOrigin VerticalOrigin,
+    Length VerticalOffset,
+    Length LowerSpacing);

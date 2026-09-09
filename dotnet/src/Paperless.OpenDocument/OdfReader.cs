@@ -47,7 +47,11 @@ public abstract class OdfReader
         OdfFile file = OdfFile.Open(source.Stream, leaveOpen: true);
         try
         {
-            List<Diagnostic> diagnostics = [.. file.Diagnostics];
+            // The file's own list rather than a copy of it: a reader can still find something
+            // worth reporting after this method has returned -- an embedded font part is opened
+            // when a run first asks for its family, during layout -- and a snapshot taken here
+            // could never carry it. See `OdfFile.Report`.
+            List<Diagnostic> diagnostics = file.DiagnosticList;
             ContentDocument content = new() { Metadata = OdfMetadata.Read(file.Meta, Family) };
 
             XElement? body = file.Body;

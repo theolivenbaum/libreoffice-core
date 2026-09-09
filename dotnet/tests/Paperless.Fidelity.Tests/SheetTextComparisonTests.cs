@@ -47,6 +47,32 @@ namespace Paperless.Fidelity.Tests;
 /// positional and glyph-count assertions cover the two formats that agree about the geometry.
 /// </para>
 /// </remarks>
+// [2026-09-06, closed] EveryCellIsDrawnWhereLibreOfficeDrawsIt used to fail on
+// `sheet-cell-text.xlsx`, run 12 on page 1, on the across-pen — and it is an *indent*, not an
+// advance. The run is the cell reading "Ind", whose ink is 13.898 pt wide in both references; only
+// where it starts differed. Its column begins at 244.885 pt in all three renderings, so the indent
+// was 16.498 pt under 24.2.7.2, 16.781 under 26.2.4.2, and 16.4977 in ours.
+//
+// The seat is `sc/source/filter/oox/stylesbuffer.cxx`:1262, which converts OOXML's indent as
+// `3 * indent` in `Unit::Space`, and `sc/source/filter/oox/unitconverter.cxx`:139-142, where one
+// Space is `xFont->getCharWidth(' ')` — `OutputDevice::GetTextWidth` cast to `sal_Int16`
+// (`toolkit/source/awt/vclxfont.cxx`:77), so it reaches the multiplication as a **whole number of
+// twips**. This document's default font is Arial 10, resolved to Liberation Sans, whose design
+// space is 0.27783 em = 55.566 twips. The only question was which way the fraction goes, and we
+// truncated to 55 where 26.2.4.2 rounds to 56.
+//
+// It rounds, measured rather than fitted: over the six default font sizes at which Liberation Sans'
+// 5.5566 twips per point separate `floor` from `round` — 10, 12, 14, 16, 28 and 30 pt, one workbook
+// each, an indented cell against an unindented one in the same column — **26.2.4.2 rounds at six of
+// six and 24.2.7.2 at four of six**, and truncating is wrong at all six against the target. The
+// earlier truncation had been calibrated on the two sizes where 24.2.7.2 happens to agree with it.
+// `SheetIndentUnitTests` asserts the rule and `probes/advance-ppem/indent-twip-rounding.py`
+// re-measures it.
+//
+// This was previously filed under `CLAUDE.md`'s rule 3 as the reference measuring the same glyph
+// differently; it is not that, and rule 3 itself is withdrawn. Every other pen in this document —
+// 17 of the 24 runs — was always identical across all three to a thousandth of a point, which was
+// the standing evidence that the text advances were never the problem here.
 public sealed class SheetTextComparisonTests : IDisposable
 {
     /// <summary>A tenth of a point, two twips, as everywhere else in this project.</summary>
@@ -74,7 +100,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void EveryCellIsDrawnWhereLibreOfficeDrawsIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -108,7 +134,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void EveryCellShowsTheCharactersLibreOfficeShows(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -132,7 +158,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xls")]
     public void EveryFormatDrawsTheSameRunsInTheSameFaces(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -160,7 +186,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xls")]
     public void ANarrowNumericColumnShortensItsNumberOrHashesIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfWord> words = PdfWords.Read(Ours(path));
@@ -184,7 +210,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void ALongStringOverflowsIntoEmptyCellsAndIsCutOffByOccupiedOnes(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));

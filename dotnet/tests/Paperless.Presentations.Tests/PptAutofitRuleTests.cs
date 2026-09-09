@@ -82,6 +82,18 @@ public class PptAutofitRuleTests
     /// <summary>
     /// A box whose lines never wrap grows sideways instead, so it does not shrink either.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An approximation the corpus cannot witness, measured rather than assumed.</strong>
+    /// The reference derives <c>bAutoGrowWidth</c> from the wrap only for a shape whose text kind
+    /// was rewritten to Rectangle (<c>svdfppt.cxx</c>:1053-1055), which happens on exactly one
+    /// condition — no <c>OEPlaceholderAtom</c>, or one whose id is NONE (<c>:1043-1047</c>) — and
+    /// sets it false for everything else (<c>:1084</c>). Of the 51 corpus <c>.ppt</c>'s 1401
+    /// Body-kind shapes, <strong>55 state <c>wrapNone</c> and all 55 carry no placeholder atom</strong>,
+    /// so the two rules never disagree; over every page of the two decks that hold them the drawn
+    /// text sizes match 26.2.4.2 exactly. <c>probes/ppt-fit-r85/placeholder-census.py</c>.
+    /// </para>
+    /// </remarks>
     [Fact]
     public void ANonWrappingBoxDoesNotShrink()
     {

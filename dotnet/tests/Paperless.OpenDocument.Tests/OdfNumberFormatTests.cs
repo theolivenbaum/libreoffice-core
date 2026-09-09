@@ -116,6 +116,45 @@ public class OdfNumberFormatTests
         NumberFormatter.Format(OdfNumberFormat.Parse(style)!, 45000).ShouldBe("15/03/2023");
     }
 
+    /// <summary>
+    /// <c>number:day-of-week</c> compiles to <c>NN</c> or <c>NNN</c>, and never to <c>NNNN</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three <c>N</c> keys are short name, long name and long name with the locale's
+    /// day-of-week separator, in that order (<c>svl/source/numbers/zformat.cxx</c>:3983-4004) —
+    /// so the long element is <c>NNN</c> and not the <c>NNNN</c> its name suggests.
+    /// <c>SvXMLNumFormatContext::AddNfKeyword</c> makes the point outright: it rewrites an
+    /// incoming <c>NNNN</c> to <c>NNN</c> and only restores the separator when the following
+    /// <c>&lt;number:text&gt;</c> holds exactly it
+    /// (<c>xmloff/source/style/xmlnumfi.cxx</c>:2037-2041 and :955-970).
+    /// </para>
+    /// <para>
+    /// Measured with a hand-built flat ODS through both installed binaries
+    /// (<c>dotnet/probes/numfmt-r68/dow.fods</c>): a short day-of-week draws <c>Sun</c> and a
+    /// long one draws <c>Sunday</c>, with no trailing comma. This compiled to <c>NNN</c> and
+    /// <c>NNNN</c> until round 68, which was invisible only because the <c>N</c> keys were not
+    /// implemented at all and both spellings came out as literal letters.
+    /// </para>
+    /// <para>
+    /// The corpus holds no ODF, so this is unmeasurable there; the path that reaches it is a
+    /// chart axis, where there is no cached display string to fall back on.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ADayOfWeekIsShortAtNnAndLongAtNnn()
+    {
+        XElement shortDay = Style("""<number:day-of-week/>""", "date-style");
+        XElement longDay = Style("""<number:day-of-week number:style="long"/>""", "date-style");
+
+        OdfNumberFormat.Code(shortDay).ShouldBe("NN");
+        OdfNumberFormat.Code(longDay).ShouldBe("NNN");
+
+        // 44794 is Sunday 21 August 2022.
+        NumberFormatter.Format(OdfNumberFormat.Parse(shortDay)!, 44794).ShouldBe("Sun");
+        NumberFormatter.Format(OdfNumberFormat.Parse(longDay)!, 44794).ShouldBe("Sunday");
+    }
+
     /// <summary>A time style's minutes stay minutes because they follow the hours.</summary>
     [Fact]
     public void MinutesAfterHoursAreMinutesAndNotMonths()

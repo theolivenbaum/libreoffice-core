@@ -57,18 +57,50 @@ public sealed class SystemFontIndex
     /// The user's own fonts come first, because a font a user installed for themselves is the one
     /// they expect a document to render in.
     /// </remarks>
-    public static IReadOnlyList<string> DefaultDirectories { get; } =
-    [
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "fonts"),
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".fonts"),
-        "/usr/local/share/fonts",
-        "/usr/share/fonts",
-        "/Library/Fonts",
-        "/System/Library/Fonts",
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts"),
-    ];
+    public static IReadOnlyList<string> DefaultDirectories { get; } = Defaults();
+
+    /// <summary>Builds the search order: the faces we ship, then the platform's own.</summary>
+    /// <remarks>
+    /// <para>
+    /// The platform list is a local rather than a second static field, and that is not a style
+    /// choice. Static field and property initialisers run in <em>declaration order</em>, so a
+    /// <c>DefaultDirectories</c> declared above a <c>PlatformDirectories</c> it reads gets null
+    /// and the type initialiser throws — which surfaces as
+    /// <c>TypeInitializationException</c> from every call site at once, not as anything that
+    /// points at the ordering. Keeping the list here means there is no order to get wrong.
+    /// </para>
+    /// <para>
+    /// The faces we ship go <em>last</em>, so an installed one always wins. They are a floor
+    /// under the font set, not an override of it: their job is that a machine missing Carlito or
+    /// DejaVu renders correctly instead of silently substituting, which is the failure
+    /// <c>dotnet/CLAUDE.md</c> records as moving 53 of 534 page counts with LibreOffice held
+    /// constant. See <see cref="BundledFonts"/> for the measurement that settled the direction,
+    /// and for the opt-in that reverses it.
+    /// </para>
+    /// </remarks>
+    private static List<string> Defaults()
+    {
+        List<string> directories = [];
+
+        if (BundledFonts.Preferred && BundledFonts.Directory is { } first) directories.Add(first);
+
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        directories.AddRange([
+            Path.Combine(home, ".local", "share", "fonts"),
+            Path.Combine(home, ".fonts"),
+            "/usr/local/share/fonts",
+            "/usr/share/fonts",
+            "/Library/Fonts",
+            "/System/Library/Fonts",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts"),
+        ]);
+
+        // Last, so an installed face always wins. That is the safe direction and it was measured
+        // rather than assumed -- see BundledFonts.Preferred.
+        if (!BundledFonts.Preferred && BundledFonts.Directory is { } last) directories.Add(last);
+
+        return directories;
+    }
 
     /// <summary>The extensions a font file may have.</summary>
     private static readonly string[] Extensions = [".ttf", ".otf", ".ttc", ".otc"];
@@ -236,7 +268,10 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     private readonly Dictionary<string, OpenTypeFace> _loaded = new(StringComparer.Ordinal);
     private readonly Dictionary<OpenTypeFace, string> _keys = new(ReferenceEqualityComparer.Instance);
     private readonly List<FontSubstitution> _substitutions = [];
-    private readonly Dictionary<(int CodePoint, int Weight, bool Italic), OpenTypeFace?> _fallbacks = [];
+    private readonly Dictionary<(string CodePoints, int Weight, bool Italic, string Generic, string Language), OpenTypeFace?>
+        _fallbacks = [];
+    private readonly Dictionary<string, string> _genericByFaceKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _languageByFaceKey = new(StringComparer.Ordinal);
     private readonly List<GlyphFallback> _glyphFallbacks = [];
     private readonly FontconfigPreferences _preferences;
 
@@ -283,64 +318,347 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     public IReadOnlyList<GlyphFallback> GlyphFallbacks => _glyphFallbacks;
 
     /// <inheritdoc/>
-    /// <remarks>
-    /// LibreOffice's own list first (<c>ImplInitGenericGlyphFallback</c> in
-    /// <c>vcl/source/font/PhysicalFontCollection.cxx</c>), then anything installed that covers the
-    /// character. The order matters for more than tidiness: the face that draws a character decides
-    /// its advance width, so two renderers that pick different faces break the line differently.
-    /// </remarks>
     public OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false)
+        => FallbackFor(codePoint, weight, isItalic, primary: null);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <strong>fontconfig first, and LibreOffice's own generic list only when it answers
+    /// nothing.</strong> <c>PhysicalFontCollection::GetGlyphFallbackFont</c> calls the fallback
+    /// hook and reaches <c>ImplInitGenericGlyphFallback</c>'s list only <c>if (!pFallbackData)</c>
+    /// (<c>vcl/source/font/PhysicalFontCollection.cxx</c>:231-291). This used to ask them the other
+    /// way about, and the list heads with <c>starsymbol, opensymbol</c> — so every character
+    /// OpenSymbol covers was drawn from OpenSymbol, where the reference draws it from whatever
+    /// fontconfig ranks best. On this machine OpenSymbol is on no fontconfig preference list at
+    /// all, so the reference never answers a glyph fallback with it.
+    /// </para>
+    /// <para>
+    /// <strong>What fontconfig ranks best is decided by <em>one</em> generic's preference list, and
+    /// which generic that is comes from the request rather than from the character.</strong>
+    /// <c>FontConfigManager::Substitute</c> puts the requested family in the pattern and appends
+    /// <c>serif</c> for <c>FAMILY_ROMAN</c> and <c>sans</c> for <c>FAMILY_SWISS</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088) — the same function and the same
+    /// switch the pre-match substitution uses, because the glyph-fallback hook goes through it too.
+    /// <c>FcConfigSubstitute</c> then expands that generic's <c>&lt;prefer&gt;</c> list into the
+    /// pattern's family list and <c>FC_CHARSET</c> outranks it, so the answer is *the first face on
+    /// that one list that covers the character*. See
+    /// <see cref="FontconfigPreferences.RankOf(string?, string?)"/> for the measurement.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over six declared classes and twelve characters
+    /// (<c>probes/fonts-r64/gen-generic.py</c>): <c>U+2713</c> is drawn in <b>FreeSerif</b> when the
+    /// class is roman, modern, script, decorative or undeclared — Writer's own default is roman —
+    /// and in <b>DejaVu Sans</b> when it is swiss; <c>U+2011</c> is DejaVu <b>Serif</b> against
+    /// DejaVu <b>Sans</b> on the same split; <c>U+4E00</c> is WenQuanYi Zen Hei either way, because
+    /// it is the first face on both lists that covers it.
+    /// </para>
+    /// <para>
+    /// <strong>The emoji list is asked first, and that is a language rule rather than a family
+    /// one.</strong> <c>getExemplarLangTagForCodePoint</c> answers <c>und-zsye</c> for a character
+    /// with the Unicode <c>Emoji</c> property (<c>fontconfig.cxx</c>:1026-1029), and fontconfig
+    /// scores <c>PRI_LANG</c> above <c>PRI_FAMILY_WEAK</c> — so an emoji code point goes to the
+    /// emoji face whatever generic the pattern named. Asked as a coverage question over the
+    /// <c>emoji</c> preference list rather than as a Unicode property, because the two are the same
+    /// set by construction: the property is what an emoji font is built to cover. Measured:
+    /// <c>U+2714</c>, <c>U+2611</c> and <c>U+263A</c> answer <b>Noto Color Emoji</b> under all six
+    /// declared classes, while <c>U+2713</c> — which the property excludes and Noto Color Emoji
+    /// does not hold — answers the generic's list.
+    /// </para>
+    /// <para>
+    /// The generic list keeps the machine with no fontconfig behaving exactly as it did: there it
+    /// is asked first, because the second stage's ordering is fontconfig's and there is none.
+    /// </para>
+    /// </remarks>
+    public OpenTypeFace? FallbackFor(int codePoint, int weight, bool isItalic, OpenTypeFace? primary)
+        => FallbackFor([codePoint], weight, isItalic, primary);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <strong>The pattern carries the whole set at once, and that is a different question from the
+    /// same one asked character by character.</strong>
+    /// <c>OutputDevice::ImplGlyphFallbackLayout</c> gathers every code unit of the layout that came
+    /// back unmapped into one <c>OUString</c> and hands it to
+    /// <c>PhysicalFontCollection::GetGlyphFallbackFont</c>
+    /// (<c>vcl/source/outdev/font.cxx</c>), which passes it through to
+    /// <c>FontConfigManager::Substitute</c> as a single <c>FC_CHARSET</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1092-1116). <c>FcCompareCharSet</c> scores by
+    /// <em>how many of the set the face is missing</em> and <c>PRI_CHARSET</c> is fontconfig's
+    /// highest priority, so a face covering more of the run's missing characters beats one that is
+    /// better placed on the family list and covers fewer.
+    /// </para>
+    /// <para>
+    /// The answer is then subtracted from the set — <c>Substitute</c> ends by rebuilding
+    /// <c>rMissingCodes</c> from the code points the chosen face's charset does <em>not</em> hold —
+    /// and the next fallback level asks again with what is left. So one run can reach several
+    /// fallback faces, and which characters each one draws depends on the others.
+    /// </para>
+    /// <para>
+    /// Ordering the levels is the caller's, because it is the caller that knows which characters a
+    /// run was missing; see <see cref="Itemisation.FontItemiser"/>.
+    /// </para>
+    /// </remarks>
+    public OpenTypeFace? FallbackFor(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary)
+        => FallbackFor(codePoints, weight, isItalic, primary, default);
+
+    /// <inheritdoc/>
+    public OpenTypeFace? FallbackFor(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary, FontItem item)
     {
+        ArgumentNullException.ThrowIfNull(codePoints);
+        if (codePoints.Count == 0) return null;
+
+        // The run's own item where the caller has one, and the reverse lookup from the face where it
+        // has not: a slide or a sheet has no script items to choose between.
+        string generic = item.IsStated
+            ? GenericFor(new FontRequest(
+                item.FamilyName ?? string.Empty, DeclaredClass: item.DeclaredClass))
+            : GenericForFallback(primary);
+        string language = (item.IsStated ? item.Language : LanguageForFallback(primary))
+                          ?? string.Empty;
+        string key = string.Join('\u0000', codePoints);
+
         // Cached because a run of unsupported text asks the same question for every character, and
         // answering it means opening font files until one covers the character.
-        if (_fallbacks.TryGetValue((codePoint, weight, isItalic), out OpenTypeFace? cached))
+        if (_fallbacks.TryGetValue((key, weight, isItalic, generic, language), out OpenTypeFace? cached))
         {
             return cached;
         }
 
-        OpenTypeFace? found = null;
+        OpenTypeFace? found;
 
-        foreach (string family in GlyphFallbackFamilies.InOrder)
+        if (_preferences.IsConfigured)
         {
-            if (_index.Best(family, weight, isItalic) is not { } candidate) continue;
-            if (Covers(candidate, codePoint) is not { } face) continue;
-
-            found = face;
-            break;
+            found = OnPreferenceList(codePoints, weight, isItalic, EmojiGeneric)
+                    ?? Preferred(codePoints, weight, isItalic, generic, language)
+                    ?? OnGenericList(codePoints, weight, isItalic);
+        }
+        else
+        {
+            found = OnGenericList(codePoints, weight, isItalic)
+                    ?? Preferred(codePoints, weight, isItalic, generic, language);
         }
 
-        // Nothing on LibreOffice's list covers it. Anything installed that does is still better than
-        // a box, and the order is the machine's fontconfig preference for a generic family — which
-        // is what LibreOffice itself lands on here, since it asks fontconfig before it ever reads
-        // the list above. Ordinal family name remains the last resort, so a machine with no
-        // fontconfig behaves exactly as this did before.
-        //
-        // The rank comes ahead of slant and weight because fontconfig scores family above both
-        // (`PRI_FAMILY_WEAK` precedes `PRI_SLANT` and `PRI_WEIGHT` in `fcmatch.c`), and because at
-        // this point the primary face has already failed: a character drawn in the preferred family
-        // upright is closer to the reference than the same character drawn in an unrelated family
-        // that happens to be italic.
-        found ??= _index.Faces
-            .OrderBy(face => _preferences.RankOf(face.FamilyName))
+        _fallbacks[(key, weight, isItalic, generic, language)] = found;
+        return found;
+    }
+
+    /// <summary>The language a pattern whose face is this one would carry as <c>FC_LANG</c>.</summary>
+    /// <remarks>
+    /// The same reverse lookup <see cref="GenericForFallback"/> makes and with the same first-writer
+    /// rule, because the two travel together: a run's font item supplies both, and a face this
+    /// resolver never chose carries neither.
+    /// </remarks>
+    private string? LanguageForFallback(OpenTypeFace? primary)
+        => primary is not null
+           && _keys.TryGetValue(primary, out string? faceKey)
+           && _languageByFaceKey.TryGetValue(faceKey, out string? language)
+            ? language
+            : null;
+
+    /// <summary>fontconfig's generic family for a pattern whose face is this one.</summary>
+    /// <remarks>
+    /// The generic the <em>request</em> carried, where this resolver answered the request and so
+    /// knows it — a <c>.doc</c> whose <c>FFN</c> declares <c>Calibri</c> swiss and
+    /// <c>Times New Roman</c> roman puts its two runs on two different lists, and only the request
+    /// says so. A face this resolver did not choose — an embedded one, or one loaded by key — falls
+    /// back to the generic fontconfig files the face's own family under, which is what the pattern
+    /// would have carried had the document declared nothing.
+    /// </remarks>
+    private string GenericForFallback(OpenTypeFace? primary)
+    {
+        if (primary is not null
+            && _keys.TryGetValue(primary, out string? faceKey)
+            && _genericByFaceKey.TryGetValue(faceKey, out string? declared))
+        {
+            return declared;
+        }
+
+        return (_preferences.IsConfigured ? _preferences.GenericNameOf(primary?.FamilyName) : null)
+               ?? DefaultGeneric;
+    }
+
+    /// <summary>fontconfig's own answer for a pattern that named no generic: <c>49-sansserif.conf</c>.</summary>
+    private const string DefaultGeneric = "sansserif";
+
+    /// <summary>The generic whose preference list a code point with the Emoji property lands on.</summary>
+    private const string EmojiGeneric = "emoji";
+
+    /// <summary>The first face on one generic's preference list that covers every missing character.</summary>
+    /// <remarks>
+    /// <strong>Every one of them, not the first.</strong> <c>PRI_CHARSET</c> outranks every family
+    /// key, so a list member that covers only part of the set does not beat a face further down
+    /// that covers all of it — and this stage exists to short-circuit the full ranking, which it may
+    /// only do where it cannot be wrong. Where nothing on the list covers the whole set the search
+    /// falls through to <see cref="Preferred"/>, which relaxes the coverage requirement one
+    /// character at a time.
+    /// </remarks>
+    private OpenTypeFace? OnPreferenceList(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, string generic)
+    {
+        foreach (string family in _preferences.InOrderFor(generic))
+        {
+            if (_index.Best(family, weight, isItalic) is not { } candidate) continue;
+            if (CoversAll(candidate, codePoints) is { } face) return face;
+        }
+
+        return null;
+    }
+
+    /// <summary>The best covering face by fontconfig's scoring, as far as this models it.</summary>
+    /// <remarks>
+    /// Coverage is the filter and the generic's preference order is the rank, because
+    /// <c>FC_CHARSET</c> outranks <c>FC_FAMILY</c> and the family list outranks slant and weight
+    /// (<c>PRI_CHARSET</c>, then <c>PRI_FAMILY_WEAK</c>, then <c>PRI_SLANT</c> and
+    /// <c>PRI_WEIGHT</c> in <c>fcmatch.c</c>). The merged order across every generic is the
+    /// tie-break: a face on no list at all scores the same as any other on
+    /// <c>PRI_FAMILY_WEAK</c>, and this keeps such a face ordered as it was before the lists were
+    /// read apart. Ordinal family name is the last resort, which is the order LibreOffice's own
+    /// font set is in — <c>FontCfgWrapper::getFontSet</c> stable-sorts it by family name
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:362), and <c>FcFontSetMatch</c> keeps the first
+    /// of equal scores.
+    /// </remarks>
+    /// <param name="codePoints">The characters the run's own face could not draw, in text order.</param>
+    /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
+    /// <param name="isItalic">Whether an italic face is wanted.</param>
+    /// <param name="generic">The generic whose preference list ranks the candidates.</param>
+    /// <param name="language">
+    /// The font item's language, or empty for none. Ranked <em>above</em> the generic's preference
+    /// list, because <c>fcmatch.c</c> scores <c>PRI_LANG</c> above <c>PRI_FAMILY_WEAK</c> — which is
+    /// what makes a Hebrew character in a complex-script run answer FreeSans where the sans-serif
+    /// list on its own answers DejaVu Sans. See <see cref="FontLanguages"/>.
+    /// </param>
+    private OpenTypeFace? Preferred(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, string generic, string language)
+    {
+        int exemplar = FontLanguages.ExemplarOf(language);
+
+        List<InstalledFace> ordered = _index.Faces
+            .OrderBy(face => _preferences.RankOf(face.FamilyName, generic))
+            .ThenBy(face => _preferences.RankOf(face.FamilyName))
             .ThenBy(face => face.IsItalic == isItalic ? 0 : 1)
             .ThenBy(face => Math.Abs(face.Weight - weight))
             .ThenBy(face => face.FamilyName, StringComparer.Ordinal)
-            .Select(face => Covers(face, codePoint))
-            .FirstOrDefault(face => face is not null);
+            .ToList();
 
-        _fallbacks[(codePoint, weight, isItalic)] = found;
-        return found;
+        // `PRI_CHARSET` first, `PRI_LANG` second, the family keys last. The coverage requirement is
+        // relaxed one character at a time rather than every face being loaded and counted, so a
+        // single missing character -- which is nearly every call -- costs exactly what it did
+        // before the set existed.
+        for (int allowed = 0; allowed < codePoints.Count; allowed++)
+        {
+            for (int pass = exemplar == FontLanguages.Neutral ? 1 : 0; pass < 2; pass++)
+            {
+                foreach (InstalledFace candidate in ordered)
+                {
+                    if (pass == 0 && Covers(candidate, exemplar) is null) continue;
+
+                    if (CoversAllBut(candidate, codePoints, allowed) is { } face) return face;
+                }
+            }
+        }
+
+        return null;
     }
+
+    /// <summary>The first face on LibreOffice's own generic glyph-fallback list that covers a character.</summary>
+    private OpenTypeFace? OnGenericList(IReadOnlyList<int> codePoints, int weight, bool isItalic)
+    {
+        for (int allowed = 0; allowed < codePoints.Count; allowed++)
+        {
+            foreach (string family in GlyphFallbackFamilies.InOrder)
+            {
+                if (_index.Best(family, weight, isItalic) is not { } candidate) continue;
+                if (CoversAllBut(candidate, codePoints, allowed) is { } face) return face;
+            }
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// LibreOffice's own list and nothing else. The interface's own remarks hold the mechanism and
+    /// the measurements; the implementation is the ordinary search with its second stage — the
+    /// stand-in for the fontconfig hook — left off, because that hook is exactly what
+    /// <c>FcGlyphFallbackSubstitution::FindFontSubstitute</c> declines to run for a pi face
+    /// (<c>vcl/unx/generic/font/fontsubst.cxx</c>:100-107).
+    /// </remarks>
+    public OpenTypeFace? SymbolFallbackFor(int codePoint, int weight = 400, bool isItalic = false)
+        => OnGenericList([codePoint], weight, isItalic);
 
     /// <summary>Records a fallback, resolved or not, for the caller comparing against a reference.</summary>
     public void RecordGlyphFallback(int codePoint, string? fromFamily, string? toFamily)
         => _glyphFallbacks.Add(new GlyphFallback(codePoint, fromFamily, toFamily));
 
     /// <summary>The face behind an installed entry when it covers a character, else null.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Covering the character is not enough; the face has to be able to draw it.</strong>
+    /// Every one of the three fallback stages — the emoji list, the request's own generic list and
+    /// LibreOffice's fixed list — asks its candidates through this one method, so putting the test
+    /// here makes an unpaintable candidate fall through to the next one everywhere at once, rather
+    /// than ending the search with a face that produces an empty run.
+    /// </para>
+    /// <para>
+    /// It is a floor and it deliberately changes no preference: the candidates are offered in
+    /// exactly the order they were, and one is only ever <em>skipped</em>, never promoted. So the
+    /// advance follows whichever face actually draws, because the face this returns is the face that
+    /// is measured, shaped and painted. See <see cref="GlyphPainting.CanPaint"/> for what counts as
+    /// paintable and what is deliberately left out of it.
+    /// </para>
+    /// <para>
+    /// Nothing installed here fires it: the one colour face on the machine is Noto Color Emoji, and
+    /// its <c>CBDT</c> strikes are read. It is the guard the round that made that face reachable did
+    /// not have.
+    /// </para>
+    /// </remarks>
     private OpenTypeFace? Covers(InstalledFace candidate, int codePoint)
     {
         OpenTypeFace? face = LoadCached(candidate.FaceKey);
-        return face is not null && face.HasGlyphFor(codePoint) ? face : null;
+        return face is not null && GlyphPainting.CanPaintCharacter(face, codePoint) ? face : null;
+    }
+
+    /// <summary>The face behind an installed entry when it covers every character, else null.</summary>
+    private OpenTypeFace? CoversAll(InstalledFace candidate, IReadOnlyList<int> codePoints)
+        => CoversAllBut(candidate, codePoints, 0);
+
+    /// <summary>
+    /// The face behind an installed entry when it is missing at most <paramref name="allowed"/> of
+    /// the characters, else null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>FcCompareCharSet</c> scores a font by <c>FcCharSetSubtractCount</c> — the size of the
+    /// pattern's charset minus the font's — so this is that score, tested against a budget rather
+    /// than compared, which is what lets the search stay lazy.
+    /// </para>
+    /// <para>
+    /// <strong>A character the face cannot <em>paint</em> counts as missing, not as covered.</strong>
+    /// This is <see cref="Covers"/>'s guard applied to the set, and the two must agree: the round
+    /// that made the whole set one question and the round that added the guard landed against the
+    /// same base, and merging them textually left this path asking <c>HasGlyphFor</c> alone — which
+    /// is coverage, so a face that maps a character and keeps its shape in a table this renderer
+    /// does not read would end the search and draw a blank at the right advance. That is the defect
+    /// the guard exists to prevent, reintroduced on the path that had become the common one.
+    /// </para>
+    /// </remarks>
+    private OpenTypeFace? CoversAllBut(InstalledFace candidate, IReadOnlyList<int> codePoints, int allowed)
+    {
+        OpenTypeFace? face = LoadCached(candidate.FaceKey);
+        if (face is null) return null;
+
+        int missing = 0;
+        foreach (int codePoint in codePoints)
+        {
+            if (GlyphPainting.CanPaintCharacter(face, codePoint)) continue;
+            if (++missing > allowed) return null;
+        }
+
+        // A face that covers none of them is not an answer, however generous the budget.
+        return missing < codePoints.Count ? face : null;
     }
 
     /// <summary>Loads a face by key through the resolver's own cache, or null when it cannot be read.</summary>
@@ -430,6 +748,57 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     private static readonly string[] MonoFallbacks =
         ["dejavusansmono", "liberationmono", "couriernew", "freemono", "notosansmono"];
 
+    /// <summary>The faces a family fontconfig files under <c>math</c> resolves to.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The maths generic is not a shape and cannot be served by one.</strong>
+    /// <c>45-generic.conf</c> files <c>Cambria Math</c> and six siblings under <c>math</c>, and
+    /// then — in the same file — prepends <c>lang=und-zmth</c> to any pattern whose family is
+    /// <c>math</c>. So the match is decided by which installed face declares the *mathematical
+    /// orthography*, which no shape fallback can express.
+    /// </para>
+    /// <para>
+    /// The head of the list is <c>60-generic.conf</c>'s own <c>math</c> preference order, verbatim
+    /// and in its order. Behind it sits the orthography carrier, which on a stock Debian or Ubuntu
+    /// is GNU FreeFont's <c>FreeSerif</c>: <c>fc-list :lang=und-zmth</c> answers it and nothing
+    /// else here. Behind that the sans-serif fallbacks, because a machine with neither a maths
+    /// face nor FreeFont has nothing to satisfy the lang test and the pattern falls all the way
+    /// through to the configuration's overall default — which is the case the earlier
+    /// "Cambria Math draws in DejaVu Sans" measurement was taken in.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over the four corpus documents that name <c>Cambria Math</c> —
+    /// <c>DRX-Ascend System Course Description.docx</c>,
+    /// <c>075_Storyboard_Template_Fillable_Format…docx</c>,
+    /// <c>084_Printable_Graph_Paper_Template…docx</c> and
+    /// <c>AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc</c>. All four use it for a handful of
+    /// characters (a <c>U+2010</c> hyphen, in DRX-Ascend's case, seven times); the reference draws
+    /// every one of them in <c>FreeSerif</c> and we drew them in <c>DejaVuSerif</c>.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] MathFallbacks =
+        ["xitsmath", "stixtwomath", "cambriamath", "latinmodernmath",
+         "minionmath", "lucidamath", "asanamath"];
+
+    /// <summary>The face that declares the mathematical orthography where no maths font does.</summary>
+    /// <remarks>
+    /// <para>
+    /// GNU FreeFont's roman: <c>fc-list :lang=und-zmth</c> answers <c>FreeSerif.ttf</c> and nothing
+    /// else on a stock Debian or Ubuntu, and <em>only its regular file</em> — <c>FreeSerifBold</c>
+    /// does not declare the orthography.
+    /// </para>
+    /// <para>
+    /// <strong>Which is why it is taken at regular weight and upright whatever was asked
+    /// for.</strong> fontconfig ranks a language requirement above weight and slant, so a pattern
+    /// carrying <c>und-zmth</c> can only be satisfied by the one file that declares it. Measured:
+    /// <c>fc-match "Cambria Math:bold"</c> answers FreeSerif <em>Regular</em> where
+    /// <c>fc-match "FreeSerif:bold"</c> answers FreeSerif Bold, and 26.2.4.2 draws
+    /// <c>075_Storyboard_Template_Fillable_Format…docx</c>'s title — a 48 pt <c>w:b</c> run in
+    /// Cambria Math — in FreeSerif regular.
+    /// </para>
+    /// </remarks>
+    private const string MathOrthographyFace = "freeserif";
+
     /// <summary>The faces to try for a request that names no family at all.</summary>
     /// <remarks>
     /// A blank family name is not a family nobody has installed — it is a document expressing no
@@ -486,6 +855,14 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         // The requested family, if it is here.
         if (_index.Best(request.FamilyName, request.Weight, request.IsItalic) is { } exact)
             return Reference(request, exact, requested: request.FamilyName);
+
+        // A family fontconfig files under `math` is answered by the orthography, not by a shape,
+        // and that beats the document's own declaration. See MathFace.
+        if (MathFace(request) is { } maths)
+        {
+            Record(request, maths);
+            return Reference(request, maths, requested: request.FamilyName);
+        }
 
         // What the *document* declared about the family, when it declared something acted on.
         //
@@ -598,6 +975,11 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             _loaded[reference.FaceKey] = face;
         }
 
+        // Also on the hit, and for the same reason `LoadCached` does it: a face reached only through
+        // this path would otherwise have no key, and `GenericForFallback` and `ReferenceFor` both
+        // ask the face for one.
+        _keys[face] = reference.FaceKey;
+
         return new ResolvedFontFace(reference, face);
     }
 
@@ -633,8 +1015,26 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// asserting the request onto the answer (the embedded-face arm, where the document supplied
     /// the face and its own declaration is all there is), and neither can decide this.
     /// </remarks>
-    private static FontReference Reference(FontRequest request, InstalledFace face, string requested)
-        => new()
+    private FontReference Reference(FontRequest request, InstalledFace face, string requested)
+    {
+        // Which of fontconfig's generic preference lists a *glyph fallback* out of this face will be
+        // ranked by. It is a property of the request rather than of the face — the same DejaVu Serif
+        // answers a roman request and an undeclared one — so it is recorded here, where both halves
+        // are in hand, and read back through the face in `GenericForFallback`.
+        //
+        // **The first request to reach a face keeps it, and that is a stability requirement rather
+        // than a preference.** Measurement and drawing itemise the same paragraph separately and
+        // must choose the same fallback face for it, or a line is measured at one width and painted
+        // at another; an entry that could change between the two passes would do exactly that. So a
+        // face two differently-declared families both resolve to answers for the first of them,
+        // which in a document is its body face.
+        _genericByFaceKey.TryAdd(face.FaceKey, GenericFor(request));
+
+        // And the language, for the same reason and under the same first-writer rule: the two are
+        // the two halves of one pattern, and fontconfig ranks the language above the generic.
+        if (request.Language is { Length: > 0 } language) _languageByFaceKey.TryAdd(face.FaceKey, language);
+
+        return new FontReference
         {
             FamilyName = face.FamilyName,
             RequestedFamily = requested,
@@ -642,6 +1042,36 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             IsItalic = face.IsItalic,
             SyntheticOblique = request.IsItalic && !face.IsItalic,
             FaceKey = face.FaceKey,
+        };
+    }
+
+    /// <summary>
+    /// The generic family <c>FontConfigManager::Substitute</c> would put in this request's pattern.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>serif</c> for <c>FAMILY_ROMAN</c> and <c>sans</c> for <c>FAMILY_SWISS</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088) and <strong>nothing for the
+    /// rest</strong> — and where nothing is appended, the family's own filing or
+    /// <c>49-sansserif.conf</c> supplies one, which is what
+    /// <see cref="FontconfigPreferences.GenericNameOf"/> answers.
+    /// </para>
+    /// <para>
+    /// <strong>Pitch is deliberately not read here, unlike in <see cref="DeclaredGenericFor"/>.</strong>
+    /// <c>addtopattern</c> does put the pitch in the pattern as <c>FC_SPACING</c>, but
+    /// <c>PRI_SPACING</c> sits <em>below</em> <c>PRI_FAMILY_WEAK</c> in <c>fcmatch.c</c> — so it
+    /// breaks ties between faces the family list has already ranked equal and never chooses which
+    /// list ranks them. Substitution is the other way round, because a request marked fixed is
+    /// relying on its columns; that is a different question and it has its own helper.
+    /// </para>
+    /// </remarks>
+    private string GenericFor(FontRequest request)
+        => request.DeclaredClass switch
+        {
+            FontFamilyClass.Serif => "serif",
+            FontFamilyClass.SansSerif => DefaultGeneric,
+            _ => (_preferences.IsConfigured ? _preferences.GenericNameOf(request.FamilyName) : null)
+                 ?? DefaultGeneric,
         };
 
     private void Record(FontRequest request, InstalledFace chosen)
@@ -871,6 +1301,51 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             FontFamilyClass.SansSerif => SansFallbacks,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// The face a family fontconfig files under <c>math</c> resolves to, or null when it files it
+    /// under something else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The maths generic is answered by a language, not by a shape, and that is why it
+    /// cannot go through <see cref="DeclaredGenericFor"/>.</strong> <c>45-generic.conf</c> files
+    /// <c>Cambria Math</c> and six siblings under <c>math</c> and then prepends
+    /// <c>lang=und-zmth</c> to any pattern whose family is <c>math</c>. fontconfig ranks a
+    /// language requirement above weight and slant and above the generic a caller appended, so the
+    /// answer is the same whatever the document declared and whatever weight it asked for:
+    /// <c>fc-match "Cambria Math"</c>, <c>"Cambria Math,serif"</c>, <c>"Cambria Math,sans"</c> and
+    /// <c>"Cambria Math:bold"</c> all answer FreeSerif <em>Regular</em> here.
+    /// </para>
+    /// <para>
+    /// Three tiers, in fontconfig's own order. <see cref="MathFallbacks"/> is
+    /// <c>60-generic.conf</c>'s <c>math</c> preference list verbatim, taken at the requested weight
+    /// because a real maths family has faces to choose between; then
+    /// <see cref="MathOrthographyFace"/>, pinned to regular because only its regular file declares
+    /// the orthography; then nothing, so a machine with neither falls through to the ordinary path
+    /// and lands on the configuration's overall default, which is what
+    /// <c>Cambria Math draws in DejaVu Sans</c> was measured on.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2, faces read out of the PDFs: the four corpus documents naming
+    /// <c>Cambria Math</c> — <c>DRX-Ascend System Course Description.docx</c>,
+    /// <c>075_Storyboard_Template_Fillable_Format…docx</c>,
+    /// <c>084_Printable_Graph_Paper_Template…docx</c> and
+    /// <c>AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc</c> — are drawn in FreeSerif by the
+    /// reference and were drawn in DejaVu Serif here.
+    /// </para>
+    /// </remarks>
+    private InstalledFace? MathFace(FontRequest request)
+    {
+        if (_preferences.GenericNameOf(request.FamilyName) != "math") return null;
+
+        foreach (string candidate in MathFallbacks)
+        {
+            if (_index.Best(candidate, request.Weight, request.IsItalic) is { } maths) return maths;
+        }
+
+        return _index.Best(MathOrthographyFace, weight: 400, italic: false);
     }
 
     /// <summary>

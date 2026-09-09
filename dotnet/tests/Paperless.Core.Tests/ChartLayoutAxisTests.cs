@@ -99,11 +99,12 @@ public class ChartLayoutAxisTests
         };
 
         ChartDrawing drawing = Place(plot);
-        drawing.Boxes.Count.ShouldBe(4);
+        List<ChartShape> bars = drawing.Filled();
+        bars.Count.ShouldBe(4);
 
         // The tallest bar of each series, by its top edge.
-        Length primary = drawing.Boxes.Take(2).Min(box => box.Bounds.Top);
-        Length secondary = drawing.Boxes.Skip(2).Min(box => box.Bounds.Top);
+        Length primary = bars.Take(2).Min(bar => bar.Bounds().Top);
+        Length secondary = bars.Skip(2).Min(bar => bar.Bounds().Top);
 
         Math.Abs((primary - secondary).Points).ShouldBeLessThan(1.0);
     }
@@ -247,12 +248,15 @@ public class ChartLayoutAxisTests
         // Each above its own bar's top edge.
         foreach (ChartLabel label in values)
         {
-            ChartBox bar = drawing.Boxes
-                .Where(box => box.Bounds.Left <= label.At.X && box.Bounds.Right >= label.At.X)
-                .OrderBy(box => box.Bounds.Top.Emu)
+            // Every shape, not just the filled ones: this series declares no colour, so its
+            // bars carry a null Fill, and the assertion is about geometry rather than paint.
+            DocRect bar = drawing.Shapes
+                .Select(shape => shape.Bounds())
+                .Where(bounds => bounds.Left <= label.At.X && bounds.Right >= label.At.X)
+                .OrderBy(bounds => bounds.Top.Emu)
                 .First();
 
-            label.At.Y.ShouldBeLessThanOrEqualTo(bar.Bounds.Top);
+            label.At.Y.ShouldBeLessThanOrEqualTo(bar.Top);
         }
     }
 

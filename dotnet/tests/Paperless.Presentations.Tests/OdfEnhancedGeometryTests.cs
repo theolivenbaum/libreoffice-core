@@ -87,6 +87,48 @@ public class OdfEnhancedGeometryTests
     }
 
     /// <summary>
+    /// A shape imported from OOXML states its coordinate space in the extension namespace.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Such a shape carries <c>svg:viewBox="0 0 0 0"</c> and the real space in
+    /// <c>drawooo:sub-view-size</c>. <strong>The namespace is the finding</strong>: LibreOffice's
+    /// exporter writes <c>rExport.AddAttribute(XML_NAMESPACE_DRAW_EXT, XML_SUB_VIEW_SIZE, …)</c>
+    /// (<c>xmloff/source/draw/shapeexport.cxx</c>:5006) under a comment saying it writes
+    /// <c>draw:sub-view-size</c>, and it does not — <strong>5673 occurrences in 178 of the
+    /// converted corpus's documents (151 of the 302 <c>.odp</c>, 23 <c>.odt</c>, 4 <c>.ods</c>)
+    /// and not one <c>draw:</c> spelling anywhere.</strong>
+    /// </para>
+    /// <para>
+    /// Read in the wrong namespace the path falls back to the shape's own extent in hundredths of
+    /// a millimetre — 600 × 450 here — so a triangle stated over 1200 × 900 comes out at twice its
+    /// box. 26.2.4.2 draws this one at 42.52, 255.12, 170.11 × 127.59, which is exactly its
+    /// <c>svg:x</c>, <c>svg:y</c>, <c>svg:width</c> and <c>svg:height</c>.
+    /// </para>
+    /// <para>
+    /// It is the fifth instance of the rule <c>dotnet/CLAUDE.md</c> records against
+    /// <c>drawooo:display</c>, <c>loext:shadow-blur</c>, <c>chartext:coordinate-region</c> and
+    /// <c>text:line-break</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ASubViewSizeIsReadFromTheExtensionNamespace()
+    {
+        List<(double X, double Y)> vertices = Vertices(Named("SubViewTriangle"));
+
+        double left = 1.5 * 72 / 2.54;
+        double top = 9 * 72 / 2.54;
+
+        vertices.Count.ShouldBe(3);
+        vertices[0].X.ShouldBe(left, TolerancePoints);
+        vertices[0].Y.ShouldBe(top, TolerancePoints);
+        vertices[1].X.ShouldBe(left + ShapeWidth, TolerancePoints);
+        vertices[1].Y.ShouldBe(top, TolerancePoints);
+        vertices[2].X.ShouldBe(left + (ShapeWidth / 2), TolerancePoints);
+        vertices[2].Y.ShouldBe(top + ShapeHeight, TolerancePoints);
+    }
+
+    /// <summary>
     /// <c>U</c> draws the whole ellipse, which is one command ODF has and DrawingML has not.
     /// </summary>
     [Fact]

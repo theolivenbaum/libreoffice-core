@@ -51,7 +51,7 @@ public sealed class SheetMergedNeighbourComparisonTests : IDisposable
     [Fact]
     public void ADocumentDrawsNeitherMoreNorFewerWordsThanLibreOffice()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("sheet-features.ods");
         List<PdfWord> ours = PdfWords.Read(Ours(path));
@@ -74,7 +74,7 @@ public sealed class SheetMergedNeighbourComparisonTests : IDisposable
     [Fact]
     public void AStringStopsAtACellCoveredByAMergeInTheRowAbove()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("sheet-features.ods");
         List<PdfWord> ours = PdfWords.Read(Ours(path));

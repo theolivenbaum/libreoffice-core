@@ -119,6 +119,18 @@ Still open here:
       `draw:image` pointing at `ObjectReplacements/Object 1` — a metafile picture *of* the chart.
       `ReadFrame` now stops at a chart, or a packaged `.odp` reports one more `ContentImage` than
       the flat file it was converted from.
+- [x] **A chart's data labels take four attributes, not two, and two of them were unread.**
+      `chart:data-label-number`, `chart:data-label-text`, `chart:data-label-symbol` and
+      `chart:data-label-series` are four `MID_FLAG_MERGE_PROPERTY` rows against the one
+      `PROP_DataCaption` bit field (`xmloff/source/chart/PropertyMaps.cxx`:247-250); the last is
+      `MAP_SPECIAL_ODF13`, newer than its neighbours, and `OdfChartPlot`'s own remark asserted for
+      three rounds that it did not exist. It is stated `="true"` 25 times in 8 of the 307
+      converted `.ods` and 11 times in one `.odp`, and it is the whole of `M1; 93; 17%` against
+      26.2.4.2's `M1; Actual; 93; 17%`. `.ods` gate **269 → 273 of 307**, and of the 57 documents
+      in the converted corpus that mention either attribute, 49 render byte-identically.
+      `probes/ods-track-r88/results.md` §3.
+- [ ] `chart:label-separator` is still not read; the unstated default `"; "` is what every corpus
+      file happens to want, so nothing measures it yet.
 - [ ] Other embedded objects (`draw:object`): a formula or a nested spreadsheet is still recorded
       as a graphic, not opened. A spreadsheet inside a text document is a whole nested document,
       and unlike a chart it has no bounded model — it would need the spreadsheet reader, which

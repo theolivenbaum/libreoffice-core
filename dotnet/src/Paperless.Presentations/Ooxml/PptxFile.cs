@@ -156,6 +156,21 @@ internal sealed class PptxFile : IDisposable
         }
     }
 
+    private DiagramPartSource? _diagrams;
+
+    /// <summary>
+    /// The deck as the two lookups a SmartArt diagram's parts need.
+    /// </summary>
+    /// <remarks>
+    /// Built once and kept, because the resolution walks the same two methods for every one of the
+    /// five parts of every diagram in the deck, and <see cref="Load"/>'s part cache is what keeps
+    /// asking twice cheap.
+    /// </remarks>
+    public DiagramPartSource Diagrams
+        => _diagrams ??= new DiagramPartSource(
+            (part, id) => Relationship(part, id) is { IsExternal: false } found ? found.Target : null,
+            Load);
+
     /// <summary>
     /// The relationship a part declares under an id, or null.
     /// </summary>

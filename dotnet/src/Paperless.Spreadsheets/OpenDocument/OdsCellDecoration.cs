@@ -29,14 +29,14 @@ namespace Paperless.Spreadsheets.OpenDocument;
 internal static class OdsCellDecoration
 {
     /// <summary>
-    /// How far one repeated cell or row is expanded before it is treated as padding.
+    /// How many rows of a repeat state a row default of their own.
     /// </summary>
     /// <remarks>
     /// ODF pads a sheet to its full width and height with repeat counts, so a
     /// <c>table:table-cell</c> carrying <c>table:number-columns-repeated="16384"</c> is
-    /// ordinary and a row repeated a million times is too. Nearly all of them name the default
-    /// style and intern to nothing, so this never fires on a file Calc wrote; it exists so that
-    /// one that pads with a <em>styled</em> cell cannot materialise sixteen billion entries.
+    /// ordinary and a row repeated a million times is too. The cells of such a repeat are kept
+    /// as one rectangle and cost nothing per row; a row <em>default</em> is one entry per row,
+    /// so that half is still bounded.
     /// </remarks>
     private const int MaxRepeat = 4096;
 
@@ -95,36 +95,49 @@ internal static class OdsCellDecoration
 
         void ReadRow(XElement element)
         {
-            int first = row;
+            long first = row;
             int repeat = Math.Max(1, Repeated(element, "number-rows-repeated"));
-            row += repeat;
 
-            int lastRow = Math.Min(row, first + MaxRepeat);
+            // Clamped to the sheet's own last row, which is what `ScXMLTableRowContext` does
+            // with the same attribute (`sc/source/filter/xml/xmlrowi.cxx`:73-82). A repeat that
+            // runs past the sheet's bounds is honoured up to them, not ignored.
+            long lastRow = Math.Min(first + repeat - 1, SheetAddress.MaxRow);
+            row = (int)Math.Min(first + repeat, SheetAddress.MaxRow + 1L);
+
+            if (first > lastRow) return;
 
             int rowFormat = Handle(Attribute(element, "default-cell-style-name"));
             if (rowFormat >= 0)
             {
-                for (int at = first; at < lastRow; at++) formatting.SetRow(at, rowFormat);
+                long last = Math.Min(lastRow, first + MaxRepeat - 1);
+                for (long at = first; at <= last; at++) formatting.SetRow((int)at, rowFormat);
             }
 
-            int column2 = 0;
+            long column2 = 0;
             foreach (XElement cell in element.Elements())
             {
                 if (cell.Name != TableCell && cell.Name != CoveredCell) continue;
+                if (column2 > SheetAddress.MaxColumn) break;
 
                 int span = Math.Max(1, Repeated(cell, "number-columns-repeated"));
+                long lastColumn = Math.Min(column2 + span - 1, SheetAddress.MaxColumn);
                 int format = Handle(Attribute(cell, "style-name"));
 
                 // Zero is applied and only absence is skipped: a cell naming a style that paints
                 // nothing has to cancel its column's fill, which is exactly what Calc writes as
                 // table:style-name="Default".
+                //
+                // The rectangle is recorded as a rectangle. Calc records the same one as a single
+                // `ScRange` (`sc/source/filter/xml/xmlcelli.cxx`:1368-1377) and stores it as a run
+                // of an `ScAttrArray`, so a sheet padded to its full extent costs one entry per
+                // repeat rather than one per cell.
                 if (format >= 0)
                 {
-                    for (int offset = 0; offset < Math.Min(span, MaxRepeat); offset++)
-                    {
-                        for (int line = first; line < lastRow; line++)
-                            formatting.SetCell(line, column2 + offset, format);
-                    }
+                    if (first == lastRow && column2 == lastColumn)
+                        formatting.SetCell((int)first, (int)column2, format);
+                    else
+                        formatting.SetCells(
+                            (int)first, (int)lastRow, (int)column2, (int)lastColumn, format);
                 }
 
                 column2 += span;
@@ -146,21 +159,42 @@ internal static class OdsCellDecoration
     }
 
     /// <summary>Reads the header and footer of the master page a sheet prints under.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>text:span</c>'s formatting is kept.</strong> It used to be dropped — the
+    /// comment inside <c>Collect</c> read <em>"a text:span carries formatting and nothing else
+    /// here, so its children are taken and it is not"</em> — which made every ODF band one size
+    /// and one face, the workbook's default, whatever the file said. That is wrong twice: it
+    /// draws the band in the wrong face, and it sizes it in the wrong one, because
+    /// <c>ScPrintFunc::UpdateHFHeight</c> measures the band's real text
+    /// (<c>sc/source/ui/view/printfun.cxx:817-836</c>). Measured against 26.2.4.2 over 30
+    /// authored probes crossing five faces with six sizes: the reference's band grows with the
+    /// header's own size at every size above the default's and ours did not move at all — 18.1 pt
+    /// short at Carlito 24.
+    /// </para>
+    /// <para>
+    /// The three properties a band's height and drawing turn on are the size, the family and the
+    /// two slopes; everything else a span can state is colour and decoration, which
+    /// <see cref="SheetHeaderSegment"/> does not model for any of the three formats.
+    /// </para>
+    /// </remarks>
+    /// <param name="styles">The document's styles, for the spans' own text styles.</param>
     /// <param name="header">The <c>style:header</c> element, or null.</param>
-    public static SheetHeaderFooter? ReadBand(XElement? header)
+    public static SheetHeaderFooter? ReadBand(OdfStyles styles, XElement? header)
     {
+        ArgumentNullException.ThrowIfNull(styles);
         if (header is null) return null;
 
-        SheetHeaderPart left = Region(header, "region-left");
-        SheetHeaderPart centre = Region(header, "region-center");
-        SheetHeaderPart right = Region(header, "region-right");
+        SheetHeaderPart left = Region(styles, header, "region-left");
+        SheetHeaderPart centre = Region(styles, header, "region-center");
+        SheetHeaderPart right = Region(styles, header, "region-right");
 
         // A band with no regions at all but with a bare text:p is Calc's own shorthand for
         // "everything is centred", which is what its exporter writes for a header holding only
         // the sheet name.
         if (left.IsEmpty && centre.IsEmpty && right.IsEmpty)
         {
-            SheetHeaderPart whole = Paragraphs(header);
+            SheetHeaderPart whole = Paragraphs(styles, header);
             return whole.IsEmpty ? null : new SheetHeaderFooter(
                 SheetHeaderPart.Empty, whole, SheetHeaderPart.Empty);
         }
@@ -168,10 +202,10 @@ internal static class OdsCellDecoration
         return new SheetHeaderFooter(left, centre, right);
     }
 
-    private static SheetHeaderPart Region(XElement band, string localName)
+    private static SheetHeaderPart Region(OdfStyles styles, XElement band, string localName)
     {
         XElement? region = band.Element(XName.Get(localName, OdfNamespaces.Style));
-        return region is null ? SheetHeaderPart.Empty : Paragraphs(region);
+        return region is null ? SheetHeaderPart.Empty : Paragraphs(styles, region);
     }
 
     /// <summary>
@@ -184,31 +218,119 @@ internal static class OdsCellDecoration
     /// showed and is exactly what must not be printed — page 1 of a document whose page 1 was
     /// deleted still says "1" in the file.
     /// </remarks>
-    private static SheetHeaderPart Paragraphs(XElement region)
+    private static SheetHeaderPart Paragraphs(OdfStyles styles, XElement region)
     {
         List<SheetHeaderSegment> segments = [];
 
         foreach (XElement paragraph in region.Elements(XName.Get("p", OdfNamespaces.Text)))
         {
             if (segments.Count > 0) segments.Add(SheetHeaderSegment.Literal("\n"));
-            Collect(paragraph, segments);
+
+            // A paragraph's own text style applies to everything on it that no span overrides,
+            // exactly as a span's does to its children.
+            Collect(
+                styles, paragraph, segments,
+                Run.None.Over(styles, TextStyleName(paragraph)));
         }
 
         return segments.Count == 0 ? SheetHeaderPart.Empty : new SheetHeaderPart(segments);
     }
 
-    private static void Collect(XElement element, List<SheetHeaderSegment> segments)
+    /// <summary>What a band's run is formatted with: the three properties its height turns on.</summary>
+    /// <param name="Size">The em size the run states, or null to take the workbook's default.</param>
+    /// <param name="Family">The family it states, or null for the default.</param>
+    /// <param name="Bold">Whether it is bold, or null for the default.</param>
+    /// <param name="Italic">Whether it is italic, or null for the default.</param>
+    private readonly record struct Run(
+        Length? Size, string? Family, bool? Bold, bool? Italic)
+    {
+        /// <summary>A run stating nothing, which takes the workbook's default cell font.</summary>
+        public static Run None => default;
+
+        /// <summary>
+        /// This run with whatever a text style states written over it.
+        /// </summary>
+        /// <remarks>
+        /// A nested <c>text:span</c> inherits its parent's run and overrides what its own style
+        /// sets, which is what makes this a fold rather than a lookup. The family is resolved
+        /// through both of its spellings at once — <c>style:font-name</c> and
+        /// <c>fo:font-family</c> are one item, so an ancestor style stating the second must not
+        /// beat this style stating the first (<c>XMLTextImportPropertyMapper::handleSpecialItem</c>,
+        /// <c>xmloff/source/text/txtimppr.cxx:58-101</c>).
+        /// </remarks>
+        public Run Over(OdfStyles styles, string? styleName)
+        {
+            if (string.IsNullOrEmpty(styleName)) return this;
+
+            OdfProperty face = styles.ResolveWithoutDefaults(
+                styleName, OdfStyleFamily.Text, OdfPropertyKind.Text, FontSpellings,
+                out int matched);
+
+            string? family = Family;
+            if (face.HasValue)
+            {
+                family = matched == 1 && face.Value is { } named
+                         && styles.FontFaces.TryGetValue(named, out OdfFontFace? declared)
+                    ? declared.FontFamily ?? named
+                    : face.Value;
+            }
+
+            string? weight = Text(styles, styleName, OdfNamespaces.FoCompatible, "font-weight");
+            string? slope = Text(styles, styleName, OdfNamespaces.FoCompatible, "font-style");
+
+            return new Run(
+                OdfValue.ParseLength(
+                    Text(styles, styleName, OdfNamespaces.FoCompatible, "font-size")) ?? Size,
+                family,
+                weight is null ? Bold : Weight(weight) >= 600,
+                slope is null ? Italic : slope is "italic" or "oblique");
+        }
+
+        private static string? Text(OdfStyles styles, string styleName, string ns, string name)
+        {
+            OdfProperty found = styles.ResolveWithoutDefaults(
+                styleName, OdfStyleFamily.Text, OdfPropertyKind.Text, ns, name);
+
+            return found.HasValue ? found.Value : null;
+        }
+
+        /// <summary>An ODF weight, which is a keyword or a hundreds number.</summary>
+        private static int Weight(string value)
+            => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
+                ? n
+                : value switch
+                {
+                    "bold" => 700,
+                    "normal" => 400,
+                    _ => 400,
+                };
+
+        /// <summary>The two spellings of a face, in the order one style's own attributes settle.</summary>
+        private static readonly (string Namespace, string Name)[] FontSpellings =
+        [
+            (OdfNamespaces.FoCompatible, "font-family"),
+            (OdfNamespaces.Style, "font-name"),
+        ];
+    }
+
+    private static string? TextStyleName(XElement element)
+        => element.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value;
+
+    private static void Collect(
+        OdfStyles styles, XElement element, List<SheetHeaderSegment> segments, Run run)
     {
         foreach (XNode node in element.Nodes())
         {
             switch (node)
             {
                 case XText text:
-                    segments.Add(SheetHeaderSegment.Literal(text.Value));
+                    segments.Add(SheetHeaderSegment.Literal(
+                        text.Value, run.Size, run.Family, run.Bold, run.Italic));
                     break;
 
                 case XElement child when Field(child) is { } field:
-                    segments.Add(SheetHeaderSegment.Of(field));
+                    segments.Add(SheetHeaderSegment.Of(
+                        field, run.Size, run.Family, run.Bold, run.Italic));
                     break;
 
                 case XElement child when child.Name == XName.Get("s", OdfNamespaces.Text):
@@ -218,18 +340,21 @@ internal static class OdsCellDecoration
                         NumberStyles.Integer, CultureInfo.InvariantCulture, out int stated)
                         ? stated
                         : 1;
-                    segments.Add(SheetHeaderSegment.Literal(new string(' ', Math.Clamp(count, 0, 256))));
+                    segments.Add(SheetHeaderSegment.Literal(
+                        new string(' ', Math.Clamp(count, 0, 256)),
+                        run.Size, run.Family, run.Bold, run.Italic));
                     break;
                 }
 
                 case XElement child when child.Name == XName.Get("tab", OdfNamespaces.Text):
-                    segments.Add(SheetHeaderSegment.Literal("\t"));
+                    segments.Add(SheetHeaderSegment.Literal(
+                        "\t", run.Size, run.Family, run.Bold, run.Italic));
                     break;
 
-                // A text:span carries formatting and nothing else here, so its children are
-                // taken and it is not.
+                // A text:span states formatting and holds the text it applies to, so its children
+                // are taken and its own style is folded over the run they are taken with.
                 case XElement child:
-                    Collect(child, segments);
+                    Collect(styles, child, segments, run.Over(styles, TextStyleName(child)));
                     break;
             }
         }

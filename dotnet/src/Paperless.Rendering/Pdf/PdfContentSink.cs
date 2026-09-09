@@ -317,6 +317,8 @@ internal sealed class PdfContentSink(
         string resource = string.Empty;
         bool oblique = run.Font.SyntheticOblique;
 
+        bool squeezed = run.WidthScale != 1.0;
+
         int at = 0;
         while (at < run.Glyphs.Count)
         {
@@ -336,10 +338,16 @@ internal sealed class PdfContentSink(
             // there, so the pen origin is untouched by the shear and only the glyph outlines
             // lean; writing the same matrix here reproduces that exactly. See
             // FontReference.SyntheticOblique.
-            if (oblique)
+            //
+            // A squeezed run takes the same matrix with its `a` term, which is the one place PDF
+            // spells `w:rPr/w:w` directly — see GlyphRun.WidthScale. The translation is not scaled
+            // by `a`, so each segment still starts exactly where it was placed, and only the glyphs
+            // and the advances between them are drawn narrow.
+            if (oblique || squeezed)
             {
                 _content.Append(CultureInfo.InvariantCulture,
-                    $"1 0 {N(FontReference.SyntheticObliqueShear)} 1 {N(x)} {N(y)} Tm\n");
+                    $"{N(run.WidthScale)} 0 {N(oblique ? FontReference.SyntheticObliqueShear : 0)} 1 "
+                    + $"{N(x)} {N(y)} Tm\n");
             }
             else
             {
@@ -857,12 +865,20 @@ internal sealed class PdfContentSink(
     }
 
     /// <summary>Writes one stretch of glyphs, correcting the pen wherever it has drifted.</summary>
+    /// <remarks>
+    /// The pen is tracked in page points, so a run drawn under a squeezing text matrix — see
+    /// <see cref="GlyphRun.WidthScale"/> — advances by the font's width times that scale, and a
+    /// correction written into the array is scaled by it too. Both terms therefore carry it, or a
+    /// squeezed run's second glyph would be corrected onto the position its unsqueezed advance
+    /// implied.
+    /// </remarks>
     private void AppendShow(GlyphRun run, string?[] texts, int start, int end, double originX, double size)
     {
         StringBuilder items = new();
         StringBuilder hex = new();
         bool adjusted = false;
         double pen = originX;
+        double drawn = size * run.WidthScale;
 
         for (int i = start; i < end; i++)
         {
@@ -870,20 +886,20 @@ internal sealed class PdfContentSink(
             double wanted = (run.Origin.X + glyph.Offset.X).Points;
             double drift = wanted - pen;
 
-            if (Math.Abs(drift) > PenTolerancePoints && size > 0)
+            if (Math.Abs(drift) > PenTolerancePoints && drawn > 0)
             {
                 if (hex.Length > 0) { items.Append('<').Append(hex).Append('>'); hex.Clear(); }
 
                 // A number in a TJ array moves the pen backwards by its own thousandth of an em,
                 // so a glyph that should sit further right takes a negative one.
-                items.Append(N(-drift * 1000.0 / size)).Append(' ');
+                items.Append(N(-drift * 1000.0 / drawn)).Append(' ');
                 pen = wanted;
                 adjusted = true;
             }
 
             (_, byte code) = fonts.Map(run.Font, glyph.GlyphId, texts[i]);
             hex.Append(code.ToString("X2", CultureInfo.InvariantCulture));
-            pen += size * fonts.Width(run.Font, glyph.GlyphId) / 1000.0;
+            pen += drawn * fonts.Width(run.Font, glyph.GlyphId) / 1000.0;
         }
 
         if (hex.Length > 0) items.Append('<').Append(hex).Append('>');

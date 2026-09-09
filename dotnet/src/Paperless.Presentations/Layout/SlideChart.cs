@@ -3,6 +3,7 @@ using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml.DrawingML;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.Presentations.Layout;
@@ -133,6 +134,19 @@ public static class SlideChart
         LineCap cap = LineCap.Butt)
         => new(Paint.Solid(colour), width, cap, LineJoin.Miter, DashPattern: dash);
 
+    /// <summary>Which edge of its block a broken label's lines line up on.</summary>
+    /// <remarks>
+    /// The anchor's own horizontal half: a value axis' labels hang from their right edge, a
+    /// legend entry from its left, and everything else is centred.
+    /// </remarks>
+    private static TextAlignment Adjust(ChartLabelAnchor anchor)
+        => anchor switch
+        {
+            ChartLabelAnchor.RightMiddle => TextAlignment.End,
+            ChartLabelAnchor.LeftMiddle => TextAlignment.Start,
+            _ => TextAlignment.Centre,
+        };
+
     /// <summary>
     /// Lays one chart label out and returns its glyph runs, placed on the slide.
     /// </summary>
@@ -150,13 +164,26 @@ public static class SlideChart
     /// origin is the difference between a title beside the axis and one off the left of the
     /// slide.
     /// </para>
+    /// <para>
+    /// <strong>A label the arrangement broke is as wide as its widest line, and until this said
+    /// so it was as wide as all of them joined.</strong> A wrapped label came here as one
+    /// paragraph holding a newline, and the anchor was worked out from a width that added the two
+    /// lines together — so a right-aligned one landed a whole line to the left of the axis it
+    /// hangs from. <c>SheetChart</c> and <c>FrameChart</c> have split on the newline and anchored
+    /// line by line since they were written; this is the third of the three catching up. It is
+    /// done here by giving the body one paragraph per line and letting the paragraph alignment
+    /// carry the anchor, which is what <c>changeTextAdjustment</c> does for the reference's own
+    /// label shapes (<c>chart2/source/view/main/LabelPositionHelper.cxx</c>).
+    /// </para>
     /// </remarks>
     private static PlacedText? Text(ChartLabel label, AffineTransform placement, SlideFonts fonts)
     {
         if (label.Text.Length == 0) return null;
 
-        DocSize measured =
-            new Measurer(fonts).Measure(label.Text, label.Size, label.Family, label.IsBold == true);
+        Measurer measurer = new(fonts);
+        string[] lines = label.Text.Split('\n');
+
+        DocSize measured = measurer.Measure(label.Text, label.Size, label.Family, label.IsBold == true);
         if (measured.Width <= Length.Zero) return null;
 
         // A non-square stretch leaves a residual horizontal factor the em cannot carry. The text
@@ -181,8 +208,11 @@ public static class SlideChart
             _ => new DocPoint(label.At.X - effective / 2, label.At.Y - box.Height / 2),
         };
 
-        SlideTextBody body =
-            Measurer.Body(label.Text, label.Size, label.Colour, label.Family, label.IsBold == true);
+        SlideTextBody body = lines.Length > 1
+            ? Measurer.Lines(
+                  lines, label.Size, label.Colour, label.Family, label.IsBold == true,
+                  Adjust(label.Anchor))
+            : Measurer.Body(label.Text, label.Size, label.Colour, label.Family, label.IsBold == true);
 
         AffineTransform transform = stretch == 1.0
             ? placement
@@ -213,11 +243,81 @@ public static class SlideChart
         }
         else
         {
-            area = new DocRect(corner.X / stretch, corner.Y, box.Width, box.Height);
+            area = new DocRect(
+                corner.X / stretch, corner.Y,
+                lines.Length > 1 ? measured.Width : box.Width,
+                box.Height);
         }
 
-        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, fonts);
+        List<PlacedGlyphRun> runs = OnChartDevice(
+            SlideTextLayout.Place(body, area, fonts), label.Size);
         return runs.Count == 0 ? null : new PlacedText(runs, transform);
+    }
+
+    /// <summary>
+    /// Puts a chart label's advances onto <c>chart2</c>'s own device before anything reads them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart's text is not laid out by Impress.</strong> It is built by
+    /// <c>chart2</c>'s view as plain text shapes on the <c>VirtualDevice</c> that
+    /// <c>DrawModelWrapper</c> creates from <c>Application::GetDefaultDevice()</c> with
+    /// <c>MapUnit::Map100thMM</c> (<c>chart2/source/view/main/DrawModelWrapper.cxx</c>:88-99), and
+    /// that device is <strong>96 dpi</strong> (<c>SvpSalGraphics::GetResolution</c>,
+    /// <c>vcl/headless/svpgdi.cxx</c>:44). An <c>OutputDevice</c> instantiates a font at a whole
+    /// number of device pixels, so at 10 pt it sets <strong>13</strong> for 13.333 and every
+    /// advance the chart measures is 2.5% narrow, while at 11 pt it sets 15 for 14.667 and they
+    /// are 2.3% wide. <see cref="MetricGrid.PixelEmScale"/> is that ratio.
+    /// </para>
+    /// <para>
+    /// <strong>The glyphs keep the size the file states; only the pen moves.</strong> The
+    /// reference draws a 10 pt label at 10.005 pt with the narrower advances rather than at
+    /// 9.75 pt, so the em is quantised for the advance and not for the glyph — which is why this
+    /// scales the run's positions and leaves <see cref="GlyphRun.FontSize"/> alone.
+    /// </para>
+    /// <para>
+    /// <strong>Measuring and drawing take it together or neither may.</strong> The width a value
+    /// axis' labels measure is what reserves the plot area and what right-aligns them against it,
+    /// so a label measured wide and drawn narrow is aligned on a width it does not have — which
+    /// is precisely what 24.2.7.2 does and 26.2.4.2 stopped doing. Both paths here go through
+    /// this one call for that reason.
+    /// </para>
+    /// <para>
+    /// <c>SheetBandText.ChartShape</c> is the same rule for a workbook's charts, landed one round
+    /// earlier; <c>FrameChart.ChartFace.Shape</c> is the third. What is deliberately left out on
+    /// all three is the reference's further rounding of each glyph's advance to a whole hundredth
+    /// of a millimetre, worth at most 0.014 pt a glyph — see
+    /// <see cref="MetricGrid.PixelEmScale"/>. Decorations in
+    /// <see cref="PlacedGlyphRun.Rules"/> are in slide coordinates rather than run-relative ones
+    /// and are left alone; a chart label carries none.
+    /// </para>
+    /// </remarks>
+    /// <param name="runs">The runs the ordinary slide text layout produced.</param>
+    /// <param name="size">The em size the label states.</param>
+    private static List<PlacedGlyphRun> OnChartDevice(List<PlacedGlyphRun> runs, Length size)
+    {
+        double scale = MetricGrid.Chart.PixelEmScale(size);
+        if (runs.Count == 0 || scale == 1.0) return runs;
+
+        for (int i = 0; i < runs.Count; i++)
+        {
+            PlacedGlyphRun placed = runs[i];
+            IReadOnlyList<PositionedGlyph> glyphs = placed.Run.Glyphs;
+            List<PositionedGlyph> scaled = new(glyphs.Count);
+
+            foreach (PositionedGlyph glyph in glyphs)
+            {
+                scaled.Add(glyph with
+                {
+                    Offset = new DocPoint(glyph.Offset.X * scale, glyph.Offset.Y),
+                    Advance = glyph.Advance * scale,
+                });
+            }
+
+            runs[i] = placed with { Run = placed.Run with { Glyphs = scaled } };
+        }
+
+        return runs;
     }
 
     /// <summary>
@@ -262,6 +362,24 @@ public static class SlideChart
             ArgumentNullException.ThrowIfNull(text);
             if (text.Length == 0) return new DocSize(Length.Zero, Length.Zero);
 
+            // A label the arrangement broke is as wide as its widest line and as deep as the sum
+            // of them — the same shape `ChartAxisLabels.Shape` reserves room for. Measuring the
+            // joined run instead adds the lines together, which is a width no label ever has.
+            if (text.AsSpan().IndexOf('\n') >= 0)
+            {
+                Length widest = Length.Zero;
+                Length deep = Length.Zero;
+
+                foreach (string line in text.Split('\n'))
+                {
+                    DocSize one = Measure(line, size, family, bold);
+                    if (one.Width > widest) widest = one.Width;
+                    deep += one.Height;
+                }
+
+                return new DocSize(widest, deep);
+            }
+
             SlideTextBody body = Body(text, size, Colour.Black, family, bold);
             Length height = SlideTextLayout.Height(body, Length.Zero, fonts);
 
@@ -269,10 +387,12 @@ public static class SlideChart
             // because it decides how much room the value axis' labels are given and an
             // underestimate puts the widest of them outside the frame. Laying the line out at
             // the origin and adding up its advances is the same arithmetic the layout used to
-            // place them, so the two cannot disagree.
+            // place them — through the same `OnChartDevice` call — so the two cannot disagree.
             Length width = Length.Zero;
-            foreach (PlacedGlyphRun placed in SlideTextLayout.Place(
-                body, new DocRect(Length.Zero, Length.Zero, Length.Zero, height), fonts))
+            foreach (PlacedGlyphRun placed in OnChartDevice(
+                SlideTextLayout.Place(
+                    body, new DocRect(Length.Zero, Length.Zero, Length.Zero, height), fonts),
+                size))
             {
                 foreach (PositionedGlyph glyph in placed.Run.Glyphs) width += glyph.Advance;
             }
@@ -284,15 +404,34 @@ public static class SlideChart
         /// A one-line, one-run, un-inset, unwrapped body — what every chart label is.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// <strong>A chart's text is measured by the face's own metrics, not by the em.</strong>
         /// The PPTX importer sets EditEngine's <c>FixedCellHeight</c> on every <em>slide shape's</em>
         /// text body (<c>oox/source/ppt/pptshapecontext.cxx:186</c>), which makes a line 1.2 em
         /// tall whatever face it is in — but a chart's labels are not slide shapes. They are made
         /// by <c>chart2</c>'s own view, which creates plain text shapes and sets no such flag, so
-        /// their line height is the face's ascent plus descent plus leading. For Liberation Sans
-        /// that is 1.1499 em against 1.2, which is 0.15 pt on a 10 pt label and 0.65 pt on a
-        /// 13 pt title — small individually, and the two accumulate into the top and bottom
-        /// insets that place the whole plot area.
+        /// their line height is the face's ascent and descent. For Liberation Sans that is
+        /// 1.1499 em against 1.2 before any device — small individually, and it accumulates into
+        /// the top and bottom insets that place the whole plot area.
+        /// </para>
+        /// <para>
+        /// <strong>…and those metrics come through <c>chart2</c>'s own 96 dpi device, which is the
+        /// vertical half of the same rule <see cref="OnChartDevice"/> applies horizontally.</strong>
+        /// <see cref="SlideTextBody.Device"/> is what carries it, so the height
+        /// <c>SlideTextLayout.Height</c> reserves and the baselines <c>SlideTextLayout.Place</c>
+        /// draws on are quantised by one device and cannot drift apart. A 96 dpi pixel is 0.75 pt,
+        /// so at 10 pt the device sets the em at <strong>13</strong> pixels and Liberation Sans
+        /// stacks at 11.254 pt where its design metrics give 11.499 — and at 11 pt, where the em
+        /// rounds <em>up</em> to 15, at 12.756 against 12.649. The external leading goes with the
+        /// grid, which is right for the same reason it is everywhere else: <c>IsAddExtLeading()</c>
+        /// is false in EditEngine and a chart label is an EditEngine text.
+        /// </para>
+        /// <para>
+        /// Measured on both reference binaries in <c>probes/chart-vertical/</c>: three faces ×
+        /// twelve sizes × two binaries × a deck and a Writer document, <strong>144 of 144</strong>
+        /// baseline-to-baseline distances within 0.019 pt of this rule, where scaling the face's
+        /// metrics exactly is out by up to 1.208 pt.
+        /// </para>
         /// </remarks>
         internal static SlideTextBody Body(
             string text, Length size, Colour colour, string? family, bool bold = false)
@@ -302,6 +441,7 @@ public static class SlideChart
             Wraps = false,
             Anchor = TextAnchor.Top,
             FontIndependentLineSpacing = false,
+            Device = MetricGrid.Chart,
             Paragraphs =
             [
                 new SlideParagraph(
@@ -319,5 +459,46 @@ public static class SlideChart
                     TextAlignment.Start),
             ],
         };
+
+        /// <summary>One paragraph per line, aligned on the edge the anchor names.</summary>
+        /// <remarks>
+        /// What a label the arrangement broke is drawn from. Each line is its own paragraph
+        /// because the body does not wrap — <see cref="Body"/> sets <c>Wraps = false</c>, which
+        /// is right for a chart label and means a newline inside one paragraph would be the only
+        /// thing breaking it — and because the alignment is what carries the anchor across all of
+        /// them at once.
+        /// </remarks>
+        internal static SlideTextBody Lines(
+            string[] lines,
+            Length size,
+            Colour colour,
+            string? family,
+            bool bold,
+            TextAlignment adjust)
+        {
+            SlideTextBody body =
+                Body(string.Concat(lines), size, colour, family, bold);
+
+            List<SlideParagraph> paragraphs = new(lines.Length);
+
+            foreach (string line in lines)
+            {
+                paragraphs.Add(new SlideParagraph(
+                    line,
+                    [
+                        new SlideTextRun(
+                            0,
+                            line.Length,
+                            string.IsNullOrWhiteSpace(family) ? ChartFace : family.Trim(),
+                            size,
+                            bold ? 700 : 400,
+                            false,
+                            colour),
+                    ],
+                    adjust));
+            }
+
+            return body with { Paragraphs = paragraphs };
+        }
     }
 }

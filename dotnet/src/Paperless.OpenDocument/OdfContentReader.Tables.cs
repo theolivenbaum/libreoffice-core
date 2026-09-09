@@ -121,7 +121,7 @@ public sealed partial class OdfContentReader
 
             foreach (XElement child in container.Elements())
             {
-                if (child.Name.NamespaceName != OdfNamespaces.Table) continue;
+                if (!OdfNamespaces.IsTable(child.Name.NamespaceName)) continue;
 
                 switch (child.Name.LocalName)
                 {
@@ -234,7 +234,7 @@ public sealed partial class OdfContentReader
 
             foreach (XElement child in rowElement.Elements())
             {
-                if (child.Name.NamespaceName != OdfNamespaces.Table) continue;
+                if (!OdfNamespaces.IsTable(child.Name.NamespaceName)) continue;
 
                 bool covered = child.Name.LocalName == "covered-table-cell";
                 if (!covered && child.Name.LocalName != "table-cell") continue;
@@ -310,7 +310,11 @@ public sealed partial class OdfContentReader
         // already run through its number format. Keeping them rather than re-deriving the
         // text from the value is what makes extraction agree with what the authoring
         // application showed.
+        // SuspendReading clears the verbatim flag, so it is set after the suspend and
+        // restored by the resume; a shape anchored inside the cell suspends again and is
+        // therefore read with ordinary collapsing.
         ReadingState state = SuspendReading();
+        _cellVerbatim = CellTextIsVerbatim;
         ReadBlocks(cellElement, cell);
         ResumeReading(state);
 

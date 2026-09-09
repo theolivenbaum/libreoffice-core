@@ -71,9 +71,14 @@ internal static class BiffChartFixture
     /// resolved only when the categories' own format is a date one, so a test about one has to
     /// state a date code here.
     /// </param>
+    /// <param name="hiddenRow">
+    /// Hides the worksheet's second row. A chart whose <c>CHPROPERTIES</c> says it plots only the
+    /// cells its sheet shows drops such a cell from the series entirely, so this and
+    /// <see cref="SeriesAreaLink"/> together are what a case about that rule needs.
+    /// </param>
     public static ChartPlot Chart(
         byte[] substream, bool withData = false, ushort? cellFormat = null,
-        string formatCode = "0.0")
+        string formatCode = "0.0", bool hiddenRow = false)
     {
         List<byte> globals = [.. Record(Bof, [0x00, 0x06, 0x05, 0x00, 0, 0, 0, 0])];
         foreach (string name in Fonts) globals.AddRange(FontRecord(name));
@@ -95,7 +100,7 @@ internal static class BiffChartFixture
             globals.AddRange(Record(ExternSheet, [.. Word(1), .. Word(0), .. Word(0), .. Word(0)]));
         }
 
-        byte[] data = withData ? Worksheet() : [];
+        byte[] data = withData ? Worksheet(hiddenRow) : [];
 
         // BOUNDSHEET states where each sheet's BOF is, so the records have to be built once
         // everything before them is sized — including themselves.
@@ -119,14 +124,41 @@ internal static class BiffChartFixture
             .Single(item => item.Chart is not null).Chart!;
     }
 
-    /// <summary>A worksheet substream holding one number, at A1, for a series to plot.</summary>
-    private static byte[] Worksheet() =>
+    /// <summary>
+    /// A worksheet substream holding two numbers, at A1 and A2, for a series to plot.
+    /// </summary>
+    /// <remarks>
+    /// The second cell and its <c>ROW</c> records were added for the visible-cells rule and are
+    /// invisible to every case that came before it: those name A1 alone, through
+    /// <see cref="SeriesLink"/>'s single-cell <c>tRef3d</c>.
+    /// </remarks>
+    /// <param name="hiddenRow">Whether row 2 states the hidden flag.</param>
+    private static byte[] Worksheet(bool hiddenRow = false) =>
     [
         .. Record(Bof, [0x00, 0x06, 0x10, 0x00, 0, 0, 0, 0]),
-        .. Record(Dimensions, [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+        .. Record(Dimensions, [0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+        .. RowRecord(0, hidden: false),
+        .. RowRecord(1, hidden: hiddenRow),
         .. Record(Number, [.. Word(0), .. Word(0), .. Word(0), .. BitConverter.GetBytes(42.0)]),
+        .. Record(Number, [.. Word(1), .. Word(0), .. Word(0), .. BitConverter.GetBytes(7.0)]),
         .. Record(Eof, []),
     ];
+
+    /// <summary>
+    /// A <c>ROW</c> record: the row, its height, and the flags whose bit 5 hides it.
+    /// </summary>
+    /// <remarks>
+    /// Sixteen bytes, which is the shortest the reader will act on. The height is 255 twips so
+    /// that a hidden row and a visible one differ in the flag alone.
+    /// </remarks>
+    private static byte[] RowRecord(ushort row, bool hidden) => Record(Row,
+    [
+        .. Word(row), .. Word(0), .. Word(2),
+        .. Word(255),
+        .. Word(0), .. Word(0),
+        .. Word(hidden ? (ushort)0x0020 : (ushort)0),
+        .. Word(0),
+    ]);
 
     /// <summary>
     /// A <c>CHSOURCELINK</c> naming cell A1 of the workbook's first sheet as a series' values.
@@ -141,6 +173,24 @@ internal static class BiffChartFixture
         1, 2, 0, 0, 0, 0,
         .. Word(7),
         0x3A, .. Word(0), .. Word(0), .. Word(0),
+    ]);
+
+    /// <summary>
+    /// A <c>CHSOURCELINK</c> naming <em>A1:A2</em> as a series' values or categories.
+    /// </summary>
+    /// <remarks>
+    /// One <c>tArea3d</c> token rather than <see cref="SeriesLink"/>'s <c>tRef3d</c>: the
+    /// visible-cells rule can only be seen over a rectangle holding both a shown cell and a
+    /// hidden one.
+    /// </remarks>
+    /// <param name="destination">
+    /// 1 for <c>EXC_CHSRCLINK_VALUES</c>, 2 for <c>EXC_CHSRCLINK_CATEGORY</c>.
+    /// </param>
+    public static byte[] SeriesAreaLink(byte destination = 1) => Record(ChSourceLink,
+    [
+        destination, 2, 0, 0, 0, 0,
+        .. Word(11),
+        0x3B, .. Word(0), .. Word(0), .. Word(1), .. Word(0), .. Word(0),
     ]);
 
     /// <summary>
@@ -363,6 +413,7 @@ internal static class BiffChartFixture
     public const ushort Font = 0x0031;
     public const ushort Dimensions = 0x0200;
     public const ushort Number = 0x0203;
+    public const ushort Row = 0x0208;
     public const ushort ExternSheet = 0x0017;
     public const ushort SupBook = 0x01AE;
     public const ushort Format = 0x041E;
@@ -390,6 +441,12 @@ internal static class BiffChartFixture
     public const ushort ChBegin = 0x1033;
     public const ushort ChEnd = 0x1034;
     public const ushort ChAxesSet = 0x1041;
+    public const ushort ChTypeGroup = 0x1014;
+    public const ushort ChSeriesGroup = 0x1045;
+    public const ushort ChValueRange = 0x101F;
+    public const ushort ChProperties = 0x1044;
+    public const ushort ChBar = 0x1017;
+    public const ushort ChLine = 0x1018;
 
     /// <summary>An axis' own number format index — <c>EXC_ID_CHFORMAT</c>.</summary>
     public const ushort ChFormat = 0x104E;
