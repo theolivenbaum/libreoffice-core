@@ -91,6 +91,13 @@ echo "measuring $CLI" >&2
 # table that looks entirely normal and is not comparable to any round's figures. One whole-corpus
 # sweep -- 1285 documents, about three hours -- was scored against 24.2.7.2 that way and thrown out.
 # The version is printed rather than the path alone, because the path does not say which build it is.
+# How long one render may take, either side. Raise it when the box is busy: a render that
+# times out is banked as a failure, and a "reference cannot render" row is a wedge rather than
+# a slow document -- round 88 found all eleven of one column's ref-failed rows finish in one to
+# three seconds alone, and re-measuring that column at RENDER_TIMEOUT=900 moved its headline
+# from 225 of 307 to 269. Keep the -k: soffice execs oosplash, which ignores SIGTERM.
+RENDER_TIMEOUT="${RENDER_TIMEOUT:-240}"
+
 REF="${REF_SOFFICE:-soffice}"
 command -v "$REF" >/dev/null || { echo "no soffice at $REF" >&2; exit 1; }
 echo "reference $(command -v "$REF") -- $("$REF" --version 2>/dev/null | head -1)" >&2
@@ -240,11 +247,11 @@ one() {  # one <index>
     o="$OUT/ours/$id.pdf"; r="$OUT/ref/$id.pdf"
 
     rm -rf "${OUT:?}/t$idx"; mkdir -p "$OUT/t$idx"
-    timeout -k 30 240 "$CLI" render "$f" --format pdf --outdir "$OUT/t$idx" >/dev/null 2>&1
+    timeout -k 30 "$RENDER_TIMEOUT" "$CLI" render "$f" --format pdf --outdir "$OUT/t$idx" >/dev/null 2>&1
     [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$o"
 
     rm -rf "$OUT/t$idx"; mkdir -p "$OUT/t$idx"
-    timeout -k 30 240 "$REF" -env:UserInstallation="file://$prof" \
+    timeout -k 30 "$RENDER_TIMEOUT" "$REF" -env:UserInstallation="file://$prof" \
       --headless --convert-to pdf --outdir "$OUT/t$idx" "$f" >/dev/null 2>&1
     [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
 
