@@ -2325,6 +2325,29 @@ states one gets neither its own size nor the pool's but `\pard\plain`'s 12 pt �
 style's space after, and the pool's six points is not an sprm at all, so it needs a carrier of its
 own.
 
+***`Title` and `Subtitle` are the same rule under two names that look nothing like a heading, and
+`Body Text` and `caption` are a different one.*** Round 87 left the four as *"26.2.4.2 answers 10,
+10, 14 and 14 where this tree answers 12"*; the numbers are right and **neither of the two 10s is a
+pool value**. What decides it is `GetPoolParent` (`sw/source/core/doc/poolfmt.cxx`:279-289): every
+id in `COLL_DOC_BITS` that is not `COLL_HEADLINE_BASE` itself has that style for a parent, so
+`COLL_DOC_TITLE` and `COLL_DOC_SUBTITLE` answer *Heading*'s 14 pt, 12/6 and keep-with-next — and
+**not** the 28 pt bold centring and 18 pt those two pool entries state for themselves
+(`DocumentStylePoolManager.cxx`:1365-1387), because the entry's own properties are what the import
+resets. `COLL_LABEL` and `COLL_TEXT` have `COLL_STANDARD` for a parent (`:201-204`, `:229-235`), so
+`caption` and `Body Text` inherit **the document's own `Normal` entry**: the same probe with
+`{\s0 … \fs20 Normal;}` draws them at 10 pt and with `\fs28` at 14, while `heading 4`, `Title` and
+`Subtitle` answer 14 to both. So the discriminator is one attribute of the *control* style, and a
+round that measures only one `Normal` size cannot tell a pool constant from inheritance.
+`Title` and `Subtitle` are **done**; the *Standard* half is measured, pinned by
+`APoolStyleUnderStandardIsNotModelledYet`, and left — it needs the whole of `ConvertStyleName`'s
+two hundred names to be safe, and the pool entry a reader would copy is the wrong half of it.
+**Reach is nil for the two that are implemented**, and finding that out corrected round 87's own
+figure: a census whose *used* set is taken from the whole file counts each stylesheet entry's own
+`\sN` as a paragraph using it, and both `Title` candidates are declared and never applied. Excluding
+the stylesheet, `Title` 0 documents of 338, `Subtitle` 0, `Body Text` 2, `caption` 0 — and the nine
+headings **17 → 12**, which is round 87's reach re-counted rather than its fix re-measured.
+`probes/rtf-bookmark-r88/results.md` §4.
+
 ### An RTF `REF` field expands from its bookmark, and writerfilter gives the bookmarks the wrong names
 
 **The reference draws more text from an RTF than the same document's `.odt` twin, and the extra text
@@ -2350,9 +2373,39 @@ A bookmark that thereby ends in a different text node from its start makes
 `SwGetRefField::UpdateField`'s `Bookmark` case read that as *to the end of the paragraph*
 (`nEnd = nNumEnd<0 ? nLen : nNumEnd`, `:604-607`).
 
-**Reach is 11 of the 338 `.rtf` and it is left open**: substituting the reference's expansions by
-hand takes `24-25_FAA_Holdover_Tables` from 158 pages to **219 against 223** and its alphanumeric
-distance to 0.80 %, which is inside the band but still fails on pages, so no verdict moves.
+***Done in round 88, and it is worth more than the hand-patched estimate.*** `RtfBookmarkRotation`
+is those three functions in the order a bookmark half goes through them and `RtfReferenceFields` is
+the expansion; `24-25_FAA_Holdover_Tables` goes from **158 pages to 221 against the reference's
+223** and from 6.71 % to **0.33 %** on alphanumeric characters, drawing the long caption 253 times
+where the reference draws it 253 times. **Reach is 11 of the 338 `.rtf`**, counted on the `fldinst`
+group rather than on the string `REF ` — which also matches `PAGEREF` and gave 13.
+
+**A fourth link the brief did not name, and the rotation is what makes it expensive.** A group
+nested inside a bookmark's name is *part of the name* and not a half of its own — `popState` guards
+both destinations with `if (&getDestinationText() != getCurrentDestinationText()) break; // not for
+nested group` (`:2736-2740`, `:2751-2755`), which skips the nested half and, because the two states
+share one buffer, keeps its text. Under a reader that pairs by name that is harmless; under the
+rotation a spurious half takes an id, and a spurious **end** naming nothing takes
+`m_aBookmarks[""]` — value-initialised to **0** — so it closes the document's *first* bookmark under
+the wrong name. Measured: 26.2.4.2 reads `{\*\bkmkstart A}first{\*\bkmkend {x}A}` as one bookmark
+called **`xA`**, so its `REF A` finds nothing, and the same file without the nested group draws
+`first`.
+
+Three things about it are worth carrying. **The rotation is verified against 26.2.4.2 on ten
+one-shape probes, 27 of 28 predictions exact** (`probes/rtf-bookmark-r88/`), the twenty-eighth being
+the flat-ODF *shape* of a cross-reference bookmark rather than what it expands to. **A document
+stating a `REF` is read twice**: a `REF` may name a bookmark the walk has not reached, and rewriting
+a paragraph after it has closed would rebase every offset counted against it — its runs, its notes,
+its frames and its own marks — so `RtfReader` computes the expansions from the first read's marks
+and hands them to a second. And **the "Error: Reference source not found" the reference draws for a
+name nobody holds is deliberately not reproduced**: it would fire wherever *our* bookmark table is
+the incomplete one, and it costs two occurrences across the eleven documents.
+
+**No gate verdict moves, and the verdict column is the wrong instrument here.** Both holdover
+documents fail on pages before and after; what the fix moves is the page count and the characters
+drawn. The other document to know about is `FAA 2025-26 Holdover Tables`, which is **172 pages
+against 233** with its glyph distance now at 1.70 %: whatever is left there adds pages without
+adding text, and it is not this mechanism — the long expansion appears 578 times on both sides.
 
 **The instrument for both of these is worth more than either.** `soffice --convert-to fodt` on the
 `.rtf` prints the reference's own answer for every bookmark, every style name and every parent, in

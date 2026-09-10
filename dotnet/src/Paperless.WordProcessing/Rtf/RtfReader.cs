@@ -43,6 +43,17 @@ public static class RtfReader
         RtfDocumentReader reader = new(data, diagnostics);
         ContentDocument content = reader.Read();
 
+        // A REF field draws its bookmark's text rather than the result the producer cached, and the
+        // bookmark may be anywhere in the document -- so a file that states one is read a second
+        // time with the expansions in hand. A token stream has nothing to revisit, and rewriting a
+        // paragraph after it has closed would rebase every offset counted against it.
+        if (RtfReferenceFields.Expansions(reader.Marks) is { Count: > 0 } expansions)
+        {
+            diagnostics.Clear();
+            reader = new RtfDocumentReader(data, diagnostics) { ReferenceExpansions = expansions };
+            content = reader.Read();
+        }
+
         return new RtfDocument(
             format, content, diagnostics, reader.Sections, reader.LayoutBlocks,
             reader.HeaderLayout, reader.FooterLayout, reader.Marks,

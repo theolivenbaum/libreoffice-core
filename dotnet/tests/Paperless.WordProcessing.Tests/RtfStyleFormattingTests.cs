@@ -281,6 +281,67 @@ public sealed class RtfStyleFormattingTests
             .SpaceAfter.ShouldBe(Length.Zero);
     }
 
+    /// <summary>
+    /// <c>Title</c> and <c>Subtitle</c> take the same pool <em>Heading</em>, and neither takes what
+    /// its own pool style states.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both map to a pool style under <c>COLL_DOC_BITS</c>, whose parent is
+    /// <c>COLL_HEADLINE_BASE</c> (<c>GetPoolParent</c>, <c>sw/source/core/doc/poolfmt.cxx</c>:279-289)
+    /// — so a name that looks nothing like a heading takes a heading's fourteen points, twelve above
+    /// and six below. The 28 pt bold centring <c>COLL_DOC_TITLE</c> states
+    /// (<c>DocumentStylePoolManager.cxx</c>:1365-1374) and the 18 pt of <c>COLL_DOC_SUBTITLE</c>
+    /// (<c>:1376-1387</c>) are the entry's own properties and the import resets those, which is the
+    /// same half of the rule that costs the nine headings their <c>aHeadlineSizes</c> percentages.
+    /// </para>
+    /// <para>
+    /// Measured before it was written: 26.2.4.2 draws all three of <c>heading 4</c>, <c>Title</c>
+    /// and <c>Subtitle</c> at 14 pt with 28.16 pt above and 17.49 below, unturned and unbolded,
+    /// whatever the document's <c>Normal</c> entry states. <c>probes/rtf-bookmark-r88/genpool.py</c>.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("Title")]
+    [InlineData("Subtitle")]
+    public void TheDocumentTitleStylesTakeTheSamePoolHeading(string name)
+    {
+        ParagraphFormat format = Formats(
+            @"\pard\plain\s7 HEAD\par",
+            @"{\s0\snext0\f0\fs20 Normal;}{\s7\sbasedon9\snext0 " + name + ";}"
+                + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")[0];
+
+        format.SpaceBefore.ShouldBe(Length.FromPoints(12));
+        format.SpaceAfter.ShouldBe(Length.FromPoints(6));
+        format.KeepWithNext.ShouldBeTrue();
+
+        First(@"\pard\plain\s7 MARKER\par",
+                @"{\s0\snext0\f0\fs20 Normal;}{\s7\sbasedon9\snext0 " + name + ";}"
+                    + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")
+            .Size.ShouldBe(Length.FromPoints(14));
+    }
+
+    /// <summary>
+    /// <c>Body Text</c> and <c>caption</c> are a different pool parent and are left where they are.
+    /// </summary>
+    /// <remarks>
+    /// The measured divergence beside the rule above, kept as a test so that the next round finds it
+    /// stated rather than has to re-measure it. Both names' pool styles have <c>COLL_STANDARD</c> for
+    /// a parent (<c>poolfmt.cxx</c>:201-204, :229-235), so what 26.2.4.2 gives them is the document's
+    /// own <c>Normal</c> entry — <b>10 pt under <c>\fs20</c> and 14 pt under <c>\fs28</c></b>, while
+    /// this tree answers <c>\pard\plain</c>'s twelve to both. Neither <c>COLL_TEXT</c>'s 0/7 pt nor
+    /// <c>COLL_LABEL</c>'s italic 6/6 survives the reset, so the gap is inheritance from
+    /// <em>Standard</em> and not a pool value; reach is 2 of the 338 converted <c>.rtf</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData("Body Text")]
+    [InlineData("caption")]
+    public void APoolStyleUnderStandardIsNotModelledYet(string name)
+        => First(@"\pard\plain\s7 MARKER\par",
+                @"{\s0\snext0\f0\fs20 Normal;}{\s7\sbasedon9\snext0 " + name + ";}"
+                    + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")
+            .Size.ShouldBe(Length.FromPoints(12));
+
     /// <summary>The resolved layout format of each body paragraph that carries text.</summary>
     private static IReadOnlyList<ParagraphFormat> Formats(string body, string styles)
     {

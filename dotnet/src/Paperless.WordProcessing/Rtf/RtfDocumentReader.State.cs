@@ -819,12 +819,25 @@ public sealed partial class RtfDocumentReader
                 // Hidden text is not displayed by any reader, so extracting it would inject text
                 // the document does not show.
                 if (state.Hidden) return;
+
+                // A REF field's result is recomputed from its bookmark rather than taken from the
+                // file, on the read that knows what the bookmarks say.
+                if (_fieldResultDepth >= 0) text = SubstitutedFieldText(text);
+                if (text.Length == 0) return;
+
                 NoteBodyContent();
                 AppendToParagraph(state, text);
                 return;
 
             case RtfDestination.ListText:
                 CurrentFlow.ListMarker.Append(text);
+                return;
+
+            // The one destination whose text is the reader's rather than the group's: a group nested
+            // inside a bookmark's name shares its buffer, so `{\*\bkmkend {x}A}` names `xA`.
+            case RtfDestination.BookmarkStart:
+            case RtfDestination.BookmarkEnd:
+                AppendBookmarkName(text);
                 return;
 
             case RtfDestination.ColourTable:
@@ -848,8 +861,6 @@ public sealed partial class RtfDocumentReader
             case RtfDestination.AnnotationAuthor:
             case RtfDestination.FieldInstruction:
             case RtfDestination.RevisionTable:
-            case RtfDestination.BookmarkStart:
-            case RtfDestination.BookmarkEnd:
             case RtfDestination.Deletion:
 
             // The two halves of an Escher property, whose text is the whole of what they say: a
@@ -1836,11 +1847,11 @@ public sealed partial class RtfDocumentReader
                 break;
 
             case RtfDestination.BookmarkStart:
-                RecordBookmark(state, start: true);
+                RecordBookmark(start: true);
                 break;
 
             case RtfDestination.BookmarkEnd:
-                RecordBookmark(state, start: false);
+                RecordBookmark(start: false);
                 break;
 
             case RtfDestination.Deletion:
@@ -1864,7 +1875,7 @@ public sealed partial class RtfDocumentReader
         }
 
         // The cached result ends with the group that held it.
-        if (_fieldResultDepth >= 0 && _groupDepth <= _fieldResultDepth) EndFieldResult();
+        if (_fieldResultDepth >= 0 && _groupDepth <= _fieldResultDepth) EndFieldResult(state);
 
         // A field's hyperlink applies only within that field.
         if (_fieldDepth >= 0 && _groupDepth <= _fieldDepth)
