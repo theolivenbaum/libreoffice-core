@@ -7,6 +7,17 @@
 > the font's vertical metrics, not from ink. The corrected reading is below. The measurements of
 > *advance* — which is what the rest of this file rests on — are unaffected.
 
+> **SETTLED by `probes/title-font-r92/`.** The corrected reading above is confirmed, widened from 8
+> glyphs to 16 and scored against every face on the box (DejaVu Sans Bold at 0.9 thousandths of an
+> em a glyph, next face 27× further), and the outlines were extracted and confirmed to be
+> Liberation Sans Bold's. The mechanism is the declared **family class**: 26.2.4.2 appends `sans`
+> to the fontconfig pattern for `FAMILY_SWISS` (`vcl/unx/generic/font/fontconfig.cxx`:1076-1087)
+> when editeng measures, and `drawinglayer::attribute::FontAttribute` has no field for the family
+> class, so the font rebuilt to *draw* is `FAMILY_DONTKNOW` and resolves elsewhere. **The two leads
+> named at the bottom of this file are both refuted there**: `panose` does nothing, and the
+> vertical overflow is identical in a variant that does not show the effect at all. No code
+> changed; read r92 §6-§7 before working from this file.
+
 
 Found by looking at the page. `pdf-image-diff` on
 `slides/chartset-008/pptx/038_Competitive_Advantage_Card_for_PowerPoint_and_Google_Slides`

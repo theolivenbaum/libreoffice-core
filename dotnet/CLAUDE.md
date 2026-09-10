@@ -1719,6 +1719,38 @@ and both answer DejaVu Sans for *Arial Narrow* — so **we agree with a stock ma
 is the outlier.** Bundling one would be the same mistake as the first cut of the bundle, which
 shipped TDF's fuller DejaVu and made us draw a real italic where the reference synthesises a lean.
 
+### The seventh confound: on the draw layer 26.2.4.2 measures in one face and draws in another
+
+**A slide's text can be laid out at one font's advances and painted with another's, and it is a
+LibreOffice defect rather than anything to reproduce.** The declared family class survives into the
+*measurement* and is thrown away before the *drawing*:
+`drawinglayer::attribute::FontAttribute` (`include/drawinglayer/attribute/fontattribute.hxx`) has
+fields for the family *name*, weight, italic, symbol, vertical, outline and **monospaced** — and
+none for the family class or the charset — so `getVclFontFromFontAttribute`
+(`drawinglayer/source/primitive2d/textlayoutdevice.cxx`:416-448) rebuilds the font at
+`FAMILY_DONTKNOW`, while the DX array the primitive carries was measured by editeng with the class
+still on it. `VclProcessor2D` then draws the class-less face at the class-ful face's advances
+(`drawinglayer/source/processor2d/vclprocessor2d.cxx`:485-491).
+
+The one-line test, which needs no LibreOffice at all:
+
+```sh
+fc-match "Helvetica:bold"        # LiberationSans-Bold.ttf   <- what 26.2.4.2 DRAWS
+fc-match "Helvetica,sans:bold"   # DejaVuSans-Bold.ttf       <- what 26.2.4.2 MEASURES
+```
+
+**When those two agree there is no confound** — install `urw-base35` and both answer Nimbus Sans;
+remove Liberation and both answer DejaVu. So the effect is a property of this container's
+fontconfig graph, and a rule fitted to the gap between the two answers is fitted to
+`/etc/fonts/conf.d`. It is also *silent*: both sides draw the same characters, so no gate column
+moves, and the only symptom is a line that wraps a word early and a title that looks tracked out.
+Round 90 filed exactly that as a letter-spacing defect before correcting it.
+
+**Reach 101 of 803 zip corpus documents — slides 99, sheets 2, words 0 — and 91 of them are
+`Helvetica`.** Writer body text cannot show it: `SwTextPainter` never becomes a drawinglayer
+primitive, which is why the 24-of-24 agreement in the next section stands. `probes/title-font-r92/`
+has the census, fourteen one-attribute variants, and why no code changed.
+
 ### The two references differ in a *rule*, not only in their fonts, and it decides font fallback
 
 **24.2.7.2 lets the family name decide; 26.2.4.2 lets a declared family class beat it.**
