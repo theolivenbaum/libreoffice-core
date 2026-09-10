@@ -974,3 +974,20 @@ dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	presen
 dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/candidate-scores.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/dump-stream.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/face-scan-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/face-scan-v8-roman.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/face-scan.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/implied-advances-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/implied-advances.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/make-variants.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/reach-census.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/reach-census.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/reach-documents.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/render-ref.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/results.md	2026-09-10	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/probes/slide-title-track-r90/findings.md;dotnet/src/Paperless.Presentations/Layout/SlideText.cs
+dotnet/probes/title-font-r92/run-census-ours-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/run-census-ref-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/run-census.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/variant-table.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
