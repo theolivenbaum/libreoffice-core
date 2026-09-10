@@ -1,4 +1,12 @@
-# A slide title is tracked out 18 % in the reference and not here
+# A slide title advances at a different font's metrics in the reference
+
+> **CORRECTED, same day, before anything was dispatched on it.** This was first written up as
+> *"the reference tracks the title out 18 %"*, with a claim that the glyph ink was identical on
+> both sides. **The tracking framing is wrong** and the ink claim was not measured: the widths
+> compared were PyMuPDF `rawdict` character *cell* boxes, which are derived from the advance and
+> the font's vertical metrics, not from ink. The corrected reading is below. The measurements of
+> *advance* — which is what the rest of this file rests on — are unaffected.
+
 
 Found by looking at the page. `pdf-image-diff` on
 `slides/chartset-008/pptx/038_Competitive_Advantage_Card_for_PowerPoint_and_Google_Slides`
@@ -9,7 +17,9 @@ flags the title band as *"marks displaced or reshaped"* on both pages; cropping 
 ## What is measured, and it is not what it first looks like
 
 Both sides draw the same string in **the same face at the same size** — `LiberationSans-Bold`,
-36.00 pt, per the PDF's own span data. **The glyph ink is identical to a hundredth of a point**:
+36.00 pt, per the PDF's own span data — and both PDFs embed exactly the same four faces. The
+per-character *cell* widths PyMuPDF reports are also near-identical, which is what first suggested
+tracking; they are **not** ink measurements and should not have been read as any:
 
     C 25.99 / 25.99    o 22.00 / 21.96    m 32.00 / 32.00
     e 20.02 / 20.02    t 11.99 / 11.99    i 10.01 / 9.97      (ours / reference)
@@ -22,7 +32,7 @@ So this is **not** a horizontal scale and not a different substitute face. What 
 | ours | **520.77 pt** | Liberation Sans Bold's natural advance for that string at 36 pt is **522.12 pt** — we are within 0.26 %, which is about what the title's `kern="1200"` would take off |
 | 26.2.4.2 | **615.53 pt** | **+17.9 %**, an extra **3.34 pt per character** |
 
-The reference tracks the title out; we draw it at the font's metrics. The wrap follows from that
+The reference advances further per character; we draw at the font's own metrics. The wrap follows
 and is correct on both sides given their own advances: the layout's title box is
 `cx="8515350"` EMU = 670.5 pt, about 656 pt of text width after the default insets, so our
 616.8 pt line still has room for `Slide` and the reference's 623.5 pt line does not.
@@ -34,7 +44,7 @@ and is correct on both sides given their own advances: the layout's title box is
   `<a:latin typeface="Helvetica"/>` and no spacing. The only `spc` anywhere in the deck is
   `spc="150"` on three master runs whose text is the `www.` footer, and `spc="0"` in
   `slideLayout3`, which this slide does not use.
-- **Not proportional tracking.** The 9 pt body paragraphs on the same slide differ by only
+- **Not a constant per-character amount, so not tracking at all.** The 9 pt body paragraphs on the same slide differ by only
   **+0.117 pt per character** (`competitive pricing and`, 107.0 against 109.7 pt). Four times the
   size carries twenty-eight times the extra advance, so whatever this is, it is not a per-em
   constant applied everywhere.
@@ -42,7 +52,50 @@ and is correct on both sides given their own advances: the layout's title box is
   (`Slide Template`, the last line) is tracked out just as much — a justified paragraph leaves its
   last line alone.
 
-## The lead I could not close
+## What the advances actually are
+
+Per-character advance, taken from the PDFs and compared against the faces' own tables:
+
+| glyph | ours | reference | Liberation Sans Bold | DejaVu Sans Bold |
+|---|---:|---:|---:|---:|
+| C | 25.99 | **26.39** | 26.00 | **26.42** |
+| o | 22.00 | **24.70** | 21.99 | **24.73** |
+| m | 32.00 | **37.47** | 32.01 | **37.51** |
+| p | 22.00 | **25.74** | 21.99 | **25.77** |
+| e | 20.02 | **24.41** | 20.02 | **24.42** |
+| t | 11.99 | **17.17** | 11.99 | **17.21** |
+| i | 10.01 | **12.31** | 10.00 | **12.34** |
+| v | 20.02 | **23.40** | 20.02 | **23.47** |
+
+Summed absolute error against the reference: **Liberation Sans Bold 27.57 pt, DejaVu Sans Bold
+0.28 pt** — 0.035 pt a glyph, which is rounding. So the extra advance is not tracking at all and
+was never constant (it ranges 0.40 to 8.21 pt a pair, stdev 1.83): **the reference is laying the
+title out at DejaVu Sans Bold's advance table and we are laying it out at Liberation Sans
+Bold's.**
+
+Both PDFs embed the same four faces — `Carlito-Regular`, `Carlito-Bold`, `LiberationSans-Bold`,
+`DejaVuSans` — and **neither embeds `DejaVuSans-Bold`**, so the reference is not simply drawing in
+DejaVu: it advances at one face's metrics and draws with another.
+
+**Two cautions on that identification.** It rests on eight glyphs, and `fc-match` on this container
+resolves `DejaVu Sans:bold`, `DejaVu Sans Condensed:bold` and `Noto Sans:bold` all to the same
+file, so the test separated Liberation from DejaVu and nothing finer. And the container's font set
+is a known confound source — five of them are documented in `dotnet/CLAUDE.md`.
+
+## The contradiction a round has to resolve first
+
+LibreOffice's **own** substitution table prefers Liberation for this face.
+`/opt/libreoffice26.2/share/registry/main.xcd`, node `helvetica`:
+
+    SubstFonts = albanyamt;albany;liberationsans;arial;nimbussansl;lucidasans;...
+
+`albanyamt` and `albany` are not installed here, so `liberationsans` is the first that resolves —
+which is the answer *we* produced. Yet the reference's own advances are DejaVu's. Something is
+reaching the metrics that is not this table, and until that is named the direction of the fix is
+not settled: **it is entirely possible that our answer is the right one and the reference's is an
+artefact of this container's fonts.** Establish that before changing anything.
+
+## The other lead
 
 The title overflows its box vertically: two lines of 36 pt at the master's `lnSpc` of 90 % is
 about 64.8 pt in a box `cy="739056"` EMU = 58.2 pt tall. The layout's `bodyPr` is
