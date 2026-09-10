@@ -48,6 +48,36 @@ namespace Paperless.Spreadsheets.Layout;
 /// sheet several bands wide carries every drawing on the sheet — see
 /// <see cref="ReachesTheBlock"/>.
 /// </para>
+/// <para>
+/// <strong>And that rectangle is a clip as well as a cull, which is the half that was missing.</strong>
+/// <c>BeginDrawLayers</c> stores the region on the paint window
+/// (<c>SdrPageWindow::PrepareRedraw</c>, <c>svx/source/svdraw/sdrpagewindow.cxx</c>:212-224),
+/// <c>RedrawAll</c>/<c>RedrawLayer</c> put it on the <c>DisplayInfo</c> (<c>:347</c>, <c>:404</c>),
+/// and <c>ObjectContactOfPageView::DoProcessDisplay</c> pushes it onto the device —
+/// <c>pOutDev-&gt;IntersectClipRegion(rRedrawArea)</c>,
+/// <c>svx/source/sdr/contact/objectcontactofpageview.cxx</c>:163-171. So an object straddling a
+/// page break is not merely drawn on both pages: on each one it is <em>cut at the block's edge</em>,
+/// and the part belonging to the other page never reaches the paper even when the margin has room
+/// for it. Measured on an authored two-band, three-strip workbook
+/// (<c>probes/ink-pass-r92/make-clip-probe.py</c>): 26.2.4.2 emits <c>q 50.4 58.28 466.186 729.609
+/// re W* n</c> — exactly six 14-character columns by fifty-seven rows, the block and not the
+/// 494.9 pt text area — round every one of the six pages' copies of the rectangle, and this tree
+/// emitted no clip at all on any of them.
+/// </para>
+/// <para>
+/// <strong>The clip cuts the ink and keeps the words</strong>, so it is
+/// <see cref="IDrawingSink.ClipPathKeepingText"/>. LibreOffice clips the output device, and its PDF
+/// writer goes on emitting the text objects inside the clip: on
+/// <c>044_Cash_flow_forecast_Use_this_template</c> page 4 the reference paints only the last three
+/// of a chart's twelve category labels and <c>pdftotext</c> reads all twelve. So no gate column can
+/// see this either way, which is why it survived.
+/// </para>
+/// <para>
+/// It is taken only when the drawing actually leaves the block, for the same reason
+/// <see cref="DrawPicture"/>'s crop clip is conditional: an unconditional one would put a
+/// <c>q</c>/<c>W n</c>/<c>Q</c> pair round every picture in the corpus and change every one of
+/// those renderings to no effect.
+/// </para>
 /// </remarks>
 internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
 {
@@ -68,6 +98,8 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
 
         Dictionary<int, PlacedRow> byRow = [];
         foreach (PlacedRow row in rows) byRow.TryAdd(row.Row, row);
+
+        DocRect block = BlockOf(columns, rows);
 
         foreach (SheetDrawing drawing in sheet.Drawings.Items)
         {
@@ -104,37 +136,58 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // `SheetDrawing.QuarterTurnedAnchor`.
             DocRect box = drawing.QuarterTurnedAnchor ? Reflected(placed) : placed;
             if (box.Width <= Length.Zero || box.Height <= Length.Zero) continue;
-            if (!ReachesTheBlock(box, columns, rows)) continue;
+            if (!ReachesTheBlock(box, block)) continue;
 
-            // The box before anything inside it. A shape carrying a fill paints it under its own
-            // text rather than instead of it, and under the cells' text rather than over it: the
-            // internal layer is drawn after the strings, so a shown comment covers what it sits on
-            // (`PrintDrawingLayer(SC_LAYER_INTERN)`, printfun.cxx:1713).
-            //
-            // Through the shape's own preset rather than the anchor's rectangle -- 438 of the
-            // corpus's 644 worksheet shapes name a preset that is not `rect`. See
-            // `SheetShapeInk`.
-            SheetShapeInk.Draw(
-                sink, box, drawing.Fill, drawing.Gradient, drawing.Stroke, drawing.StrokeWidth,
-                drawing.Preset, drawing.Adjustments,
-                drawing.FlipHorizontal, drawing.FlipVertical, scale);
+            bool cut = LeavesTheBlock(box, block);
+            if (cut)
+            {
+                sink.Save();
+                sink.ClipPathKeepingText(GraphicsPath.Rectangle(block));
+            }
 
-            // The vector before the raster, since a shape carrying both means the DrawingML `svgBlip`
-            // case where the raster is the fallback. `VectorImage.Draw` maps the picture's own frame
-            // onto the box and clips to it — the same stretch `DrawImage` gives a raster, and not the
-            // extent of the picture's ink, which would put a logo with margins outside its anchor.
-            if (drawing.Vector is { } vector && !vector.Value.IsEmpty)
-                DrawPicture(sink, box, drawing.Crop, vector, null, drawing.Opacity);
-            else if (drawing.Image is { } image)
-                DrawPicture(sink, box, drawing.Crop, null, image, drawing.Opacity);
-            else if (drawing.Chart is { } chart) SheetChart.Draw(sink, chart, box, scale);
-
-            // Not an `else`: a shape may carry both a picture and a caption, and the text goes
-            // over the fill rather than instead of it.
-            if (drawing.Text is { } text) SheetShapePainter.Draw(sink, text, box, scale);
-
-            if (paintsParts || paintsPartInk) DrawParts(sink, box, drawing.Parts);
+            try
+            {
+                DrawInside(sink, drawing, box, paintsParts, paintsPartInk);
+            }
+            finally
+            {
+                if (cut) sink.Restore();
+            }
         }
+    }
+
+    /// <summary>Everything one drawing puts on the page, inside whatever clip is in force.</summary>
+    private void DrawInside(
+        IDrawingSink sink, SheetDrawing drawing, DocRect box, bool paintsParts, bool paintsPartInk)
+    {
+        // The box before anything inside it. A shape carrying a fill paints it under its own
+        // text rather than instead of it, and under the cells' text rather than over it: the
+        // internal layer is drawn after the strings, so a shown comment covers what it sits on
+        // (`PrintDrawingLayer(SC_LAYER_INTERN)`, printfun.cxx:1713).
+        //
+        // Through the shape's own preset rather than the anchor's rectangle -- 438 of the
+        // corpus's 644 worksheet shapes name a preset that is not `rect`. See
+        // `SheetShapeInk`.
+        SheetShapeInk.Draw(
+            sink, box, drawing.Fill, drawing.Gradient, drawing.Stroke, drawing.StrokeWidth,
+            drawing.Preset, drawing.Adjustments,
+            drawing.FlipHorizontal, drawing.FlipVertical, scale);
+
+        // The vector before the raster, since a shape carrying both means the DrawingML `svgBlip`
+        // case where the raster is the fallback. `VectorImage.Draw` maps the picture's own frame
+        // onto the box and clips to it — the same stretch `DrawImage` gives a raster, and not the
+        // extent of the picture's ink, which would put a logo with margins outside its anchor.
+        if (drawing.Vector is { } vector && !vector.Value.IsEmpty)
+            DrawPicture(sink, box, drawing.Crop, vector, null, drawing.Opacity);
+        else if (drawing.Image is { } image)
+            DrawPicture(sink, box, drawing.Crop, null, image, drawing.Opacity);
+        else if (drawing.Chart is { } chart) SheetChart.Draw(sink, chart, box, scale);
+
+        // Not an `else`: a shape may carry both a picture and a caption, and the text goes
+        // over the fill rather than instead of it.
+        if (drawing.Text is { } text) SheetShapePainter.Draw(sink, text, box, scale);
+
+        if (paintsParts || paintsPartInk) DrawParts(sink, box, drawing.Parts);
     }
 
     /// <summary>
@@ -333,8 +386,35 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
     /// pages 1, 10 and 19 — 2251 words against 2197.
     /// </para>
     /// </remarks>
-    private static bool ReachesTheBlock(
-        DocRect box, List<PlacedColumn> columns, List<PlacedRow> rows)
+    private static bool ReachesTheBlock(DocRect box, DocRect block)
+        // Inclusive on both edges, because Calc's is: `aRect` is a `tools::Rectangle`, whose
+        // `Right()` and `Bottom()` are the last coordinates *inside* it, so a drawing whose left
+        // edge sits exactly on the block's right edge still overlaps it by one unit. Measured on
+        // `sheet-shape-clip.xlsx`, whose box is anchored in the first column of the second band and
+        // which LibreOffice prints on both pages.
+        => box.X + box.Width >= block.X && box.X <= block.X + block.Width
+           && box.Y + box.Height >= block.Y && box.Y <= block.Y + block.Height;
+
+    /// <summary>Whether any part of a placed rectangle falls outside the page's own cell block.</summary>
+    /// <remarks>
+    /// The test that decides whether a clip is emitted at all. Strict, so a drawing whose edge sits
+    /// exactly on the block's costs nothing — the clip would remove no ink and every such rendering
+    /// would change for no reason.
+    /// </remarks>
+    private static bool LeavesTheBlock(DocRect box, DocRect block)
+        => box.X < block.X || box.Y < block.Y
+           || box.X + box.Width > block.X + block.Width
+           || box.Y + box.Height > block.Y + block.Height;
+
+    /// <summary>The rectangle the page's own printed cells cover.</summary>
+    /// <remarks>
+    /// <c>PrePrintDrawingLayer</c>'s <c>aRect</c>, in this page's coordinates: the columns
+    /// <c>mnX1</c>…<c>mnX2</c> across and the rows <c>mnY1</c>…<c>mnY2</c> down
+    /// (<c>sc/source/ui/view/output3.cxx</c>:43-78). Taken as the extremes of the placed columns
+    /// and rows rather than as first and last, because neither list is promised to be in order and
+    /// a right-to-left sheet places its first column on the right.
+    /// </remarks>
+    private static DocRect BlockOf(List<PlacedColumn> columns, List<PlacedRow> rows)
     {
         Length left = columns[0].X;
         Length right = columns[0].Right;
@@ -352,13 +432,7 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             if (row.Bottom > bottom) bottom = row.Bottom;
         }
 
-        // Inclusive on both edges, because Calc's is: `aRect` is a `tools::Rectangle`, whose
-        // `Right()` and `Bottom()` are the last coordinates *inside* it, so a drawing whose left
-        // edge sits exactly on the block's right edge still overlaps it by one unit. Measured on
-        // `sheet-shape-clip.xlsx`, whose box is anchored in the first column of the second band and
-        // which LibreOffice prints on both pages.
-        return box.X + box.Width >= left && box.X <= right
-               && box.Y + box.Height >= top && box.Y <= bottom;
+        return new DocRect(left, top, right - left, bottom - top);
     }
 
     /// <summary>Where a drawing lands on this page, or null when it does not.</summary>
@@ -429,10 +503,12 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
     /// The print area is computed from the <em>cells</em> — <c>ScTable::GetPrintArea</c>
     /// (<c>sc/source/core/data/table1.cxx:657</c>) tests data, notes, sparklines and attributes and
     /// never asks the drawing layer — but the drawing layer is then painted in document
-    /// coordinates and clipped to the paper, not to the used range
+    /// coordinates, addressed from the sheet's own origin rather than from the used range
     /// (<c>PrintDrawingLayer(SC_LAYER_FRONT)</c>, <c>printfun.cxx:1699</c>). So a chart anchored
     /// three rows below the last number prints, and looking its anchor up in the page's own placed
-    /// rows finds nothing.
+    /// rows finds nothing. What bounds it is the *printed block* — which
+    /// <see cref="SheetDrawingArea"/> has already grown to cover that chart — and the class remarks
+    /// say where that clip comes from.
     /// </para>
     /// <para>
     /// Measured: <c>chart-bar-sheet.ods</c> holds four rows of data in <c>A1:C5</c> and anchors its
