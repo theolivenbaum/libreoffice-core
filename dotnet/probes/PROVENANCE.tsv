@@ -974,3 +974,6 @@ dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	presen
 dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/chart-axisrot-r91/frame-sweep.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
+dotnet/probes/chart-axisrot-r91/label-variants.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
+dotnet/probes/chart-axisrot-r91/turned-census.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md

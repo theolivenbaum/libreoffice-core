@@ -207,6 +207,27 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    punctuation) and the other — an over-long word — is what this document needs. `ChartAxisLabels.Wraps`
    models it and answers false here.
 
+   ***`Wraps` models half of that test, and the missing half is HYPHENATION.*** *"A line starting
+   in the middle of a word"* is not the same thing as *"a word wider than the slot"*, because
+   `PropertyMapper::getTextLabelMultiPropertyLists` sets **`ParaIsHyphenation` true** beside
+   `TextMaximumFrameWidth`, inside the same `if (nLimitedSpace > 0)` and nowhere else
+   (`chart2/source/view/main/PropertyMapper.cxx`:550-557), and `DrawModelWrapper` installs
+   `LinguMgr::GetHyphenator()` on the drawing outliner under the comment *"Hyphenation and
+   spellchecking"* (`DrawModelWrapper.cxx`:72-86). So EditEngine may put a **hyphenated fragment of
+   the next word** on the current line, and `lcl_hasWordBreak` reports that as the mid-word break —
+   turning line breaking off and, if the one-line labels then collide, turning the axis 45°.
+   Measured on 26.2.4.2 with one-attribute variants of `038_Competitive_Advantage_Card.pptx`, whose
+   five category labels the reference turns and this tree wraps: **`Cost Efficiency` turns and
+   `Efficiency Cost` wraps** — the same two words, order swapped — and `Cost Efficiency` (word
+   43.638 pt) turns while `Cost Thoughts` (42.610), `Cost Strengths` (43.742), `Cost Stretched`
+   (44.401) and `Cost Scratched` (45.181) all wrap, so **no width rule can produce the ordering.**
+   **`TextBreak` is not what a brief will tell you it is**: `axisconverter.cxx`:356-365 sets it
+   **true** for every non-date category axis at zero rotation, an out-of-range `rot` reads as zero,
+   and both this tree and the reference have it on here. `probes/chart-axisrot-r91/results.md`;
+   the fix needs a hyphenator, the limit that applies to a line *inside* a wrapped label is
+   measurably below 0.95 of the pitch and is not yet characterised, and **no corpus document states
+   `c:layoutTarget val="inner"` at all**, which retires that lead for good.
+
    ***The ODF twin of that document closed on a different attribute, and the `.pptx` is untouched.***
    `N2_E_Maestroni_Swarm_COP.odp` went from 340 alphanumeric characters clear of 26.2.4.2 to **84**
    when `OdfChartPlot` was taught to read **`text:line-break`**, which it had been passing as false
