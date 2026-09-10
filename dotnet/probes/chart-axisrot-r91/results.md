@@ -211,10 +211,22 @@ instruction not to sweep `057` in is right. The two that may be genuine are
 `EHEST-SMS-Safety-Management-Manual-V2.docx` (2 lines, 14/27) and `150_5300_13_chg12.doc`
 (2 lines, 162/2).
 
-**The brief's proposed signature — a positive glyph delta — does not select these documents.**
+> **CORRECTED BY THE PARENT SESSION AT MERGE.** The paragraph below reads the wrong column and
+> its conclusion does not hold. `252/272` is column 8, `rawwords`. **The gate decides on column 9,
+> `glyphs`**, and this document's r83 row reads `1585/1449` — **+136**, exactly as the brief said,
+> against a band of `max(2 %, 15) = 28.98`. The row *is* this document's:
+> `slides/chartset-008/pptx/038_Competitive_Advantage_Card_…`, verdict `words`. **The brief's
+> signature stands and does select `038`**; the reach section resting on discarding it should be
+> re-derived on column 9. Everything else in this round — the `TextBreak` refutation, the
+> hyphenation trigger and the frame sweep — is independent of this and unaffected.
+>
+> This is the third time this session that column 4 or 8 has been quoted where the gate uses
+> column 9, and the second time it reached a write-up.
+
+~~**The brief's proposed signature — a positive glyph delta — does not select these documents.**
 `038` itself is **252/272** in the r83 gate: we draw *fewer* alphanumerics than the reference,
 not 136 more. The +136 arithmetic in r90 counts what the reference loses to outlining and not
-what it gains elsewhere on the same page, and the row it was read from is not this document's.
+what it gains elsewhere on the same page, and the row it was read from is not this document's.~~
 
 ## 5a. One source change was considered and is not worth making
 
