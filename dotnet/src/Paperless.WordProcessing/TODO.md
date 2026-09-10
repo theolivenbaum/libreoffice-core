@@ -738,7 +738,19 @@ Order chosen so each is verifiable before the next gets harder.
       `\fs` still reaches its paragraphs with neither — the round-80 rule. Reach **17 of the 338 converted
       `.rtf`**; `.rtf` gate **259 → 260 of 336**, `Sample_SQMS_Program` 60/77 → 77/77, and on
       `24-25_FAA_Holdover_Tables` it is 37 of the 67 pages. `probes/rtf-holdover-r87/results.md` §2.
-- [ ] **`REF` expands from the bookmark, and the RTF import hands the bookmarks the wrong names.** RTF
+      **`Title` and `Subtitle` joined it in round 88 and `Body Text` and `caption` did not**, which is one
+      rule and not four: `GetPoolParent` (`sw/source/core/doc/poolfmt.cxx`:279-289) gives every
+      `COLL_DOC_BITS` id but `COLL_HEADLINE_BASE` that style for a parent, so the two document-title
+      styles answer *Heading*'s 14 pt and 12/6 rather than the 28 pt bold centring and 18 pt their own
+      pool entries state; `COLL_LABEL` and `COLL_TEXT` have `COLL_STANDARD` for a parent, so `caption`
+      and `Body Text` inherit the document's own `Normal` entry — 10 pt under `\fs20` and 14 under
+      `\fs28`, measured both ways. The *Standard* half is left and pinned by
+      `APoolStyleUnderStandardIsNotModelledYet`. **Reach for the implemented half is nil** — excluding
+      the stylesheet from the "used" set, which round 87's census did not, `Title` and `Subtitle` are
+      declared and never applied in the two documents that hold them, `Body Text` is 2 of 338 and
+      `caption` 0; the nine headings' own reach is 17 → **12** under the same correction.
+      `probes/rtf-bookmark-r88/results.md` §4.
+- [x] **`REF` expands from the bookmark, and the RTF import hands the bookmarks the wrong names.** RTF
       sends a bookmark half's *name* before its *id* (`lcl_getBookmarkProperties`,
       `rtfdocumentimpl.cxx`:224-236, whose comment says the name "should be sent first"; the halves at
       `:2735-2764`). `DomainMapper_Impl::SetBookmarkName` (`DomainMapper_Impl.cxx`:9426-9447) is written
@@ -754,8 +766,17 @@ Order chosen so each is verifiable before the next gets harder.
       bookmarks called `R1` and `R1 Copy 1`. **Reach is 11 of the 338 `.rtf`** and two of them are the
       holdover pair, which state 332 and 365 `REF` fields; substituting the reference's expansions by hand
       takes `24-25_FAA_Holdover_Tables` from 158 pages to **219 against the reference's 223**, with the
-      alphanumeric distance at 0.80 %. It moves no gate verdict on its own, which is why it is here rather
-      than built. `probes/rtf-holdover-r87/results.md` §1.
+      alphanumeric distance at 0.80 %. It moves no gate verdict on its own, which is why it was left in
+      round 87. `probes/rtf-holdover-r87/results.md` §1.
+      **Built in round 88, and it is worth more than that estimate.** `RtfBookmarkRotation` is the naming
+      and `RtfReferenceFields` the expansion; `24-25_FAA_Holdover_Tables` goes **158 → 221 pages against
+      223** and 6.71 % → **0.33 %** on alphanumeric characters, drawing the long caption 253 times against
+      the reference's 253. The rotation is verified against 26.2.4.2 on ten probes, **27 of 28 predictions
+      exact**. Two shape notes: a document stating a `REF` is **read twice**, because a `REF` may name a
+      bookmark the walk has not reached and rewriting a closed paragraph would rebase every offset counted
+      against it; and the *"Error: Reference source not found"* the reference draws for a name nobody holds
+      is deliberately not reproduced, at a measured cost of two occurrences in the eleven documents.
+      `probes/rtf-bookmark-r88/results.md`.
 
 ## Layout engine
 

@@ -211,6 +211,58 @@ public static class FieldInstructions
         }
     }
 
+    /// <summary>
+    /// The bookmark a <c>REF</c> field quotes, when LibreOffice would draw that bookmark's own text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>REF</c> whose first argument is not a <c>SET</c>/<c>SEQ</c> variable becomes a
+    /// <c>SwGetRefField</c> with <c>ReferenceFieldSource::BOOKMARK</c> and the argument as its source
+    /// name (<c>DomainMapper_Impl.cxx</c>:8598-8608), and Writer recomputes what it draws from the
+    /// bookmark rather than keeping the <c>{\fldrslt}</c> or <c>w:fldSimple</c> cache. So a reader
+    /// that keeps the cache draws the string the producing application last computed, which is a
+    /// different string whenever the two applications disagree about where the bookmark is.
+    /// </para>
+    /// <para>
+    /// Null for the four switches that ask for something other than the text — <c>\p</c> above/below,
+    /// <c>\r</c>, <c>\n</c> and <c>\w</c>, the three numberings (<c>:8611-8632</c>) — and for
+    /// <c>PAGEREF</c>, which is the same field with <c>ReferenceFieldPart::PAGE</c>. Those keep the
+    /// producer's result, on the same reasoning as a <c>FILENAME \p</c>: a part we do not compute is
+    /// better served by the cache than by a wrong answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="instruction">The instruction, verbatim.</param>
+    public static string? ReferenceBookmark(string? instruction)
+    {
+        if (!string.Equals(Name(instruction), "REF", StringComparison.OrdinalIgnoreCase)) return null;
+
+        foreach (char part in "prnw")
+        {
+            if (HasSwitch(instruction, part)) return null;
+        }
+
+        ReadOnlySpan<char> arguments = instruction.AsSpan().Trim();
+        int after = arguments.IndexOfAny(' ', '\t', '\n');
+        if (after < 0) return null;
+
+        arguments = arguments[after..].TrimStart();
+
+        if (arguments.Length > 0 && arguments[0] == '"')
+        {
+            int close = arguments[1..].IndexOf('"');
+            return close < 0 ? null : Named(arguments.Slice(1, close));
+        }
+
+        int end = arguments.IndexOfAny(' ', '\t', '\n');
+        return Named(end < 0 ? arguments : arguments[..end]);
+
+        static string? Named(ReadOnlySpan<char> name)
+        {
+            name = name.Trim();
+            return name.Length == 0 || name[0] == '\\' ? null : name.ToString();
+        }
+    }
+
     /// <summary>Whether the instruction carries a given single-letter switch.</summary>
     private static bool HasSwitch(string? instruction, char letter)
     {

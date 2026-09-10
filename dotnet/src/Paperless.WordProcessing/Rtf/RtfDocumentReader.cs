@@ -596,9 +596,11 @@ public sealed partial class RtfDocumentReader
                 return;
             case "bkmkstart":
                 state.Destination = RtfDestination.BookmarkStart;
+                BeginBookmarkName();
                 return;
             case "bkmkend":
                 state.Destination = RtfDestination.BookmarkEnd;
+                BeginBookmarkName();
                 return;
             case "atnid" or "atnref" or "atndate" or "atnparent"
                  or "annotprot" or "xe" or "tc" or "tcn" or "datafield" or "fname" or "ftnsep"

@@ -242,6 +242,30 @@ public sealed class RtfStyles
     /// parent instead (<c>:1156-1169</c>), which is why this is a fallback and not an override.
     /// </para>
     /// <para>
+    /// <strong>Three families of name reach this, and only one of them is here.</strong>
+    /// <c>heading 1</c>…<c>heading 9</c>, <c>Title</c> and <c>Subtitle</c> all map to a pool style
+    /// under <c>COLL_DOC_BITS</c>, whose parent is <c>COLL_HEADLINE_BASE</c> unless it <em>is</em>
+    /// that style (<c>GetPoolParent</c>, <c>sw/source/core/doc/poolfmt.cxx</c>:279-289) — so all
+    /// eleven answer <em>Heading</em>, and none of them answers the 28 pt bold centring
+    /// <c>COLL_DOC_TITLE</c> states for itself (<c>DocumentStylePoolManager.cxx</c>:1365-1374) or
+    /// the 18 pt of <c>COLL_DOC_SUBTITLE</c> (<c>:1376-1387</c>), because the entry's own
+    /// properties are what the import resets. Measured: <c>Title</c> and <c>Subtitle</c> reproduce
+    /// <c>heading 4</c>'s size, space above and space below to the hundredth of a point.
+    /// </para>
+    /// <para>
+    /// <c>Body Text</c> and <c>caption</c> are the second family and are deliberately <em>not</em>
+    /// here. Their pool styles' parent is <c>COLL_STANDARD</c> (<c>poolfmt.cxx</c>:201-204,
+    /// :229-235), so what they inherit is the document's own <c>Normal</c> entry rather than a
+    /// constant: the same probe with <c>{\s0 … \fs20 Normal;}</c> draws them at 10 pt and with
+    /// <c>\fs28</c> at 14, while <c>heading 4</c>, <c>Title</c> and <c>Subtitle</c> answer 14 to
+    /// both. Neither <c>COLL_TEXT</c>'s 0/7 pt nor <c>COLL_LABEL</c>'s italic 6/6 survives the
+    /// reset. That is a rule about <em>Standard</em> and not about the pool, it needs the whole of
+    /// <c>ConvertStyleName</c>'s two hundred names to be safe, and its reach is <b>2 of the 338
+    /// converted <c>.rtf</c></b> — so it is measured and left. The third family is every name the
+    /// map answers nothing for, <c>Quote</c> and <c>List Paragraph</c> among them, which keeps
+    /// <c>\pard\plain</c>'s twelve points and is the control this rule must not move.
+    /// </para>
+    /// <para>
     /// Every heading maps to a pool style whose parent is <em>Heading</em>, and
     /// <c>SwPoolFormatId::COLL_HEADLINE_BASE</c>
     /// (<c>sw/source/core/doc/DocumentStylePoolManager.cxx</c>:768-819) is where the four values
@@ -260,6 +284,14 @@ public sealed class RtfStyles
         // (rtfdocumentimpl.cxx:1594), and ConvertStyleName's map is case-sensitive with an entry
         // for each of the two spellings a file actually uses.
         string trimmed = name.Trim();
+
+        // `Title` and `Subtitle` have one spelling each in the map; the nine headings have two.
+        if (string.Equals(trimmed, "Title", StringComparison.Ordinal)
+            || string.Equals(trimmed, "Subtitle", StringComparison.Ordinal))
+        {
+            return HeadingPool;
+        }
+
         if (trimmed.Length != 9) return null;
         if (trimmed[0] is not ('h' or 'H')) return null;
         if (!trimmed.AsSpan(1, 7).SequenceEqual("eading ")) return null;

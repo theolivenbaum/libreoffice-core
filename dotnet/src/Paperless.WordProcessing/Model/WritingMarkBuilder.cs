@@ -194,12 +194,22 @@ internal sealed class WritingMarkBuilder
     }
 
     /// <summary>Closes a bookmark opened under a key, discarding an end that pairs with nothing.</summary>
-    public void CloseBookmark(string key, WritingPosition? end)
+    /// <param name="key">What the format pairs the halves by, as for <see cref="OpenBookmark"/>.</param>
+    /// <param name="end">Where it ends.</param>
+    /// <param name="name">
+    /// The name to record instead of the one the start gave, or null to keep that one.
+    /// <para>
+    /// For RTF alone, whose importer settles a bookmark's name only as it closes: it writes each
+    /// incoming name onto the previously opened start, so which name a mark carries is not known
+    /// while it is open. See <c>RtfBookmarkRotation</c>.
+    /// </para>
+    /// </param>
+    public void CloseBookmark(string key, WritingPosition? end, string? name = null)
     {
         if (!_openBookmarks.Remove(key, out PendingBookmark pending)) return;
         if (end is not { } to) return;
 
-        _bookmarks.Add(new WritingBookmark(pending.Name, new WritingRange(pending.Start, to)));
+        _bookmarks.Add(new WritingBookmark(name ?? pending.Name, new WritingRange(pending.Start, to)));
     }
 
     /// <summary>Records a bookmark whose two ends are already known.</summary>

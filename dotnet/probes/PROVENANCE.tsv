@@ -948,3 +948,29 @@ dotnet/probes/ods-track-r88/refail.sh	2026-09-09	current	26.2.4.2	present	curren
 dotnet/probes/ods-track-r88/render-ours.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.OpenDocument/TODO.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-track-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/base-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/base-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/base-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/check.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/drawn-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/extractdiff.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/extractdiff.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/genpool.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfStyleFormattingTests.cs
+dotnet/probes/rtf-bookmark-r88/genprobes.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfReferenceFieldTests.cs
+dotnet/probes/rtf-bookmark-r88/head-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/head-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/head-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/marks-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/pdfdiff.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/pool-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/poolcensus.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/poolcensus.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/readpool.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/refcensus.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/refcensus.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfBookmarks.cs;dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/rtf-bookmark-r88/rotate.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
