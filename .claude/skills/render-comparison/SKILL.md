@@ -67,6 +67,18 @@ reading that quietly promotes itself into a diagnosis is worse than no reading.
   track can be 163 of 163 page-exact while three passing pages opened at random yield a missing
   custom bullet, a hanging indent we invent, and glyphs a few percent narrow. Rank the *passing*
   documents by `|ink|%` and open the worst.
+  **Measured, and it pays on the first document:** ranking 48 passing slides and sheets that way
+  put `TICAPCapability_Final.xls` on top at 16.87 % summed unsigned ink — a document matching on
+  both pages and characters — and its worst page turned out to be missing a white panel and its
+  black outline, two `draw:custom-shape` text boxes whose text we already draw.
+- **Rank on ink, never on path counts.** Path count describes how a renderer structures its
+  output, not what lands on the page, and the two diverge wildly. On that same document we draw
+  **901** grey fills where the reference draws **one**, over the identical 42.4 % of the page.
+  Counting stroked and white-filled paths across the sample duly reported that *44 of 48 passing
+  documents draw fewer than the reference somewhere*, led by one at 3452 "missing" strokes — which
+  costs it under 0.31 % ink and is not a defect at all. Use path counts only to explain a
+  difference ink has already found; the order that worked was ink → drawing dump → the reference's
+  own flat ODF naming the object and quoting its style.
 - **Describe before you check the record.** Reading blind and only then looking up what is known
   is a control on the reading. A gradient description produced that way matched a diagnosis made
   a week earlier from source, with no chance of having been led to it.
