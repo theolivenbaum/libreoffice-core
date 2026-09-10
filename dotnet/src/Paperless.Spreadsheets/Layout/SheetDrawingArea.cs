@@ -21,9 +21,10 @@ namespace Paperless.Spreadsheets.Layout;
 /// </para>
 /// <para>
 /// This is a different rule from the one <see cref="SheetPageGraphics"/> already carries. That one
-/// says a drawing outside the printed block is still <em>painted</em>, because the drawing layer is
-/// clipped to the paper rather than to the cells; this one says the block itself grows, which is
-/// what turns a one-page workbook into a two-page one. Measured on
+/// says <em>where</em> a drawing is painted and how much of it survives — the drawing layer is
+/// clipped to the page's own cell block, not to the paper, so an object straddling a break is cut
+/// at the block's edge on each of the pages it reaches; this one says the block itself grows, which
+/// is what turns a one-page workbook into a two-page one. Measured on
 /// <c>chart2/qa/extras/data/xlsx/bubble_chart_simple.xlsx</c>, four cells with a chart anchored at
 /// column 11: one page here against LibreOffice's two, and 5 words against 26, with a complete
 /// chart composed behind the right-hand edge of the only page produced.
