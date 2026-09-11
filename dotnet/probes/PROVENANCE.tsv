@@ -974,3 +974,15 @@ dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	presen
 dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/odt-sectable-r92/census-nested.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/compare.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/confine.list	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/confine.sh	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/confinement.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/movers.list	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/nested.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/rows-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/rows-before.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/startx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md

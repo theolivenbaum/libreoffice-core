@@ -195,6 +195,109 @@ public sealed class OdtTextSectionTests
         words["THREEAFTER"].Baseline.ShouldBe(512.90, Tolerance);
     }
 
+    /// <summary>A section inside a section takes one column, whatever the enclosing one has.</summary>
+    /// <remarks>
+    /// Writer inserts a nested section's frame behind its parent rather than inside it, so the parent's
+    /// <c>SwColumnFrame</c>s never reach it (<c>sw/source/core/layout/frmtool.cxx</c>:1795-1803) — and
+    /// it does not inherit the parent's columns either, although its format <em>is</em> derived from the
+    /// parent's (<c>ndsect.cxx</c>:1345): <c>SwSectionFormat</c>'s constructor puts the pool's default
+    /// one-column item on every section format outright (<c>section.cxx</c>:608-614). Measured on
+    /// 26.2.4.2 with a nested section that names no style at all and with one whose style states a
+    /// <c>style:section-properties</c> and no <c>style:columns</c>: both are drawn across the whole
+    /// measure, wrapping at 521.9 and 530.5 pt inside a parent whose columns are 216 pt wide.
+    /// </remarks>
+    [Fact]
+    public void ANestedSectionTakesOneColumnWhereItStatesNone()
+    {
+        OdfSectionGeometry parent =
+            OdfSectionGeometry.Read(
+                Styles(@"<style:columns fo:column-count=""2"" fo:column-gap=""0.5in""/>"), "S")!.Value;
+
+        // No style at all, and a style whose section-properties states no `style:columns`.
+        OdfSectionGeometry.Nested(Styles(""), styleName: null, parent).Columns.ShouldBe(1);
+        OdfSectionGeometry.Nested(Styles(""), "S", parent).Columns.ShouldBe(1);
+    }
+
+    /// <summary>And it takes its own columns where it states them.</summary>
+    [Fact]
+    public void ANestedSectionTakesItsOwnColumnsWhereItStatesThem()
+    {
+        OdfSectionGeometry parent =
+            OdfSectionGeometry.Read(
+                Styles(@"<style:columns fo:column-count=""2"" fo:column-gap=""0.5in""/>"), "S")!.Value;
+
+        OdfSectionGeometry nested = OdfSectionGeometry.Nested(
+            Styles(@"<style:columns fo:column-count=""3"" fo:column-gap=""0.25in""/>"), "S", parent);
+
+        nested.Columns.ShouldBe(3);
+        nested.ColumnGap.Points.ShouldBe(18.0, 0.05);
+    }
+
+    /// <summary>
+    /// The indents are the enclosing section's where the nested one states neither of them, and its
+    /// own — as a pair — where it states either.
+    /// </summary>
+    /// <remarks>
+    /// The two are one <c>SvxLRSpaceItem</c>, and a nested section's format is derived from its
+    /// parent's, so the item is inherited whole or replaced whole. Measured on 26.2.4.2 inside a parent
+    /// indented 0.5 in and 0.75 in: a nested section stating nothing is drawn from 108.1 pt to 486, one
+    /// stating 1.5 in and 0.25 in from 180.1 to 522, and one stating only the 1.5 in left indent from
+    /// 180.1 to the page's own right edge rather than to the parent's.
+    /// <c>probes/odt-sectable-r92/nested.py</c>.
+    /// </remarks>
+    [Fact]
+    public void ANestedSectionsIndentsAreItsOwnPairOrTheEnclosingOnes()
+    {
+        OdfSectionGeometry parent = OdfSectionGeometry.Read(
+            Styles(
+                @"<style:columns fo:column-count=""2"" fo:column-gap=""0.5in""/>",
+                @"fo:margin-left=""0.5in"" fo:margin-right=""0.75in"""),
+            "S")!.Value;
+
+        OdfSectionGeometry inherits = OdfSectionGeometry.Nested(Styles(""), "S2", parent);
+        inherits.IndentLeft.Points.ShouldBe(36.0, 0.05);
+        inherits.IndentRight.Points.ShouldBe(54.0, 0.05);
+
+        OdfSectionGeometry ownPair = OdfSectionGeometry.Nested(
+            Styles("", @"fo:margin-left=""1.5in"" fo:margin-right=""0.25in"""), "S", parent);
+        ownPair.IndentLeft.Points.ShouldBe(108.0, 0.05);
+        ownPair.IndentRight.Points.ShouldBe(18.0, 0.05);
+
+        // One side stated is the whole item stated, so the other is nought and not the parent's 54.
+        OdfSectionGeometry oneSide =
+            OdfSectionGeometry.Nested(Styles("", @"fo:margin-left=""1.5in"""), "S", parent);
+        oneSide.IndentLeft.Points.ShouldBe(108.0, 0.05);
+        oneSide.IndentRight.ShouldBe(Length.Zero);
+    }
+
+    /// <summary>
+    /// An index inside a columned section is drawn across the whole measure, below both columns, and
+    /// the section resumes its columns underneath it.
+    /// </summary>
+    /// <remarks>
+    /// The fixture is <c>odt-section-columns.odt</c> with a <c>text:table-of-content</c> put inside the
+    /// two-column section after PARA11 and the whole file then round-tripped through 26.2.4.2's own ODF
+    /// export, so every element in it is LibreOffice's. Its figures are that binary's PDF: TOCBODY at
+    /// x 72.1, y 418.80 — wrapping at 519.0, which is the full 468 pt measure and not the 216 pt
+    /// column — PARA12 back at 72.1, y 459.10 in the <em>first</em> column of a second frame of the same
+    /// section, and TWOEND at 324.1, y 526.30 in its second. That is
+    /// <c>SwSectionFrame::SplitSect</c> (<c>frmtool.cxx</c>:1954-1960) drawn.
+    /// </remarks>
+    [Fact]
+    public void AnIndexInsideAColumnedSectionSplitsItAndTakesTheWholeMeasure()
+    {
+        Dictionary<string, DrawnWord> words = Words("odt-section-nested-index.odt", 1)[0];
+
+        words["TOCBODY"].Left.ShouldBe(72.1, Tolerance);
+        words["TOCBODY"].Baseline.ShouldBe(418.80, Tolerance);
+
+        words["PARA12"].Left.ShouldBe(72.1, Tolerance);
+        words["PARA12"].Baseline.ShouldBe(459.10, Tolerance);
+
+        words["TWOEND"].Left.ShouldBe(324.1, Tolerance);
+        words["TWOEND"].Baseline.ShouldBe(526.30, Tolerance);
+    }
+
     /// <summary>A section style holding one <c>style:section-properties</c>, as a resolved style set.</summary>
     private static OdfStyles Styles(string columns, string sectionAttributes = "")
     {

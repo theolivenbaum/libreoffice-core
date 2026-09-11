@@ -1125,6 +1125,51 @@ first's end indent plus the second's start indent. Reach **33 of the 338 convert
 **8.593 → 4.083 pt**, `.odt` gate 291 → 292. `.ods` and `.odp` hold no `text:section` at all.
 `probes/odt-startx-r88/results.md`.
 
+**And a section inside a section is a *sibling* of it, so the enclosing one's columns never reach
+it — an ODF index included.** Writer inserts a nested section's frame behind its parent, into the
+parent's own upper (`pFrame->InsertBehind(pTmp->GetUpper(), pTmp)`,
+`sw/source/core/layout/frmtool.cxx`:1795-1803), and splits the parent at the nested section's end
+node so that what follows is a **second frame of the parent's format** (`SwSectionFrame::SplitSect`,
+`:1954-1960`) — so a page reads *two columns, a full-measure index, two columns again*. What the
+child does take from the parent is the **indents**, because a nested section's format is derived
+from the enclosing one's (`pFormat->SetDerivedFrom(pSectNd ? pSectNd->GetSection().GetFormat() : …)`,
+`sw/source/core/docnode/ndsect.cxx`:1345) and `SwSectionFrame::Init` insets its print area by
+`GetFormat()->GetLRSpace()` (`sectfrm.cxx`:129-166); what it never takes is the **columns**, because
+`SwSectionFormat`'s constructor puts the pool's default one-column item on every section format
+outright — `LockModify(); SetFormatAttr(*GetDfltAttr(RES_COL)); UnlockModify();`,
+`sw/source/core/docnode/section.cxx`:608-614. The two indents are one `SvxLRSpaceItem`, so a child
+stating either **replaces the pair** and the side it left out is nought. Measured over sixteen
+one-element variants of one fixture (`probes/odt-sectable-r92/nested.py`). **Reach is 1 of the 338
+converted `.odt`** — `absrc-pac-01-info-note-en`, whose two-column section holds a
+`text:table-of-content` — and closing it takes the `.odt` gate **292 → 293**, recovering the verdict
+round 88 cost, with exactly one row and two renderings moving in the whole column.
+
+**Two of round 88's readings of that document are withdrawn, and one instrument produced both.**
+*"A table inside a columned `text:section` is laid out against the page rather than against its
+column"* is false at all three documents that hold one: every cell of all three is within **0.35 pt**
+of 26.2.4.2's, and a probe shows both renderers laying a table inside its column and both letting a
+table wider than the column overflow to the right of the *page*. *"26.2.4.2 draws that document's
+section in ONE column although the file states two"* is false too — it draws two, at the positions
+this tree computes, and removing `style:columns` moves the second column's paragraph to the next
+page. Both came from **a histogram of line starts taken with every span of one baseline merged,
+which reads a two-column page as one column** because a baseline crosses the gap;
+`probes/odt-sectable-r89/xhist.py`'s docstring is where that correction is written down and is the
+only thing that cut-off round left. **Cut a baseline into segments at a gap wider than a tab before
+counting columns.**
+
+**A third rule fell out of it and it is not an ODF one: a page carries one text area, and it is the
+last section's.** `LaidOutPage.BodyArea` is `geometry.TextArea` at the moment the page is *emitted*,
+so a `text:section`'s own indents reach the layout and not the drawing wherever a later section on
+the same page restores the master's margins — 26.2.4.2 draws a 0.5 in-indented two-column section's
+first column at 108.10 and this tree at 72.00, with the same wrap. **Left**, because the only one of
+the corpus's 10 indented sections the gate can see, `644730BRI0mna000BOX361539B00public0`, runs to
+the end of the body and is page-for-page exact. What *was* closed is the line-level half of the same
+confusion: `PageContent.ColumnArea(PlacedLine)` used to send a line stating one column to the
+**page's** column at that line's index, which drew a full-measure heading inside a column — 4 of 696
+`.docx`/`.doc`/`.rtf` renderings move with it, none changes a page or a glyph count, and
+`150_5300_13_chg8`'s centred `Chapter 3.  RUNWAY DESIGN` goes from 205.05 to **231.75** against
+26.2.4.2's 231.80 in all three of its formats. `probes/odt-sectable-r92/results.md`.
+
 **And two instrument corrections came out of it that invalidate a stored ranking.**
 `probes/odt-page-r87/residual-startx.txt`'s columns are *matched, mean before, mean after, within-0.1pt
 before/after* — not *max, mean, pages agreeing*, which is how a brief read them, so

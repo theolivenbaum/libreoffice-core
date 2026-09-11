@@ -935,6 +935,12 @@ public sealed class Paginator
         int sectionFirstPage = 0;
         int column = 0;
 
+        // How far down the deepest column of this page has reached, over the columns already left behind.
+        // A page's columns are filled one after another and `used` is only ever the current one's, so this
+        // is what a section that must begin *below* the columned stretch above it starts from — see the
+        // section switch, where a text section's columns are left. Reset with the page.
+        Length columnReach = Length.Zero;
+
         // A continuous section's page-number restart, waiting for the first hard page break inside the
         // section to hang itself on. Null where there is nothing waiting, which is every other section —
         // see PaginatedSection.StatesOwnFurniture for why a continuous section's restart
@@ -1239,6 +1245,38 @@ public sealed class Paginator
                 sectionIndex = blockSection;
                 geometry = resolved[sectionIndex].Section;
                 furnitureSet = resolved[sectionIndex].Furniture;
+
+                // A text section is a frame, so the next one begins *below* the whole of it rather than
+                // beside its last column. Writer inserts a nested section's frame behind its parent, into
+                // the parent's own upper (`pFrame->InsertBehind(pTmp->GetUpper(), pTmp)`,
+                // `sw/source/core/layout/frmtool.cxx`:1795-1803), and splits the parent at the nested
+                // section's end so that the rest of it is a second frame (`SplitSect`, `:1954-1960`) — so
+                // a page can read: two columns, a full-measure index, two columns again. The flow
+                // therefore leaves the column it is in, drops past the deepest of the columns already
+                // filled, and starts again at the first column of the new section.
+                //
+                // Only where the columns actually change, so that a section following another with the
+                // same columns keeps filling them — which is what `columnTop = used` below is for, and
+                // what a paragraph naming its own master page inside a text section needs, since that
+                // allocates a section of the same geometry — and only for a text section, because a page
+                // style's columns belong to the sheet and this tree defers those. Measured on
+                // `absrc-pac-01-info-note-en.odt`, whose two-column section holds a table of contents:
+                // 26.2.4.2 draws the index across the whole measure below both columns and resumes the
+                // columns underneath it.
+                bool leavesColumns =
+                    kind == SectionBreak.Continuous
+                    && !pageIsEmpty
+                    && geometry.IsTextSection
+                    && (geometry.Page.Columns != page.Columns
+                        || geometry.Page.ColumnGap != page.ColumnGap);
+
+                if (leavesColumns)
+                {
+                    if (used > columnReach) columnReach = used;
+                    used = columnReach;
+                    lineUsed = columnReach;
+                    column = 0;
+                }
 
                 // A continuous break shares a sheet with the section above it, and a sheet has one paper
                 // size and one set of margins — so the new section's take effect on the *next* page, not
@@ -1943,6 +1981,8 @@ public sealed class Paginator
                     if (lineUsed > balanceLineReach) balanceLineReach = lineUsed;
                 }
 
+                if (used > columnReach) columnReach = used;
+
                 column++;
                 used = columnTop;
                 lineUsed = columnTop;
@@ -1996,6 +2036,7 @@ public sealed class Paginator
             AdoptSection();
             pageNumber++;
             column = 0;
+            columnReach = Length.Zero;
             placed = [];
             tables = [];
 
@@ -2065,6 +2106,11 @@ public sealed class Paginator
         {
             balance = null;
 
+            // The section starting here has left no column behind yet, so the deepest one is its own top
+            // — and whatever the section above it reached on this page is spent. Set here rather than at
+            // the switch because this runs at every section start, the first one on a page included.
+            columnReach = used;
+
             // Every column of a section that begins part way down a page begins there too — balanced or
             // not, and this is the half that is not about balancing at all. Writer gives a continuous
             // multi-column section a `SwSectionFrame` of its own whose top is where the section starts,
@@ -2113,6 +2159,11 @@ public sealed class Paginator
             lineUsed = state.Top;
             columnTop = state.Top;
             columnBottom = state.Top + state.Candidate;
+
+            // The trial's own columns are gone with it, so the deepest one starts again at the section's
+            // top: a tall first trial must not leave a following section believing the columns reached
+            // the bottom of the page.
+            columnReach = state.Top;
         }
 
         // The section fitted at the candidate height. Accept it when the search has narrowed to less than
