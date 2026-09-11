@@ -270,6 +270,39 @@ public sealed partial record ChartSeries(
     /// </remarks>
     public bool HasLine { get; init; } = true;
 
+    /// <summary>
+    /// Whether the line through this series' points is a flattened cubic spline rather than a
+    /// polyline.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CurveStyle_CUBIC_SPLINES</c>. OOXML spells it <c>c:smooth</c> on each
+    /// <c>c:ser</c> and ODF <c>chart:interpolation="cubic-spline"</c> on the plot area's style;
+    /// <see cref="ChartSpline"/> is what it means for the geometry.
+    /// </para>
+    /// <para>
+    /// <strong>It is a property of the plot group and not of the series, however the file spells
+    /// it.</strong> <c>OOX_CHART_SMOOTHED_PER_SERIES</c> is <c>0</c>
+    /// (<c>oox/inc/drawingml/chart/seriesconverter.hxx</c>:37), so
+    /// <c>TypeGroupConverter::convertLineSmooth</c> is called once per series
+    /// <em>against the chart type's</em> property set
+    /// (<c>oox/source/drawingml/chart/typegroupconverter.cxx</c>:585-588) — one series stating
+    /// <c>c:smooth val="1"</c> smooths every series in its group. The readers therefore resolve
+    /// the flag per group and put the same answer on each of that group's series. No corpus
+    /// document distinguishes the two rules: all fourteen smoothed plot groups are uniform.
+    /// </para>
+    /// <para>
+    /// <strong>An absent <c>c:smooth</c> does not mean "not smooth".</strong>
+    /// <c>SeriesModel</c>'s constructor is <c>mbSmooth( !bMSO2007Doc )</c>
+    /// (<c>oox/source/drawingml/chart/seriesmodel.cxx</c>:124) and both the line and the scatter
+    /// series contexts read it as <c>getBool( XML_val, !bMSO2007Doc )</c>
+    /// (<c>seriescontext.cxx</c>:618, :726), so a file that is not an Office 2007 one smooths by
+    /// default. That is not a curiosity: it is the whole of one corpus witness. See
+    /// <c>probes/chart-smooth-r102</c>.
+    /// </para>
+    /// </remarks>
+    public bool Smooth { get; init; }
+
     /// <summary>The label every point of this series carries, or null for none.</summary>
     public ChartDataLabel? Label { get; init; }
 

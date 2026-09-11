@@ -131,6 +131,10 @@ public static class DrawingChartPlot
         {
             if (candidate.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
             if (KindOf(candidate.Name.LocalName) is not { } matched) continue;
+
+            if (matched == ChartPlotKind.OfPie && IsExploded(candidate))
+                matched = ChartPlotKind.Pie;
+
             groups.Add(candidate);
             kinds.Add(matched);
         }
@@ -1255,6 +1259,8 @@ public static class DrawingChartPlot
         // A group's own c:dLbls is the default every series in it inherits.
         ChartDataLabel? groupLabel = LabelOf(Child(group, "dLbls"), null, kind, office2007);
 
+        bool smooth = SmoothOf(group, kind, office2007);
+
         // Which of a stock plot's four numbers each of its series carries, by position. Four
         // series are open, high, low, close and three are high, low, close — which is
         // TypeGroupConverter's own "int nRoleIdx = (aSeries.size() == 3) ? 1 : 0" over the roles
@@ -1356,6 +1362,7 @@ public static class DrawingChartPlot
                 MarkerLine = LineOf(MarkerProperties(element), theme),
                 MarkerSize = MarkerSizeOf(element),
                 HasLine = scatterLine && !SuppressesLine(properties),
+                Smooth = smooth,
                 DashPattern = DashOf(properties),
                 LineCap = CapOf(properties),
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
@@ -1450,6 +1457,121 @@ public static class DrawingChartPlot
            && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
             ? v
             : null;
+
+    /// <summary>
+    /// Whether an of-pie group states an exploded series, which is what makes 26.2.4.2 draw it
+    /// as a plain pie.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Measured at the reference, one attribute at a time and in both directions.</strong>
+    /// The corpus holds two <c>c:ofPieChart</c> documents and they part company here:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <c>029_Unit_Circle_Chart_Pie_Theme_8a922142.docx</c> states
+    /// <c>&lt;c:explosion val="1"/&gt;</c> on its series. 26.2.4.2 draws it as one circle of
+    /// four wedges with four labels and a four-entry legend — no second plot, no composite
+    /// slice, no connector lines — and its own <c>--convert-to fodt</c> of the file carries a
+    /// bare <c>chart:class="chart:circle"</c> with no <c>loext:sub-pie</c>.
+    /// <strong>Delete that one element and the export carries
+    /// <c>loext:sub-pie="true"</c>.</strong>
+    /// </description></item>
+    /// <item><description>
+    /// <c>028_Unit_Circle_Chart_Optimized_Graph_83d9c756.docx</c> states no explosion at all
+    /// (it carries seventeen <c>c:dPt</c>, so the per-point elements are not what decides it)
+    /// and the reference draws its pie-plus-bar in full.
+    /// <strong>Add <c>&lt;c:explosion val="1"/&gt;</c> to its series and the export stops
+    /// carrying <c>loext:sub-bar</c>.</strong>
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// So the attribute decides it in both directions on both documents. <strong>The mechanism
+    /// is not established</strong>: <c>PieChartTypeTemplate::matchesTemplate</c> reads the
+    /// series' <c>Offset</c> and answers <c>PieChartOffsetMode_ALL_EXPLODED</c>
+    /// (<c>chart2/source/model/template/PieChartTypeTemplate.cxx</c>:307-366, this tree), which
+    /// is the obvious suspect for re-templating the diagram out of its of-pie type, but that
+    /// reading requires every point's offset to equal the series' and <c>029</c>'s do not — so
+    /// it is a lead and not the answer. What is recorded here is the measurement.
+    /// </para>
+    /// <para>
+    /// <strong>It is not the whole of what separates us from the reference on that
+    /// document, and the rest is left open.</strong> With the explosion removed, 26.2.4.2 draws
+    /// <c>029</c> as a <em>bar</em>-of-pie when <c>c:ofPieType</c> is changed to <c>bar</c> and
+    /// still as a plain pie when it is left at <c>pie</c> — at four, five, six and seven points
+    /// — while <c>028</c> with <c>val="pie"</c> forced onto it draws a full pie-of-pie at
+    /// sixteen. So the pie sub-type carries a second condition that a small series fails and
+    /// this tree does not model; <c>probes/chart-smooth-r102</c> has the variants. It costs
+    /// nothing here because the corpus's only pie-of-pie is the exploded one.
+    /// </para>
+    /// </remarks>
+    private static bool IsExploded(XElement group)
+    {
+        foreach (XElement series in Children(group, "ser"))
+        {
+            if (Drawing.Number(Child(series, "explosion"), "val") is > 0) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a plot group's lines are drawn as flattened cubic splines.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three things decide it, and all three are the reference's, not the schema's.
+    /// </para>
+    /// <para>
+    /// <strong>Only a two-dimensional line, stock or scatter group can be smoothed.</strong>
+    /// <c>TypeGroupConverter::convertLineSmooth</c> does nothing unless
+    /// <c>!isSeriesFrameFormat() &amp;&amp; meTypeCategory != TYPECATEGORY_RADAR</c>
+    /// (<c>oox/source/drawingml/chart/typegroupconverter.cxx</c>:686), and
+    /// <c>isSeriesFrameFormat()</c> is <c>mb3dChart || mbSeriesIsFrame2d</c> (<c>:261-264</c>) —
+    /// which the type table sets false for exactly <c>TYPEID_LINE</c>, <c>TYPEID_STOCK</c> and
+    /// <c>TYPEID_SCATTER</c> (<c>:95-117</c>). A bar, an area, a pie, a bubble or a radar
+    /// group's <c>c:smooth</c> is read and discarded. Stock is in the list for fidelity and has
+    /// no corpus witness, and <see cref="ChartLayout"/> draws a stock plot as candles rather
+    /// than as a polyline in any case.
+    /// </para>
+    /// <para>
+    /// <strong>One smoothed series smooths the group.</strong> See
+    /// <see cref="ChartSeries.Smooth"/>: the property is set on the chart type, once per series,
+    /// so the last series to state anything wins and any series stating <c>1</c> is enough
+    /// — <c>convertLineSmooth</c> is only reached for a series whose <c>mbSmooth</c> is true
+    /// (<c>:586-587</c>).
+    /// </para>
+    /// <para>
+    /// <strong>An unstated <c>c:smooth</c> is <c>!office2007</c> and not false.</strong>
+    /// <c>SeriesModel</c>'s <c>mbSmooth( !bMSO2007Doc )</c>
+    /// (<c>oox/source/drawingml/chart/seriesmodel.cxx</c>:124). Measured both ways over the
+    /// three corpus documents holding a line or scatter group that states no <c>c:smooth</c> at
+    /// all: <c>Demick_JetBlue.pptx</c> and <c>171128IPAP.pptx</c> both declare
+    /// <c>&lt;Application&gt;Microsoft Office PowerPoint&lt;/Application&gt;</c> with
+    /// <c>&lt;AppVersion&gt;12.0000&lt;/AppVersion&gt;</c> and 26.2.4.2's own ODF export of them
+    /// carries no <c>chart:interpolation</c> on those groups;
+    /// <c>microsoft_learn_multi_chart_examples.xlsx</c> declares <c>AppVersion 3.1</c>, is
+    /// therefore not an Office 2007 file, and its export carries
+    /// <c>chart:interpolation="cubic-spline"</c> on two of its five charts — whose reference
+    /// PDF then draws 60 and 200 segments for a four-point and an eleven-point series.
+    /// </para>
+    /// </remarks>
+    private static bool SmoothOf(XElement group, ChartPlotKind kind, bool office2007)
+    {
+        if (kind is not (ChartPlotKind.Line or ChartPlotKind.Scatter or ChartPlotKind.Stock))
+            return false;
+
+        // mb3dChart is the other half of isSeriesFrameFormat, and a c:line3DChart is the one
+        // spelling that reaches here with it set.
+        if (group.Name.LocalName is "line3DChart") return false;
+
+        bool smooth = false;
+
+        foreach (XElement element in Children(group, "ser"))
+            smooth |= Flag(element, "smooth") ?? !office2007;
+
+        return smooth;
+    }
 
     /// <summary>
     /// What marker a series draws, or none.

@@ -5,8 +5,8 @@ using Paperless.Core.Units;
 namespace Paperless.Core.Charts;
 
 /// <summary>
-/// The five plot types that are not a rectangle, a polyline or a wedge: radar, bubble, stock and
-/// of-pie — and the one that draws nothing on purpose, surface.
+/// The four plot types that are not a rectangle, a polyline or a wedge: radar, bubble, stock and
+/// of-pie.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -16,38 +16,39 @@ namespace Paperless.Core.Charts;
 /// instead of one.
 /// </para>
 /// <para>
-/// <strong>What is deliberately absent: a surface chart draws nothing, and that is a decision
-/// rather than an omission.</strong> Three reasons, in the order they were established.
+/// <strong>There is no fifth type here, and the paragraphs that used to say otherwise are
+/// withdrawn.</strong> This file argued at length that <em>"a surface chart's frame stays
+/// empty"</em> and that drawing one as a bar chart was <em>"the tempting shortcut"</em>. Whatever
+/// the merits of that when it was written, it has not described the code for several rounds:
+/// <c>Paperless.Ooxml.DrawingML.DrawingChartPlot.KindOf</c> maps <c>c:surfaceChart</c> and
+/// <c>c:surface3DChart</c> onto <see cref="ChartPlotKind.Bar"/>, and
+/// <c>Paperless.OpenDocument.OdfChartPlot.KindOf</c> does the same for
+/// <c>chart:class="chart:surface"</c>. Nothing here draws a surface chart's frame empty. The
+/// measurement that overturned the older view is recorded on the OOXML reader's own
+/// <c>KindOf</c> and is not repeated.
 /// </para>
 /// <para>
-/// <em>One: the corpus contains none.</em> Counted over every chart part in LibreOffice's own
-/// <c>chart2/qa/extras/data/</c> — 351 OOXML plot groups and 219 ODF <c>chart:class</c>
-/// attributes — there are <em>zero</em> <c>c:surfaceChart</c>, zero <c>c:surface3DChart</c> and
-/// zero <c>chart:class="chart:surface"</c>, against 5 of-pie, 3 bubble, 2 radar and 1 stock in
-/// the OOXML set alone. There is nothing to measure a surface implementation against, and an
-/// unmeasurable implementation is the kind that looks right and is not.
+/// <strong>What the withdrawn argument was reaching for is true and is a different claim:
+/// <c>Surface</c> has never been a chart type in LibreOffice, in either version.</strong>
+/// <c>template.Surface</c> is commented out of the registry
+/// (<c>chart2/source/model/template/ChartTypeManager.cxx</c>:223, this tree) and there is no
+/// <c>SurfaceChartType</c> among the nineteen services in
+/// <c>chart2/source/inc/servicenames_charttypes.hxx</c>:23-59; grepping 26.2.4.2's own
+/// <c>libmergedlo.so</c> and <c>services.rdb</c> finds neither name there either. All three of
+/// its importers substitute a column chart with the same <c>// Todo</c> — OOXML at
+/// <c>oox/source/drawingml/chart/typegroupconverter.cxx</c>:79 with <em>"create a deep 3D bar
+/// chart from surface charts"</em> at <c>:217-219</c>, BIFF at
+/// <c>sc/source/filter/excel/xlchart.cxx</c>:469, and ODF at
+/// <c>xmloff/source/chart/SchXMLTools.cxx</c>:148 with <em>"@todo change this if a surface chart
+/// is available"</em>. So reading one as a bar chart is not a shortcut past the reference; it is
+/// the reference's own answer.
 /// </para>
 /// <para>
-/// <em>Two: LibreOffice does not draw one either.</em> There is no <c>SurfaceChart</c> in
-/// <c>chart2/source/view/charttypes/</c>. The importer maps both elements onto
-/// <c>TYPEID_SURFACE</c>, whose chart2 service is spelled
-/// <c>"com.sun.star.chart2.ColumnChartType"</c> with the comment <c>// Todo</c>
-/// (<c>oox/source/drawingml/chart/typegroupconverter.cxx:79</c>), and converts the group into "a
-/// deep 3D bar chart from all surface charts" (<c>:198-199, :217-218</c>). So the reference this
-/// feature is measured against is itself a substitution; reproducing it would be reproducing a
-/// substitution rather than porting a projection.
-/// </para>
-/// <para>
-/// <em>Three: the projection is genuinely three-dimensional.</em> A surface is a height field
-/// over two category axes drawn through a rotation, an elevation and a perspective —
-/// <c>m_aMatrixScreenToScene</c> and the whole of <c>ThreeDHelper</c> — and none of that exists
-/// here: <see cref="ChartLayout"/> maps two fractions onto a rectangle. A flat drawing of a
-/// surface is not a worse surface, it is a different picture.
-/// </para>
-/// <para>
-/// So a surface chart's frame stays empty, which reads as a missing feature. Drawing it as a bar
-/// chart — the tempting shortcut, and what the importer does — reads as a layout bug, which is
-/// the rule the SmartArt evaluator was built on.
+/// <strong>Its reach is nil in all four streams, twice over</strong>, which is why none of this
+/// costs anything either way: <c>0 of 766</c> OOXML documents state <c>c:surfaceChart</c> or
+/// <c>c:surface3DChart</c>, <c>0 of 947</c> of 26.2.4.2's own ODF exports state
+/// <c>chart:class="chart:surface"</c>, and no <c>CHSURFACE</c> (0x103F) record appears in any of
+/// the 64 <c>.xls</c> or the 51 <c>.ppt</c>. <c>probes/chart-types-r101</c> holds both censuses.
 /// </para>
 /// </remarks>
 public static partial class ChartLayout
