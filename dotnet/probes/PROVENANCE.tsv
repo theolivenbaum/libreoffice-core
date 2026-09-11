@@ -1888,3 +1888,25 @@ dotnet/probes/sheet-last-r100/txo-runs-r100.txt	2026-09-11	current	26.2.4.2	pres
 dotnet/probes/sheet-last-r100/guardcheck.py	2026-09-11	current	26.2.4.2	present	current	
 dotnet/probes/sheet-last-r100/check-narrow.sh	2026-09-11	current	26.2.4.2	present	current	
 dotnet/probes/sheet-last-r100/narrow-rule.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/chart-smooth-r102/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-smooth-r102/census-ooxml-smooth.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/census-odf-chart.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/segment-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/spline-hypotheses.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/collinear.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/threed-raster.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/curve-deviation.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/ofpie-variants.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/ooxml-smooth-groups.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/odf-chart.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/segments.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/hypotheses.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/collinear.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/threed.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/curve-deviation.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/ofpie.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/scores.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/confine-before.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/confine-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/confine-ooxml.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-smooth-r102/confine-odf.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md

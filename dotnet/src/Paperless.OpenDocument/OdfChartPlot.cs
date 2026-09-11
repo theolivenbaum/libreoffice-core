@@ -88,6 +88,15 @@ public static class OdfChartPlot
         // drawn, rather than being drawn as some other type.
         if (KindOf(Attribute(chart, OdfNamespaces.Chart, "class")) is not { } kind) return null;
 
+        // ODF has no class for an of-pie, so LibreOffice writes it as a circle carrying two
+        // extension attributes on chart:chart itself — SchXMLExport.cxx:1331-1372 writes
+        // loext:sub-bar or loext:sub-pie and loext:split-position, and
+        // SchXMLChartContext.cxx:446-458 reads them back. Measured on the corpus's one witness,
+        // 26.2.4.2's own .odt of 028_Unit_Circle_Chart_Optimized_Graph: <chart:chart
+        // chart:class="chart:circle" loext:sub-bar="true" loext:split-position="2">.
+        ChartOfPieType? ofPie = OfPieTypeOf(chart);
+        if (ofPie is not null && kind == ChartPlotKind.Pie) kind = ChartPlotKind.OfPie;
+
         List<XElement> series = [.. Children(plotArea, OdfNamespaces.Chart, "series")];
         if (series.Count == 0) return null;
 
@@ -112,6 +121,15 @@ public static class OdfChartPlot
         // whose high and low are not already in the right places.
         string? plotStyleName = Attribute(plotArea, OdfNamespaces.Chart, "style-name");
         bool japanese = styles.Flag(plotStyleName, "japanese-candle-stick") ?? false;
+
+        // chart:interpolation is the curve style, and ODF puts it on the *plot area's* style
+        // rather than on a series' — PropertyMaps.cxx:101 maps it onto the chart type's
+        // SplineType, which chart2 resolves to CurveStyle. "cubic-spline" is the only value that
+        // reaches ChartSpline: the others are "none" (a polyline), "b-spline" — a different
+        // flattening, CalculateBSplines, with no corpus witness — and the four ODF 1.3 step
+        // shapes, which are not curves at all. Measured over /home/user/corpus-odf: 12 of 947
+        // renderings state chart:interpolation and every one of them states cubic-spline.
+        bool smooth = styles.Text(plotStyleName, "interpolation") == "cubic-spline";
 
         ChartStockRole[] stockRoles = japanese
             ?
@@ -180,6 +198,10 @@ public static class OdfChartPlot
             // per series is all a combination chart needs here.
             ChartPlotKind own = KindOf(Attribute(element, OdfNamespaces.Chart, "class")) ?? kind;
 
+            // A series states chart:circle where the chart is an of-pie, because the extension
+            // attributes sit on chart:chart and not on the series.
+            if (ofPie is not null && own == ChartPlotKind.Pie) own = ChartPlotKind.OfPie;
+
             ChartStockRole role = ChartStockRole.None;
             if (own is ChartPlotKind.Stock && stockRole < stockRoles.Length)
                 role = stockRoles[stockRole++];
@@ -196,6 +218,13 @@ public static class OdfChartPlot
                 own)
             {
                 Marker = MarkerOf(style, styles, own),
+
+                // The curve style belongs to the chart type, so a combination chart's bar
+                // series is not smoothed by the plot area's chart:interpolation and its line
+                // series is — the same rule the OOXML reader applies per plot group.
+                Smooth = smooth
+                         && own is ChartPlotKind.Line or ChartPlotKind.Scatter
+                             or ChartPlotKind.Stock,
                 Label = LabelOf(style, styles, own, areaLabel),
                 PointLabels = PointLabelsOf(element, values.Count, styles, own, areaLabel),
                 Trendlines = TrendlinesOf(element, styles),
@@ -230,6 +259,8 @@ public static class OdfChartPlot
             Series = plotted,
             Kind = kind,
             Rings = IsRing(Attribute(chart, OdfNamespaces.Chart, "class")),
+            OfPieType = ofPie ?? ChartOfPieType.Pie,
+            SplitPosition = SplitPositionOf(chart),
 
             // chart:bar is ODF's name for a *horizontal* bar chart and chart:bar with
             // chart:vertical="false" is the column one — the opposite of what the names suggest.
@@ -405,6 +436,50 @@ public static class OdfChartPlot
         int colon = stated.IndexOf(':', StringComparison.Ordinal);
         return (colon >= 0 ? stated[(colon + 1)..] : stated) == "ring";
     }
+
+    /// <summary>
+    /// Which of-pie a <c>chart:chart</c> is, or null when it is an ordinary pie.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ODF's vocabulary has no of-pie class — <c>aXMLChartClassMap</c>
+    /// (<c>xmloff/source/chart/SchXMLTools.cxx</c>:136-151, this tree) holds thirteen values and
+    /// none of them is one — so LibreOffice writes the sub-type as two of its own extension
+    /// attributes on <c>chart:chart</c> beside <c>chart:class="chart:circle"</c>:
+    /// <c>SchXMLExport.cxx</c>:1334-1337 writes <c>loext:sub-bar</c> or <c>loext:sub-pie</c>, and
+    /// <c>SchXMLChartContext.cxx</c>:446-455 reads them.
+    /// </para>
+    /// <para>
+    /// <strong>Only the <c>loext:</c> spelling exists.</strong> This is the sixth instance of
+    /// the namespace trap the family notes record: the attribute is written and read in the
+    /// extension namespace and nowhere else, so a reader looking for <c>chart:sub-bar</c> finds
+    /// it in no file at all. Measured over <c>/home/user/corpus-odf</c> — 26.2.4.2's own export
+    /// of the whole corpus — one document states one, and it states it as <c>loext:</c>.
+    /// </para>
+    /// </remarks>
+    private static ChartOfPieType? OfPieTypeOf(XElement chart)
+    {
+        if (OdfValue.ParseBoolean(Attribute(chart, OdfNamespaces.LoExt, "sub-bar")) == true)
+            return ChartOfPieType.Bar;
+
+        if (OdfValue.ParseBoolean(Attribute(chart, OdfNamespaces.LoExt, "sub-pie")) == true)
+            return ChartOfPieType.Pie;
+
+        return null;
+    }
+
+    /// <summary>
+    /// How many of the series' last points go into the second plot.
+    /// </summary>
+    /// <remarks>
+    /// <c>loext:split-position</c> (<c>SchXMLExport.cxx</c>:1370). Its absence is chart2's own
+    /// <c>m_nSplitPos(2)</c> (<c>chart2/source/view/charttypes/PieChart.cxx</c>:199), which is
+    /// what <see cref="ChartPlot.SplitPosition"/> already defaults to.
+    /// </remarks>
+    private static int SplitPositionOf(XElement chart)
+        => OdfValue.ParseDouble(Attribute(chart, OdfNamespaces.LoExt, "split-position")) is { } split
+            ? (int)Math.Clamp(split, 1.0, 4096.0)
+            : 2;
 
     /// <summary>
     /// The colour an axis' major gridlines are drawn in, or null when it has none.

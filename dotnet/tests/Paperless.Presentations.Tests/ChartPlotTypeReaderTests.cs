@@ -254,6 +254,57 @@ public class ChartPlotTypeReaderTests
         pie.SplitPosition.ShouldBe(2);
     }
 
+    /// <summary>
+    /// A series stating a non-zero <c>c:explosion</c> takes its of-pie group back to a plain
+    /// pie, because that is what the reference draws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>One attribute, measured at 26.2.4.2 in both directions, on the corpus's only two
+    /// of-pie documents.</strong> <c>029_Unit_Circle_Chart_Pie_Theme_8a922142.docx</c> states
+    /// <c>&lt;c:explosion val="1"/&gt;</c> and the reference draws it as one circle of four
+    /// wedges with no second plot and no connector lines, exporting a bare
+    /// <c>chart:class="chart:circle"</c>; delete that element and the export carries
+    /// <c>loext:sub-pie="true"</c>. <c>028_Unit_Circle_Chart_Optimized_Graph_83d9c756.docx</c>
+    /// states none and gets its pie-plus-bar; add one to its series and the export loses
+    /// <c>loext:sub-bar</c>.
+    /// </para>
+    /// <para>
+    /// It is the <em>series'</em> element, not a point's: <c>028</c> carries seventeen
+    /// <c>c:dPt</c> and keeps its sub-bar, and removing <c>029</c>'s <c>c:dPt</c> while leaving
+    /// its series' explosion does not bring the sub-pie back. Reach 1 of 947, worth
+    /// <c>|ink|%</c> 3.76 to 0.55 on that document. See
+    /// <c>Paperless.Ooxml.DrawingML.DrawingChartPlot.IsExploded</c> and
+    /// <c>probes/chart-smooth-r102</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnExplodedOfPieIsReadAsAPlainPie()
+    {
+        ChartPlot exploded = Require(
+            $"""
+             <c:plotArea><c:ofPieChart>
+               <c:ofPieType val="pie"/>
+               <c:ser><c:explosion val="1"/>{Values(6, 5, 4, 3, 2, 1)}</c:ser>
+             </c:ofPieChart></c:plotArea>
+             """);
+
+        exploded.Kind.ShouldBe(ChartPlotKind.Pie);
+
+        // Zero is not an explosion, and neither is a point's.
+        ChartPlot flat = Require(
+            $"""
+             <c:plotArea><c:ofPieChart>
+               <c:ofPieType val="pie"/>
+               <c:ser><c:explosion val="0"/>
+                 <c:dPt><c:idx val="0"/><c:explosion val="25"/></c:dPt>
+                 {Values(6, 5, 4, 3, 2, 1)}</c:ser>
+             </c:ofPieChart></c:plotArea>
+             """);
+
+        flat.Kind.ShouldBe(ChartPlotKind.OfPie);
+    }
+
     // -------------------------------------------------------------- surface
 
     /// <summary>

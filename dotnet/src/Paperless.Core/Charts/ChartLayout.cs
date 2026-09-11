@@ -3317,8 +3317,16 @@ public static partial class ChartLayout
 
             GraphicsPath path = new();
 
-            foreach (List<DocPoint> whole in runs)
+            foreach (List<DocPoint> stated in runs)
             {
+                // A smoothed series is flattened *before* it is clipped, which is the order
+                // AreaChart::impl_createLine uses — CalculateCubicSplines, then
+                // clipPolygonAtRectangle (AreaChart.cxx:331-336). Clipping first and smoothing
+                // the remains would curve through the points where the polyline met the plot's
+                // edge instead of through the series' own.
+                IReadOnlyList<DocPoint> whole =
+                    series.Smooth ? ChartSpline.Flatten(stated) : stated;
+
                 foreach (IReadOnlyList<DocPoint> piece in ChartClipping.ClipPolyline(whole, area))
                 {
                     path.MoveTo(piece[0]);
