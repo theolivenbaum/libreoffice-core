@@ -1,5 +1,10 @@
 # `odt-sectable-r89` — CUT OFF, scripts only
 
+***Settled by `probes/odt-sectable-r92`.*** The nesting this round's filenames pointed at is the
+rule, and `xhist.py`'s own docstring — a baseline crosses a column, so a histogram that merges
+every span of one baseline reads a two-column page as one column — is what refutes the two claims
+it was sent to build on. Both of them are withdrawn there; read that file rather than this one.
+
 **This round did not finish and wrote down no conclusions.** Its agent was terminated by a rate
 limit partway through, immediately after saying it was about to *"implement the nested-section
 rule"* — so it had reached a rule by that name, and what the rule says is not recorded anywhere.

@@ -1342,13 +1342,19 @@ public sealed record LaidOutPage
     /// </summary>
     /// <remarks>
     /// A line's own column count rather than the page's, because a page can hold sections that disagree
-    /// about it — see <see cref="PlacedLine.Columns"/>. Falls back to the page's for a line that states
-    /// nothing, which is every line laid out before the field existed and every line of a flow.
+    /// about it — see <see cref="PlacedLine.Columns"/>.
+    /// <para>
+    /// A line that states one column takes the whole body, <em>whatever the page states</em>. It used to
+    /// take the page's column at the line's own index instead, on the reading that a line stating one
+    /// column had stated nothing — and that put a full-measure index inside a two-column page's second
+    /// column on `absrc-pac-01-info-note-en.odt`, because the page is written with whichever section is
+    /// current when it is emitted. Every line the paginator places records the count in force where it
+    /// was laid out, so there is no such thing as a body line that states nothing.
+    /// </para>
     /// </remarks>
     /// <param name="line">The line whose rectangle is wanted.</param>
     public DocRect ColumnArea(PlacedLine line)
     {
-        if (line.Columns <= 1 && ColumnCount > 1) return ColumnArea(line.Column);
         if (line.Columns <= 1) return BodyArea;
 
         return Area(line.Columns, line.ColumnGap, line.ColumnRuler, line.Column);

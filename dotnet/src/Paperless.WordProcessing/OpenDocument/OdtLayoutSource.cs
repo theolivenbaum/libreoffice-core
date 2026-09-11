@@ -688,6 +688,20 @@ public sealed partial class OdtLayoutSource
                 continue;
             }
 
+            if (_isBody
+                && ns == OdfNamespaces.Text
+                && (name == "section" || IsIndex(name))
+                && _columnGeometry is { } enclosing)
+            {
+                // A section inside a section leaves the enclosing one's columns and splits it — see
+                // OdfSectionGeometry.Nested. An ODF index is a section like any other, which is why
+                // this arm names ODF's seven index elements beside `section`.
+                EnterNestedSection(child, enclosing);
+                Walk(child, into, depth + 1);
+                LeaveNestedSection(enclosing);
+                continue;
+            }
+
             if (ns == OdfNamespaces.Text
                 && name is "section" or "index-body"
                     or "table-of-content" or "alphabetical-index" or "illustration-index"
@@ -888,15 +902,16 @@ public sealed partial class OdtLayoutSource
     /// <remarks>
     /// <para>
     /// Answers null — and the walk then treats the element as transparent, exactly as it always has —
-    /// for a section that states one column and no indents, for one nested inside another, and for one
-    /// outside the body. A section in a header, a footer or a table cell is not laid out as its own
-    /// frame here: the flow it belongs to has no page geometry of its own to change.
+    /// for a section that states one column and no indents, and for one outside the body. A section in a
+    /// header, a footer or a table cell is not laid out as its own frame here: the flow it belongs to has
+    /// no page geometry of its own to change.
     /// </para>
     /// <para>
-    /// Nesting is refused rather than composed because composing it would need the parent section's
-    /// area as the origin of the child's indents, and nothing in the converted corpus exercises it:
-    /// of 139 <c>text:section</c> elements in 49 of the 338 converted <c>.odt</c>, <b>none</b> is
-    /// inside another and none is inside a table.
+    /// A section met while one is already open is a <em>nested</em> section and goes through
+    /// <see cref="EnterNestedSection"/> instead, which is a different rule rather than a refusal: it
+    /// leaves the enclosing section's columns and splits it. Of 139 <c>text:section</c> elements in 49 of
+    /// the 338 converted <c>.odt</c>, none is inside another and none is inside a table — but an ODF
+    /// <em>index</em> is a section too, and one of those is inside a columned section.
     /// </para>
     /// </remarks>
     /// <param name="section">The <c>text:section</c> element.</param>
@@ -911,6 +926,56 @@ public sealed partial class OdtLayoutSource
         _columnGeometry = geometry;
         _sectionIndex = AllocateColumnSection(geometry);
         return true;
+    }
+
+    /// <summary>
+    /// Whether an element name is one of ODF's seven indexes, each of which is a section in Writer.
+    /// </summary>
+    /// <remarks>
+    /// A <c>text:table-of-content</c> and its six siblings each import as a <c>SwSectionNode</c> — a
+    /// <c>SwTOXBaseSection</c> is a <c>SwSection</c> — so the nesting rule
+    /// <see cref="OdfSectionGeometry.Nested"/> describes reaches them exactly as it reaches a
+    /// <c>text:section</c>. Counting <c>text:section</c> alone is what answers "nothing in the corpus is
+    /// nested"; counting the indexes too finds the one document that is.
+    /// </remarks>
+    /// <param name="name">The element's local name, in the text namespace.</param>
+    private static bool IsIndex(string name)
+        => name is "table-of-content" or "alphabetical-index" or "illustration-index"
+            or "table-index" or "object-index" or "user-index" or "bibliography";
+
+    /// <summary>
+    /// Opens a section nested inside one that is already open.
+    /// </summary>
+    /// <remarks>
+    /// The nested section is a frame of its own beside the parent rather than inside its columns, so it
+    /// gets a section of its own here — one column unless it states more, at the parent's own indents
+    /// unless it states its own. See <see cref="OdfSectionGeometry.Nested"/> for the three seats.
+    /// </remarks>
+    /// <param name="section">The nested <c>text:section</c> or index element.</param>
+    /// <param name="enclosing">The geometry of the section it is nested in.</param>
+    private void EnterNestedSection(XElement section, OdfSectionGeometry enclosing)
+    {
+        string? styleName = section.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value;
+        OdfSectionGeometry nested = OdfSectionGeometry.Nested(_styles, styleName, enclosing);
+
+        _columnGeometry = nested;
+        _sectionIndex = AllocateColumnSection(nested);
+    }
+
+    /// <summary>
+    /// Closes a nested section, putting the flow back into a fresh frame of the enclosing one.
+    /// </summary>
+    /// <remarks>
+    /// A fresh one rather than the frame the nested section interrupted, because that is what Writer
+    /// does: <c>SwSectionFrame::SplitSect</c> moves everything after the nested section into a second
+    /// frame of the parent's format (<c>sw/source/core/layout/frmtool.cxx</c>:1954-1960), which balances
+    /// its own columns and starts where the nested section left off.
+    /// </remarks>
+    /// <param name="enclosing">The geometry of the section the nested one interrupted.</param>
+    private void LeaveNestedSection(OdfSectionGeometry enclosing)
+    {
+        _columnGeometry = enclosing;
+        _sectionIndex = AllocateColumnSection(enclosing);
     }
 
     /// <summary>
