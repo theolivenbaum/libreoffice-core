@@ -234,8 +234,8 @@ and lowers the cap to `ticks / (longest + 1)`. A date axis is exempt, as :1578 i
 | `FrameSqueezedToPageTests` (14) | 9 of 14 | all 14 |
 
 The whole suite at HEAD, read out of each run's own last line: the ten non-fidelity projects
-**0 failed of 6479** (Containers 109, Core 524, Markup 259, OpenDocument 146, Presentations
-1045, Rendering 164, Spreadsheets 1271, Text 728, Vector 309, WordProcessing 1924), and
+**0 failed of 6482** (Containers 109, Core 524, Markup 259, OpenDocument 146, Presentations
+1045, Rendering 164, Spreadsheets 1271, Text 728, Vector 309, WordProcessing 1927), and
 `Paperless.Fidelity.Tests` **542 passed / 10 failed of 552** — PageDrawing x4, TabStop x4,
 SheetDrawing, JustificationShrink. The same run was taken at the base build before the sweeps,
 and it printed the same ten names and the same 542 / 10 / 552, so the baseline is this session's
