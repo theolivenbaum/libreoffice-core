@@ -17,6 +17,7 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | # | what | evidence |
 |---|---|---|
 | L1 | **On the draw layer the reference measures in one face and draws in another.** `FontAttribute` has no family-class field, so `getVclFontFromFontAttribute` rebuilds at `FAMILY_DONTKNOW` while the DX array was measured with the class on. `fc-match "Helvetica:bold"` → Liberation; `fc-match "Helvetica,sans:bold"` → DejaVu. | `probes/title-font-r92`; seventh confound in `CLAUDE.md`. Our output equals the reference's own class-less branch to 0.105 pt on a 155 pt line. |
+| L2 | **`a:normAutofit/@fontScale` is not honoured.** Twenty one-attribute variants over two decks, drawn `Tf` sizes read from the reference's own PDF: 90000, 50000, 25000, absent, and each of those beside a stated `lnSpcReduction`, all draw identical sizes. Only removing the element moves anything; what is drawn is `constScaleLevels`' own row. | `probes/slides-ink-r94`. The trap: PowerPoint's stored value sits *near* the search's answer, so a witness measured at its own value cannot separate the hypotheses. Closed **without** code change. |
 
 ## Confounds — closed as measurement hazards, not defects
 
@@ -33,7 +34,6 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | # | what | round |
 |---|---|---|
 | O1 | Head of the sheets ink ranking: `TK-Syllabus-Comparison-Document-v2.xlsx` **304.57 summed \|ink\|% over 1235 pages, 142 MAJOR, and it passes the gate**; `alle einzeln` 225.44; `Background_Declaration_Template` 136.07. Plus BIFF `TXO` formatting runs unread — 155 boxes in 17 `.xls`, 62 mixed-format. | `agent/sheetink` |
-| O2 | `FAA_Form_337` p67 and `pres_ioc_phuket` p26 carry ink missing from ours, both passing; `NAS-Infrastructure-Roadmaps-Weather` 9.58 uncharacterised. Plus 41 pages off on dominant drawn size across 33 documents, and `@lnSpcReduction` (209 elements in 40 of 251 `.pptx`, read from source and **never measured against a rendering**). | `agent/slidesink` |
 
 ## Open — seated, not yet dispatched
 
@@ -49,6 +49,9 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | O10 | **Chart category-axis rotation** needs a hyphenator and a pattern set — the trigger is `ParaIsHyphenation`, not width. A feature, not a round; wrong hyphenation turns axes the reference wraps. | `probes/chart-axisrot-r91` |
 | O11 | `048_Expense_trends_budget`: a remaining automatic-interval cap disagreement (ours step 50, reference 100 on 0…500). Fixing it properly means laying out at model size and scaling the finished `ChartDrawing`. | `probes/chart-axis-r87` |
 | O12 | Whether a clipped **shape's own** text should leave the text layer. The 733 pages that refuted the general claim are mostly *cell* text, which the drawing clip never governed. | `probes/clip-textlayer-r93` |
+| O13 | **Escher WordArt is not drawn as Fontwork.** `pres_ioc_phuket.ppt` p26: the reference clips a gradient to the glyph outlines, we paint the rectangle, so the title reads as a blank yellow bar. No MS-binary reader reaches `Paperless.Ooxml/DrawingML/Fontwork*`. | `probes/slides-ink-r94`; **reach 2 shapes in 2 of 181** |
+| O14 | The dark blue banner on that same page is **103.38 pt** tall in the reference and 64.88 in ours. Measured, uncharacterised, and separate from O13. | same |
+| O15 | 41 `.ppt`/`.pptx` pages still differ on the dominant drawn size across 33 documents; the witness bullet is 17.773 pt at y 175.011 against 17.802 at 175.663. **Untouched** — that round spent its budget on the `@fontScale` measurement instead, which is why L2 exists. | `probes/ppt-fit-r85` |
 
 ## Open — measured as nil reach, kept only so they are not rediscovered
 
@@ -60,6 +63,8 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | N4 | `FrameLayout` positions an anchored frame against `page.BodyArea` | **no** corpus document has a frame inside an indented text section |
 | N5 | An `.xlsx` row with no `ht` and no `sheetFormatPr`: 12.800 pt from the reference, 13.777 from us | **no** corpus document reaches it |
 | N6 | `c:layoutTarget val="inner"`; an axis `rot` of exactly ±90° | **0** corpus documents each |
+| N7 | `NAS-Infrastructure-Roadmaps-Weather.pptx` as an ink defect — **refuted**. All 90 text records on its largest page sit at identical positions; the 3.52 % is a 0.13 % anisotropy seen through a 512 px instrument. | `probes/slides-ink-r94` |
+| N8 | WMF raster op `0x7` (self-mask *and* invert the rectangle) — needs the destination back, and no corpus document reaches it | `probes/slides-ink-r94` |
 
 ---
 
