@@ -998,6 +998,32 @@ internal static class SheetTextLayout
     /// so <see cref="SheetOptimalRowHeights"/> has to know which portions sit on which line. The
     /// breaking itself is the same run-aware path <see cref="Wrap"/> takes, so a row is measured
     /// against exactly the lines the cell will be drawn with.
+    /// <para>
+    /// <strong>With one addition the layouter cannot make: a trailing hard break leaves an empty
+    /// paragraph, and it is a line of the row's height.</strong> The layouter ends a paragraph on
+    /// its break and never opens the empty one after it — <c>"a\n"</c> lays out as one line where
+    /// <see cref="LineCount"/>, which splits on the break before it wraps anything, answers two.
+    /// The two have to give the same number, because a plain cell and a rich one holding the same
+    /// characters are the same row in Calc: an <c>EditTextObject</c> holds one paragraph per
+    /// <c>text:p</c>, the trailing empty one included, and <c>ScColumn::GetNeededSize</c>'s height
+    /// branch is <c>pEngine-&gt;GetTextHeight()</c> over all of them (<c>column2.cxx</c>:571-577).
+    /// It costs no glyph — an empty paragraph draws nothing — which is why the count shows up in
+    /// the height alone and <see cref="Wrap"/> is left as it is.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 rather than argued. Row 5 of <c>Reader Instructions</c> in
+    /// <c>TK-Syllabus-Comparison-Document-v2.ods</c> holds eighteen paragraphs of which the
+    /// eighteenth is empty, and the reference's own <c>--convert-to fods</c> gives that row
+    /// <strong>4864.752 twips</strong>; deleting that one paragraph and converting back gives
+    /// <strong>4597.2</strong>, one line less, which is what this tree computed without the rule.
+    /// See <c>dotnet/probes/sheet-wrap-r99</c>. Its reach is measured rather than censused:
+    /// 1261 cells in 63 of the 550 <c>.ods</c> and <c>.xlsx</c> sheets documents state a trailing
+    /// empty paragraph and <strong>10 of the 63 change a rendering</strong> — the other 53
+    /// documents hold it only in cells that are in one format, where the rule was already right,
+    /// or that are not the tallest in their row.
+    /// Sixty-one non-candidate renderings are byte-identical either way, and no gate column moves
+    /// on any of the ten.
+    /// </para>
     /// </remarks>
     /// <param name="text">The cell's text.</param>
     /// <param name="portions">The stretches it is split into.</param>
@@ -1026,9 +1052,14 @@ internal static class SheetTextLayout
         LaidOutParagraph laid = layouter.Layout(
             Measured(text, portions, scale: 1.0, device), textAreaWidth: available);
 
-        List<(int Start, int End)> ranges = new(laid.Lines.Count);
+        List<(int Start, int End)> ranges = new(laid.Lines.Count + 1);
         foreach (LineBox box in laid.Lines)
             ranges.Add((box.Line.Start, Math.Min(box.Line.End, text.Length)));
+
+        // The empty paragraph a trailing break leaves. Empty, so no portion covers it and
+        // `RichPixels` measures it in the cell's own face — which is what EditEngine gives a
+        // paragraph holding no portion of its own.
+        if (IsHardBreak(text[^1])) ranges.Add((text.Length, text.Length));
 
         return ranges;
     }
