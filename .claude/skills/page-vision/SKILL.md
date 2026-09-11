@@ -17,6 +17,25 @@ Three separate failures this addresses, all of which produce a confident and use
 
 ## Delegate the reading. It is the only real control.
 
+> **In a Claude Code agent container there is usually no such reader, and this section is then
+> aspirational rather than actionable.** An agent here has no `Task`/subagent tool; the sibling
+> session `mcp__Claude_Code_Remote__create_session` spawns runs in its own container, cannot open
+> `/home/user/...` to see your PNG, and has no channel back. **Six rounds have now reached this
+> section, gone looking for the tool, and reported it missing** — the last of them after a brief
+> that instructed it to delegate two readings.
+>
+> **Check once, then stop looking.** If the tool is absent: say so in your write-up, treat every
+> reading as your own and contaminated, and corroborate anything you lean on with arithmetic that
+> does not depend on the reading — content-stream operators, drawing dumps, the gate columns, the
+> reference's own flat ODF. The round that found the Calc drawing clip did exactly that: the
+> composed pair gave direction and kind and could not decide between *displaced*, *rescaled* and
+> *clipped*; an authored probe's clip rectangle settled it. **A contaminated reading that names
+> candidate causes and then defers to an instrument is worth a great deal.** What it is not worth
+> is being quoted as though a blind reader had confirmed it.
+>
+> The parent session driving those rounds *does* have the tool, so everything below applies to it
+> — and delegating one page costs it very little.
+
 **Send the page to a fresh subagent and let it describe the page before you look at it
 yourself.** Everything else in this file is secondary to that.
 
