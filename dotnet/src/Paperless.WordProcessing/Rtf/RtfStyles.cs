@@ -163,12 +163,17 @@ public readonly record struct RtfStyle(
 /// What Writer's style pool gives an RTF style whose <c>\sbasedon</c> did not resolve.
 /// </summary>
 /// <remarks>
-/// The two answers are not the same kind of thing, which is why this is an enumeration rather than
-/// a nullable formatting. <see cref="Heading"/> is a constant — <c>COLL_HEADLINE_BASE</c>'s own
-/// 14 pt, 12/6 and keep-with-next. <see cref="Standard"/> is a *reference*: what the paragraph
-/// inherits is whatever the document's own <c>Normal</c> entry says, which is why a probe that
-/// measures one <c>Normal</c> size cannot tell the two apart. See
-/// <see cref="RtfStyles.PoolParentOf"/>.
+/// <para>
+/// The answers are not the same kind of thing, which is why this is an enumeration rather than a
+/// nullable formatting. <see cref="Standard"/> is a *reference*: what the paragraph inherits is
+/// whatever the document's own <c>Normal</c> entry says, which is why a probe that measures one
+/// <c>Normal</c> size cannot tell inheritance from a constant. <see cref="Heading"/> and
+/// <see cref="Caption"/> are an intermediate pool style's own properties laid <em>over</em> that
+/// reference, because every Writer paragraph pool style has <c>COLL_STANDARD</c> at the root of
+/// its <c>GetPoolParent</c> chain (<c>sw/source/core/doc/poolfmt.cxx</c>:169-296) — and
+/// <see cref="Caption"/> is a reference again whenever the document declares a
+/// <c>caption</c> entry of its own. See <see cref="RtfStyles.PoolParentOf"/>.
+/// </para>
 /// </remarks>
 internal enum RtfPoolParent
 {
@@ -180,6 +185,11 @@ internal enum RtfPoolParent
 
     /// <summary>Writer's <em>Standard</em>, which is the document's own <c>Normal</c> entry.</summary>
     Standard,
+
+    /// <summary>
+    /// Writer's <em>Caption</em>, which is the five <c>COLL_LABEL_*</c> names' parent.
+    /// </summary>
+    Caption,
 }
 
 /// <summary>
@@ -222,6 +232,18 @@ public sealed class RtfStyles
     private readonly Dictionary<int, RtfStyleFormatting> _resolved = [];
     private readonly Dictionary<int, RtfStyleFormatting> _resolvedContribution = [];
 
+    /// <summary>
+    /// The <c>\s</c> id of the entry that redefines Writer's <em>Caption</em>, if the document
+    /// declares one.
+    /// </summary>
+    /// <remarks>
+    /// The last such entry wins, because <c>ApplyStyleSheets</c> walks the table in order and each
+    /// one resets the pool style and writes its own properties back over it
+    /// (<c>StyleSheetTable.cxx</c>:1101-1121). A <c>caption</c> entry counts whether or not any
+    /// paragraph applies it — it is the *declaration* that resets the pool style.
+    /// </remarks>
+    private int? _captionStyleId;
+
     /// <summary>Records a style definition read from the stylesheet.</summary>
     /// <remarks>
     /// A <c>\sbasedon</c> naming a style the sheet has not reached yet is dropped, because the
@@ -240,8 +262,21 @@ public sealed class RtfStyles
             style = style with { BasedOn = null };
         }
 
-        if (style.IsCharacterStyle) _characterStyles[id] = style;
-        else _paragraphStyles[id] = style;
+        if (style.IsCharacterStyle)
+        {
+            _characterStyles[id] = style;
+        }
+        else
+        {
+            _paragraphStyles[id] = style;
+            string trimmed = style.Name.Trim();
+            if (string.Equals(trimmed, "caption", StringComparison.Ordinal)
+                || string.Equals(trimmed, "Caption", StringComparison.Ordinal))
+            {
+                _captionStyleId = id;
+            }
+        }
+
         _resolved.Clear();
         _resolvedContribution.Clear();
     }
@@ -289,23 +324,67 @@ public sealed class RtfStyles
     /// (<c>StyleSheetTable.cxx</c>:1715-1716).
     /// </para>
     /// <para>
-    /// <b>Only those three names, and the boundary is measured rather than cautious.</b>
-    /// <c>probes/words-close-r95/standard-census.py</c> lists every paragraph style the 338
-    /// converted <c>.rtf</c> apply without a resolvable <c>\sbasedon</c> — 84 distinct names —
-    /// and the ones whose converted name reaches a Writer style with <c>COLL_STANDARD</c>
-    /// <em>somewhere</em> above it are <c>Body Text</c> (2 documents), <c>header</c> and
-    /// <c>footer</c> (5 each), <c>toc 1</c>…<c>toc 3</c> (2, 1, 1), a bare <c>Heading</c> (1) and
-    /// <c>Figure</c> (1); <c>caption</c> and <c>Caption</c> are <b>0 of 338</b>. The six that are
-    /// left out are left out because their pool parent is <em>not</em> <c>COLL_STANDARD</c>
-    /// directly — <c>Footer</c>'s is <c>COLL_HEADERFOOTER</c> and <c>Contents 1</c>'s is
-    /// <c>COLL_REGISTER_BASE</c> (<c>poolfmt.cxx</c>:206-256), both of which are pool styles with
-    /// properties of their own that the import does <em>not</em> reset, so each needs its own
-    /// measurement rather than this branch.
+    /// <b>Two routes reach a Writer style, not one, and the second is a set nobody had
+    /// enumerated.</b> For a name the map does not hold, <c>ConvertStyleName</c> returns it
+    /// <em>unchanged</em> (<c>:2083-2113</c>) — unless it collides with one of the map's own
+    /// values, when it gets a <c> (WW)</c> suffix and then matches nothing — so the second lookup
+    /// is on the name as the file wrote it, against Writer's paragraph style names in either
+    /// spelling (<c>SwXStyleFamily::hasByName</c>,
+    /// <c>sw/source/core/unocore/unostyle.cxx</c>:1030-1039, maps a programmatic name to a UI name
+    /// and looks the UI name up). <c>probes/rtf-style-r97/hasbyname-census.py</c> is that census
+    /// over the 338 converted <c>.rtf</c>: of the 84 names they apply without a resolvable
+    /// <c>\sbasedon</c>, <b>17 reach a Writer style</b> and three of the seventeen —
+    /// <c>Figure</c>, <c>Heading</c> and <c>Text</c>, one document each — do it by this route
+    /// rather than through the map.
     /// </para>
     /// <para>
-    /// The third family is every name the map answers nothing for, <c>Quote</c>,
-    /// <c>Normal (Web)</c> and <c>List Paragraph</c> among them (<c>:1794</c>, <c>:1883-1884</c>),
-    /// which keeps <c>\pard\plain</c>'s twelve points and is the control this rule must not move.
+    /// <b>Every Writer paragraph pool style has <c>COLL_STANDARD</c> at the root of its chain</b>
+    /// (<c>GetPoolParent</c>, <c>poolfmt.cxx</c>:169-296, transcribed group by group in that
+    /// census), so the question is never <em>whether</em> the walk reaches <em>Standard</em> but
+    /// what the intermediates add on the way. Measured at 26.2.4.2 on 116 one-name probes read out
+    /// of the flat ODF (<c>probes/rtf-style-r97/genpool2.py</c>, <c>genpool3.py</c>):
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <c>COLL_HEADERFOOTER</c> (<c>header</c>, <c>footer</c>) and <c>COLL_REGISTER_BASE</c>
+    /// (<c>toc 1</c>…<c>toc 9</c>, <c>Index 1</c>…<c>Index 3</c>) add <b>nothing</b>. The two tab
+    /// stops <c>DocumentStylePoolManager.cxx</c>:914-937 gives <em>Header and Footer</em> are in a
+    /// native ODF import and are <em>absent</em> after an RTF one — both measured, and the second
+    /// is why this is a measurement rather than a reading of that block.
+    /// </description></item>
+    /// <item><description>
+    /// A bare <c>Heading</c> adds nothing either, and that is the trap in its name: it
+    /// <em>is</em> <c>COLL_HEADLINE_BASE</c>, so the very style that supplies the heading
+    /// constants is the one the import resets. It answers <see cref="RtfPoolParent.Standard"/>,
+    /// not <see cref="RtfPoolParent.Heading"/>.
+    /// </description></item>
+    /// <item><description>
+    /// <c>COLL_LABEL</c> — Writer's <em>Caption</em>, the parent of all five
+    /// <c>COLL_LABEL_*</c> names <c>Figure</c>, <c>Illustration</c>, <c>Table</c>, <c>Drawing</c>
+    /// and <c>Text</c> (<c>poolfmt.cxx</c>:248-252) — adds <b>italic, 12 pt and 6 pt above and
+    /// below</b>. 12 pt rather than the <c>PT_10</c> of
+    /// <c>DocumentStylePoolManager.cxx</c>:964, because <c>SwDocShell::InitNew</c>
+    /// (<c>sw/source/uibase/app/docshini.cxx</c>:224-289) overwrites <c>COLL_LABEL</c>'s size with
+    /// the configured <c>FONTSIZE_DEFAULT</c> of 240 twips in every new document — the same loop
+    /// that gives <c>COLL_HEADLINE_BASE</c> its <c>FONTSIZE_OUTLINE</c> of 280.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// <b>And <em>Caption</em> is a reference rather than a constant whenever the document
+    /// declares a <c>caption</c> of its own</b>, because <c>SetPropertiesToDefault</c> resets it
+    /// and the entry's own properties are written back over it. Both corpus documents that apply
+    /// a <c>COLL_LABEL_*</c> name do exactly that, so the italic never arrives and what the
+    /// paragraph takes is their <c>caption</c> entry's bold 10 pt.
+    /// <c>probes/rtf-style-r97/genpool3.py</c> measures both arms, fourteen names × two
+    /// <c>Normal</c> sizes.
+    /// </para>
+    /// <para>
+    /// The control family is every name the map answers <em>nothing</em> for — <c>Quote</c>,
+    /// <c>Normal (Web)</c> and <c>List Paragraph</c> among them (<c>:1794</c>, <c>:1883-1884</c>)
+    /// — which keeps <c>\pard\plain</c>'s twelve points and is what this rule must not move.
+    /// <c>Marginalia</c> and <c>Text body indent</c> are the same control by the other rule: they
+    /// are Writer names, but they are also <em>values</em> in the map, so the <c> (WW)</c> suffix
+    /// takes them out of reach.
     /// </para>
     /// <para>
     /// Every heading maps to a pool style whose parent is <em>Heading</em>, and
@@ -328,15 +407,8 @@ public sealed class RtfStyles
         // for each of the two spellings a file actually uses.
         string trimmed = name.Trim();
 
-        // `Body Text` is `Text body`, `COLL_TEXT`, and both spellings of `caption` are `Caption`,
-        // `COLL_LABEL` (`StyleSheetTable.cxx`:1715-1716, :1761) -- and both have `COLL_STANDARD`
-        // for a pool parent, so what they inherit is the document's own `Normal`.
-        if (string.Equals(trimmed, "Body Text", StringComparison.Ordinal)
-            || string.Equals(trimmed, "caption", StringComparison.Ordinal)
-            || string.Equals(trimmed, "Caption", StringComparison.Ordinal))
-        {
-            return RtfPoolParent.Standard;
-        }
+        if (CaptionParented.Contains(trimmed)) return RtfPoolParent.Caption;
+        if (StandardParented.Contains(trimmed)) return RtfPoolParent.Standard;
 
         // `Title` and `Subtitle` have one spelling each in the map; the nine headings have two.
         if (string.Equals(trimmed, "Title", StringComparison.Ordinal)
@@ -345,13 +417,63 @@ public sealed class RtfStyles
             return RtfPoolParent.Heading;
         }
 
-        if (trimmed.Length != 9) return RtfPoolParent.None;
-        if (trimmed[0] is not ('h' or 'H')) return RtfPoolParent.None;
-        if (!trimmed.AsSpan(1, 7).SequenceEqual("eading ")) return RtfPoolParent.None;
-        if (trimmed[8] is < '1' or > '9') return RtfPoolParent.None;
+        if (IsNumbered(trimmed, "heading ", caseInsensitiveFirst: true)) return RtfPoolParent.Heading;
+        if (IsNumbered(trimmed, "toc ", caseInsensitiveFirst: true)) return RtfPoolParent.Standard;
+        if (IsNumbered(trimmed, "Index ", caseInsensitiveFirst: true) && trimmed[^1] <= '3')
+        {
+            return RtfPoolParent.Standard;
+        }
 
-        return RtfPoolParent.Heading;
+        return RtfPoolParent.None;
     }
+
+    /// <summary>
+    /// <paramref name="name"/> is <paramref name="prefix"/> followed by one digit 1-9.
+    /// </summary>
+    /// <param name="name">The style's name, already trimmed.</param>
+    /// <param name="prefix">The literal the map's numbered family shares.</param>
+    /// <param name="caseInsensitiveFirst">
+    /// True where the map holds both spellings of the first letter — <c>heading 1</c> and
+    /// <c>Heading 1</c>, <c>toc 1</c> and <c>TOC 1</c>, <c>index 1</c> and <c>Index 1</c>. Only
+    /// the first letter varies; <c>TOC</c> is the map's own upper-case spelling and is handled by
+    /// the same comparison because the rest of that prefix is a space.
+    /// </param>
+    private static bool IsNumbered(string name, string prefix, bool caseInsensitiveFirst)
+    {
+        if (name.Length != prefix.Length + 1) return false;
+        if (name[^1] is < '1' or > '9') return false;
+        StringComparison how = caseInsensitiveFirst
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return name.AsSpan(0, prefix.Length).Equals(prefix, how);
+    }
+
+    /// <summary>
+    /// The names whose Writer style has <c>COLL_STANDARD</c> for a pool parent with nothing
+    /// measurable in between.
+    /// </summary>
+    /// <remarks>
+    /// <c>Body Text</c> is <c>Text body</c>/<c>COLL_TEXT</c> and both spellings of <c>caption</c>
+    /// are <c>Caption</c>/<c>COLL_LABEL</c> (<c>StyleSheetTable.cxx</c>:1715-1716, :1761), each
+    /// with <c>COLL_STANDARD</c> directly above. <c>header</c> and <c>footer</c> reach it through
+    /// <c>COLL_HEADERFOOTER</c> and a bare <c>Heading</c> is <c>COLL_HEADLINE_BASE</c> itself;
+    /// both intermediates are measured to add nothing. <c>Comment</c> and <c>Signature</c> are
+    /// the two remaining <c>hasByName</c> names measured in <c>genpool3.py</c>, and are in
+    /// because they are right and free — the corpus applies neither.
+    /// </remarks>
+    private static readonly HashSet<string> StandardParented = new(StringComparer.Ordinal)
+    {
+        "Body Text", "caption", "Caption",
+        "header", "Header", "footer", "Footer",
+        "Heading", "Comment", "Signature",
+    };
+
+    /// <summary>The five <c>COLL_LABEL_*</c> names, whose pool parent is Writer's Caption.</summary>
+    /// <remarks><c>poolfmt.cxx</c>:248-252; all five measured in <c>genpool3.py</c>.</remarks>
+    private static readonly HashSet<string> CaptionParented = new(StringComparer.Ordinal)
+    {
+        "Figure", "Illustration", "Table", "Drawing", "Text",
+    };
 
     /// <summary>
     /// What a style whose <c>\sbasedon</c> did not resolve inherits from its pool parent.
@@ -361,9 +483,16 @@ public sealed class RtfStyles
     private RtfStyleFormatting PoolInheritance(string name, int id) => PoolParentOf(name) switch
     {
         RtfPoolParent.Heading => HeadingPool,
-        RtfPoolParent.Standard when id != DefaultStyleId => FormattingOf(DefaultStyleId),
+        RtfPoolParent.Standard => NormalInheritance(id),
+        RtfPoolParent.Caption => _captionStyleId is { } caption && caption != id
+            ? FormattingOf(caption)
+            : CaptionPool.Over(NormalInheritance(id)),
         _ => RtfStyleFormatting.Empty,
     };
+
+    /// <summary>The document's own <c>Normal</c>, or nothing when <em>this</em> is it.</summary>
+    private RtfStyleFormatting NormalInheritance(int id)
+        => id != DefaultStyleId ? FormattingOf(DefaultStyleId) : RtfStyleFormatting.Empty;
 
     /// <summary>
     /// The <c>\s</c> id of the document's own default paragraph style, which RTF fixes at zero.
@@ -381,6 +510,23 @@ public sealed class RtfStyles
         SpaceBeforeTwips = 240,
         SpaceAfterTwips = 120,
         KeepWithNext = true,
+    };
+
+    /// <summary>
+    /// Writer's <em>Caption</em> pool style, for a document that does not declare one of its own.
+    /// </summary>
+    /// <remarks>
+    /// Italic and 6 pt above and below are <c>DocumentStylePoolManager.cxx</c>:971-982; the size
+    /// is <em>not</em> that block's <c>PT_10</c> but the 240 twips
+    /// <c>SwDocShell::InitNew</c> writes over it (<c>docshini.cxx</c>:224-289). Measured 12 pt and
+    /// italic at 26.2.4.2 on all five <c>COLL_LABEL_*</c> names, under both <c>Normal</c> sizes.
+    /// </remarks>
+    private static readonly RtfStyleFormatting CaptionPool = new()
+    {
+        FontSizeHalfPoints = 24,
+        Italic = true,
+        SpaceBeforeTwips = 120,
+        SpaceAfterTwips = 120,
     };
 
     /// <summary>The paragraph style with this <c>\s</c> id, or null.</summary>
@@ -418,13 +564,23 @@ public sealed class RtfStyles
             // Writer's own style of that name keeps the pool parent it came with. `Heading` is a
             // constant; `Standard` is the *document's* own `Normal`, which is style 0 -- and the
             // walk continues into it rather than folding a constant in, which is what makes
-            // `\fs20 Normal` and `\fs28 Normal` give different answers.
+            // `\fs20 Normal` and `\fs28 Normal` give different answers. `Caption` is a constant
+            // only until the document declares a `caption` of its own, at which point the import
+            // resets the pool style and the walk continues into that entry instead.
             switch (style.BasedOn is null ? PoolParentOf(style.Name) : RtfPoolParent.None)
             {
                 case RtfPoolParent.Heading:
                     chain.Add(HeadingPool);
                     break;
                 case RtfPoolParent.Standard:
+                    current = DefaultStyleId;
+                    break;
+                case RtfPoolParent.Caption when _captionStyleId is { } caption
+                                                && caption != styleId:
+                    current = caption;
+                    break;
+                case RtfPoolParent.Caption:
+                    chain.Add(CaptionPool);
                     current = DefaultStyleId;
                     break;
                 default:
