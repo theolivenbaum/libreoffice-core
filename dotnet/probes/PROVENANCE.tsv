@@ -1577,3 +1577,11 @@ dotnet/tests/corpus/features/sheet-cf-contains-text.xlsx	2026-09-11	current	26.2
 dotnet/tests/corpus/features/sheet-cf-duplicate-values.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
 dotnet/tests/corpus/features/sheet-cf-ends-with.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
 dotnet/tests/corpus/features/sheet-cf-multi-range-anchor.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
+dotnet/probes/clip-seats-r97/figure-clip-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
+dotnet/probes/clip-seats-r97/census-onpaper.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
+dotnet/probes/clip-seats-r97/make-shape-text-probe.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
+dotnet/probes/clip-seats-r97/shape-text-probe.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/SheetStraddlingDrawingTests.cs
+dotnet/probes/clip-seats-r97/clip-overreach.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
+dotnet/probes/clip-seats-r97/overreach.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
+dotnet/probes/clip-seats-r97/cliptext-chars.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
+dotnet/probes/clip-seats-r97/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
