@@ -2997,6 +2997,50 @@ sixteen of the reference's, and the two we add are §4's tab.
 `Microsoft Excel 2007+` — a zip — with six `containsText` rules, and is one of the three movers. No
 census filtered on `.xlsx`/`.xlsm` can see it.
 
+***And the `iconSet` half of that census was corrected in the wrong direction: it is 20 rules in 10
+documents, not 2 in 2.*** Round 96 took an earlier over-count of 20 down to 2 by parsing each
+worksheet's `cfRule` elements instead of grepping for `type="iconSet"`, which is the right
+instrument for the wrong element — **an `x14:cfRule` in a worksheet's `extLst` can be a rule of its
+own** rather than an extension of a main-namespace one, carrying its own `xm:sqref`, and the
+reference imports and paints it. The source says so in as many words:
+`ExtLstLocalContext` builds a fresh format for an `x14:cfRule` whose `id` matches nothing, under
+the comment *"an ext entry does not need to have an existing corresponding entry"*
+(`sc/source/filter/oox/extlstcontext.cxx`:165-194). 18 of the corpus's 20 are of that kind, and
+`088_To-do_list_with_progress_tracker`'s `H3:H7` set is the proof in one file: it exists nowhere
+but the extension list and 26.2.4.2 draws an image for it. The test is whether some
+main-namespace rule claims the `x14` rule's `id` through an `<x14:id>`; `dataBar` is unaffected,
+because all nine of its extensions are claimed that way and r96's 9-in-6 is exact.
+**Census the extension list as well as the sheet, and match the two by `id`.**
+`probes/cond-format-r97/census-drawrules.py`.
+
+***The document count in that paragraph said 9 for a day, and the round's own data file said 10.***
+The two main-namespace `iconSet` documents (`075_Idea_planner_tasks`,
+`sistem-rekod-markah-srm`) are **disjoint** from the eight `x14`-only ones, so the union is ten, and
+`probes/cond-format-r97/icon-ink.txt` listed ten rows the whole time. **When a prose figure and a
+banked table disagree, the table is the measurement** — the prose is a transcription of it.
+
+***And `drawIconSets` does not paint the icon at a fixed ten points square.*** That constant
+(`output.cxx`:967) is a fallback for a null `mnHeight`, and `GetIconSetInfo` **always** sets that
+field from the cell's own `ATTR_FONT_HEIGHT` (`colorscale.cxx`:1222-1224), so the branch at
+`:969-980` always wins and the glyph is as tall as the cell's font. The banked areas are the
+refutation and were on disk before the claim was written: 19.4 pt² per icon on
+`066_Agile_Gantt_chart` against 103.9 on `069_Blue_modern_balance_sheet`, where a constant ten
+points would be 100 pt² throughout. **Divide a banked area by its count before quoting a size.**
+
+***And `mbNeg` is not "an `x14:negativeFillColor` was stated" — it defaults to TRUE.*** A `dataBar`
+read from OOXML therefore treats every negative value as negative, and one whose extension states
+no negative colour paints it in the source's own `COL_LIGHTRED` (`colorscale.cxx`:1082) rather than
+in the bar's positive colour. The default is at `sc/inc/colorscale.hxx`:107; the OOXML importer only
+ever sets it true again (`condformatbuffer.cxx`:1658-1664); **the one place in `sc/` that clears it
+is the ODF importer** (`sc/source/filter/xml/xmlcondformat.cxx`:483). So the fallback is not
+unreachable from SpreadsheetML, it is the *usual* answer there — eight of the corpus's nine rules
+resolve to it, and 26.2.4.2's `fods` writes `calcext:negative-color="#ff0000"` for every one.
+**Reach is nil** (75 numeric cells under a corpus `dataBar`, 0 negative;
+`probes/cond-format-r97/negative-under-databar.py`), which is exactly why the fixture that pinned
+the arm — one that *did* state a negative colour — could not see it. **A fixture built to exercise
+a feature will state the optional attribute; the corpus mostly does not, so author the absent case
+too.**
+
 ### A wrapping cell whose text begins outside its own column draws nothing at all
 
 **Only a wrapping cell is clipped to its column, and only a wrapping cell has a paper.**
