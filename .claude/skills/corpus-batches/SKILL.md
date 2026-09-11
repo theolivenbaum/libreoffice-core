@@ -1363,3 +1363,21 @@ rendering on the same machine — the same run showed fidelity at 18m42s and pre
 15m49s against their usual 3-5 minutes. Re-run alone, the project passed 1938 of 1938 in 45
 seconds. So when a run is slow because the machine is busy, **check every total**, and prefer
 re-running the one project that looks short over re-running the solution.
+
+**Contention corrupts a measurement in both directions, and the other one looks worse.** The
+same conditions that truncate a run also produce *false failures*: a whole-solution run under a
+concurrent round reported fidelity at **540 / 12**, the two extras being
+`LineBreakPositionTests` and `SheetDecorationComparisonTests(sheet-decor-xls.xls)` — neither
+related to the merge under test, and both invoking `soffice`, which the other round was also
+driving. Re-run in isolation: 26 of 26. Re-run as a whole project alone: **542 / 10 with exactly
+the ten known names.**
+
+A false failure is more dangerous than a false pass here, because the tempting response is to
+go and "fix" a defect that does not exist, or to revert a good merge. The discipline is the
+same either way and it is *not* to shrug and call it flaky:
+
+- **Name the failures.** "Two extra failures" is not a report; the two test names are.
+- **Reproduce alone before believing either outcome** — the failure or the pass.
+- **Ask whether the failing tests have anything to do with the change.** Two words-and-sheets
+  tests failing on a slides-only merge is the tell.
+- Only then say what happened, including that it happened.
