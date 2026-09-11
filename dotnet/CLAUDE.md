@@ -2803,6 +2803,76 @@ and `XlsCellFormats.FontAt` already turns that index into a face, a size and a w
 than the opening run**. On TICAP page 3 the reference draws its shape text at 6.30 pt with five
 bold spans and we draw all of it at 5.70 pt regular, which is most of the residual there.
 
+### And the head of that ranking is 413 conditional formats, which nothing read
+
+**`TK-Syllabus-Comparison-Document-v2.xlsx` was 304.57 % summed unsigned ink over 1235 pages with
+142 MAJOR pages, and it passes the gate.** It carries no drawing at all, so neither the Escher-ink
+round nor the clip could reach it. What it carries is **413 `<conditionalFormatting>` blocks, every
+one `type="expression"`**, and `XlsxConditionalFormats` read only `colorScale` — its own remarks
+named the gap and left it. Closed in round 94: `XlsxConditionalStyles` evaluates every `cfRule`
+naming a `dxfId` and hands the fill to `SheetFormatting.SetConditionalBackground` and the font to a
+differential `SheetConditionalText` over `SheetCellFormats`. **304.57 → 205.57, MAJOR 142 → 66.**
+`probes/sheet-ink-r94/results.md`.
+
+**The rank-8 document is the same workbook revised and the 6× between them is the rule count.**
+`tk-syllabus-comparison-document-v5.xlsx` states **3** expression rules where v2 states 413 — the
+revision baked the formatting into the cells and left 728 unused `dxf` entries behind — and their
+per-page ink was 0.0544 against 0.2466. *Two revisions of one document differing on a measure is a
+lead about what one of them stopped stating.*
+
+Three rules decide it and each is the reference's rather than the specification's:
+
+- **Exactly one rule wins a cell and two matching rules' properties are never merged.**
+  `ScDocument::GetCondResult` (`sc/source/core/data/documen4.cxx`) returns the *first* non-empty
+  style name's item set and `ScConditionalFormat::GetCellStyle` (`conditio.cxx`) the first matching
+  entry's style. A cell takes one `dxf` or none.
+- **What a `dxf` is silent about falls through to the cell's own pattern**, so the overlay is
+  differential and its toggles are three-valued: **287 of that document's 413 rules state
+  `<strike val="0"/>`**, which *removes* a strikethrough the cell states, and 26.2.4.2 writes that
+  out as `style:text-line-through-style="none"`.
+- **A `dxf`'s fill states its colour in `bgColor`, the opposite of a cell's.**
+  `Fill::finalizeImport`'s `if (mbDxf)` branch (`sc/source/filter/oox/stylesbuffer.cxx`) moves the
+  `bgColor` into the pattern colour and forces the pattern solid. **2734 of the corpus's `dxf`
+  fills state only a background**, so reading `fgColor` finds nothing on any of them.
+
+**The formula subset is where the corpus is, not where the specification is.** Of the 601
+`expression` rules in 34 documents, **461 are the single shape `<reference> = "<text>"`** — one
+comparison between a relative reference and a string, shifted from the `sqref`'s own top-left
+corner, which is what `calcext:base-cell-address` states in the reference's own view of the file.
+`cellIs` (123 rules, 18 documents) is read too. The rest — `AND`, `MOD(ROW())`, `ISERROR`,
+`TODAY()`, defined names, `#REF!` — paint nothing, and `containsText` and its five siblings (1040
+rules in 8 documents) are the cheapest thing left in the area.
+
+**Reach and cost, measured rather than censused.** 55 of the 947 corpus documents state a `cfRule`
+naming a `dxf`; rendering our half of the whole corpus twice moves **21 renderings and leaves 926
+byte-identical**, every mover an `.xlsx` on the sheets track. 12 improve, 3 worsen, 6 are level, and
+the sum over the 21 goes **354.87 → 254.85** with MAJOR pages 165 → 86. **No gate verdict can move**
+— a colour, a strikethrough and a fill add no alphanumeric character and no page.
+
+***And the one worsening located a palette defect whose obvious fix is refuted.***
+`Computer and Software Services_50 State Comparison.xlsx` goes 20.15 → 27.95 because its
+`cellIs equal 0` rule names an `indexed` colour and the workbook overrides the palette with entries
+written **`ffRRGGBB`**. `ColorPalette::importPaletteColor` builds
+`::Color(ColorTransparency, decodeIntegerHex(rgb))` and `decodeIntegerHex_impl`
+(`oox/source/helper/attributelist.cxx`:72-79) is `o3tl::toUInt32(value, 16)` cast to signed — so an
+eight-digit entry's **top byte becomes the transparency**, and 26.2.4.2's own
+`--convert-to fods` gives all three of that workbook's `ConditionalStyle_N` a
+`fo:background-color="#ffffff"`. **Modelling that in `XlsxPalette` takes the same document to
+68.17** and was reverted: its *stated* cell fills name the same indices and the reference does draw
+those, so the transparency reaches the conditional style and not an ordinary fill, and where the two
+part company is not established. **Reach if anyone takes it is exactly one document** — 35 of the 55
+workbooks stating an `indexedColors` table carry a non-zero top byte and this is the only one that
+names such an entry by index.
+
+**What is left on the witness is a row-height question, not a formatting one.** The residual 205.57
+is 93.5 on pages 1-100 and is a within-sheet drift: on page 52 the same rows appear in the same
+order with ours two rows lower than the reference's, and the total page count is 1235 on both sides.
+
+**And ranks 2 and 3 of that ranking are neither of these.** `alle einzeln.xlsx` (225.44 over 186
+pages) states **no conditional formatting at all** and holds a `pivotTable` over `A4:I1013`;
+`Background_Declaration_Template.xls` (136.07 over 25) is BIFF, whose conditional formatting is
+`CONDFMT`/`CF` records and a different reader. Both keep their seat.
+
 ### A wrapping cell whose text begins outside its own column draws nothing at all
 
 **Only a wrapping cell is clipped to its column, and only a wrapping cell has a paper.**
