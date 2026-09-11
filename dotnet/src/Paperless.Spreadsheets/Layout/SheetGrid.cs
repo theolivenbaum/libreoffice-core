@@ -340,10 +340,38 @@ public sealed record SheetGrid(SheetAxis Columns, SheetAxis Rows)
     /// Calc will re-measure, however its <c>ROW</c> records are flagged.
     /// </para>
     /// <para>
-    /// Measured: recomputing without this cost eight <c>.xls</c> documents their page count across
-    /// the sheets track and gained none, which is what led to the record being re-read. BIFF2's
-    /// two-byte <c>DEFAULTROWHEIGHT</c> has no flags field and Calc passes the bit unconditionally
-    /// (<c>ImportExcel::Defrowheight2</c>, <c>impop.cxx:598-604</c>).
+    /// <strong>And the version really does decide it, for a reason that is not the flag at all:
+    /// BIFF8 row heights are never recomputed, because the call that would do it is compiled
+    /// out.</strong> <c>ImportExcel8::Read</c> holds <c>AdjustRowHeight()</c> inside an
+    /// <c>#if 0</c> whose comment is the whole rule — <em>"Excel documents look much better
+    /// without this call; better in the sense that the row heights are identical to the original
+    /// heights in Excel"</em> (<c>sc/source/filter/excel/read.cxx:1284-1288</c>) — while
+    /// <c>ImportExcel::Read</c>, which is BIFF2 through BIFF7, calls it unguarded
+    /// (<c>:779-780</c>). So <c>EXC_DEFROW_UNSYNCED</c> and each <c>ROW</c>'s own
+    /// <c>fUnsynced</c> decide nothing on a BIFF8 sheet: nothing asks.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 rather than argued, by one-attribute variant. A four-row BIFF8
+    /// workbook the reference itself wrote — whose <c>DEFAULTROWHEIGHT</c> <c>grbit</c> is zero
+    /// and whose four <c>ROW</c> records already have <c>fUnsynced</c> clear — comes back from
+    /// <c>--convert-to fods</c> at the heights its records state, whatever they are: at the
+    /// written 276/298/298/298, at a patched uniform 255, and at a patched uniform <strong>100
+    /// twips</strong>, which no content could ask for. <c>probes/ods-residue-r95/xls-rowflags.py</c>.
+    /// This also supersedes the figure that used to stand here — <em>"recomputing without this
+    /// cost eight <c>.xls</c> documents their page count and gained none"</em> — which was the
+    /// right answer fitted to the wrong reason.
+    /// </para>
+    /// <para>
+    /// BIFF2's two-byte <c>DEFAULTROWHEIGHT</c> has no flags field and Calc passes the bit
+    /// unconditionally (<c>ImportExcel::Defrowheight2</c>, <c>impop.cxx:598-604</c>).
+    /// </para>
+    /// <para>
+    /// <strong>One consequence is worth stating where a later round will meet it: no BIFF
+    /// conditional format can move a row height</strong>, so the <c>CONDFMT</c> record this reader
+    /// does not read could not reach <see cref="SheetLayout.ConditionalRanges"/>'s only consumer
+    /// even if it did. 4 of the corpus's 64 <c>.xls</c> state one, 23 records over 35 ranges, and
+    /// reading them moves <strong>0 of the 64 renderings</strong> byte for byte.
+    /// <c>probes/ods-residue-r95/results.md</c> §1.
     /// </para>
     /// </remarks>
     public bool RowHeightsAreManual { get; init; }
