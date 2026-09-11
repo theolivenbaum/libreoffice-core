@@ -73,6 +73,40 @@ internal static class OdsCellFormats
         return reader.DefaultFont();
     }
 
+    /// <summary>
+    /// What each named cell style resolves to, for the conditional formats that apply them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Resolution is the same walk a cell's own style takes, parent by parent, which is the whole
+    /// point: an ODF conditional style is a cell <em>style sheet</em> and the reference reads its
+    /// font through that chain rather than out of the style's own element. See
+    /// <see cref="OdsConditionalText"/>.
+    /// </para>
+    /// <para>
+    /// A name the document does not define resolves to the <c>Default</c> cell style's font,
+    /// which is where the chain would have ended anyway.
+    /// </para>
+    /// </remarks>
+    /// <param name="styles">The document's styles.</param>
+    /// <param name="names">The style names to resolve.</param>
+    public static Dictionary<string, SheetCellFormat> ResolveNamed(
+        OdfStyles styles, IEnumerable<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+        ArgumentNullException.ThrowIfNull(names);
+
+        Reader reader = new(styles);
+        Dictionary<string, SheetCellFormat> resolved = new(StringComparer.Ordinal);
+        foreach (string name in names)
+        {
+            if (string.IsNullOrEmpty(name) || resolved.ContainsKey(name)) continue;
+            resolved[name] = reader.ResolveNamed(name);
+        }
+
+        return resolved;
+    }
+
     private sealed class Reader(OdfStyles styles)
     {
         private readonly Dictionary<string, SheetCellFormat> _resolved = new(StringComparer.Ordinal);
@@ -536,6 +570,9 @@ internal static class OdsCellFormats
                 format.IsItalic,
                 format.DeclaredFontClass);
         }
+
+        /// <summary>One named style's own resolved format.</summary>
+        public SheetCellFormat ResolveNamed(string styleName) => Resolve(styleName);
 
         private SheetCellFormat Resolve(string styleName)
         {

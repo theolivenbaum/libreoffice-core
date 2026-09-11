@@ -88,6 +88,8 @@ public sealed class OdsSpreadsheetDocument : IPaginatedDocument
         {
             (SheetPrintSetup setup, SheetGrid grid) = OdsPrintSetup.Read(document.File, table);
             (SheetCellFormats formats, SheetRichText rich) = OdsCellFormats.Read(document.File, table);
+            formats = formats.WithConditionalText(
+                OdsConditionalText.Read(document.File.Styles, table));
             ContentSection? section = sections.FirstOrDefault(s => s.Index == index);
 
             sheets.Add(new SheetLayout
