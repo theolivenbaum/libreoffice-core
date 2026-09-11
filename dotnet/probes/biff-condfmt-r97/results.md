@@ -26,6 +26,25 @@ the clip" turned out to have enumerated 197 *page-level* clips of median area 1.
 to real clips found 834, and 733 of them had text outside. Both measurements were true
 sentences about the wrong set.
 
+## Correction, round 98: this census was short by a whole document
+
+The table below says **4 of 64** `.xls`, 29 formats, 43 conditions. That is wrong, and it is
+wrong for the reason this file exists: **I took round 95's witness list instead of walking the
+substreams myself.** Round 98 walked them and found
+`EHEST-Pre-departure-checklist-Rev.-1-06-12-2016.xls` carrying **120 `CONDFMT` and 144 `CF`** —
+more than the other four together. I have re-run `--convert-to fods` on it at 26.2.4.2 and
+confirmed: **120 conditional formats, 144 conditions.** The corpus total is **149 formats and
+187 conditions in 5 of 64, 175 of them inked.**
+
+So this probe caught round 95 reusing an instrument without re-deriving it, and then reused
+round 95's census without re-deriving it. The figures below are correct for the four documents
+they name and are not the corpus. `probes/biff-reader-r98` supersedes them.
+
+One thing the larger census did **not** change: N11 still holds. Round 98 read all 144 of
+EHEST's rules and **not one byte of its rendering moved** — 126 are `cellIs equal 2` over a
+blank checklist. A rule count is not a reach figure, and 144 new rules moving nothing is a
+sharper demonstration of that than 1215 moving three renderings.
+
 ## What the reference actually does
 
 Asked instead of argued. `census.py` converts each of round 95's four witnesses with
