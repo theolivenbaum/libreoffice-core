@@ -16,15 +16,32 @@ namespace Paperless.Spreadsheets.OpenDocument;
 /// <see cref="SheetLayout.ConditionalRanges"/>.
 /// </para>
 /// <para>
-/// <strong>The spelling is the extension namespace's and the specification's is not what the
-/// corpus holds.</strong> ODF 1.2 states a conditional format as a <c>style:map</c> on the cell's
-/// own style; LibreOffice writes its full model as <c>calcext:conditional-formats</c> inside the
-/// <c>table:table</c> instead (<c>sc/source/filter/xml/xmlexprt.cxx</c>'s
-/// <c>WriteExternalDataMapping</c> neighbours), and of the 307 converted <c>.ods</c> **95 state
-/// the <c>calcext:</c> spelling and one states a <c>style:map</c> in <c>content.xml</c> without
-/// it**. That one document is the residual this deliberately does not read: recovering it would
-/// mean resolving every automatic cell style back to the cells that name it, and it is worth one
-/// row of one track.
+/// <strong>The spelling is the extension namespace's, and reading it alone is exact rather than
+/// a compromise.</strong> ODF 1.2 states a conditional format as a <c>style:map</c> on the cell's
+/// own style; LibreOffice writes <em>both</em>, from one model and in one pass —
+/// <c>ScXMLExport::ExportConditionalFormat</c> walks the sheet's
+/// <c>ScConditionalFormatList</c> into <c>calcext:conditional-formats</c>
+/// (<c>sc/source/filter/xml/xmlexprt.cxx</c>:4779-4800) and
+/// <c>ScXMLAutoStylePoolP::exportStyleContent</c> writes a <c>style:map</c> onto every cell style
+/// the same formats reach (<c>sc/source/filter/xml/xmlstyle.cxx</c>:700-810). So the two are the
+/// same set of cells by construction.
+/// </para>
+/// <para>
+/// <strong>Measured over the 307 converted <c>.ods</c>: 53 documents carry a conditional
+/// <c>style:map</c>, every one of the 53 also states <c>calcext:conditional-format</c>, and
+/// <strong>0 of them hold a single mapped cell outside a <c>calcext:target-range-address</c></strong>
+/// — so reading the specification's spelling would reach nothing.</strong>
+/// <c>probes/ods-residue-r95/stylemap-cover.py</c>.
+/// </para>
+/// <para>
+/// <em>The figure this replaces — "one document states a <c>style:map</c> and no <c>calcext:</c>",
+/// <c>probes/ods-notes-r92/results.md</c> §2 — counted the wrong element.</em> The identical
+/// element name is also how a <c>number:*-style</c> states its positive, negative and zero
+/// sub-formats, and a conditional cell format is the one that sits on a
+/// <c>style:style style:family="table-cell"</c> and carries <c>style:base-cell-address</c>. The
+/// document that census named, <c>2025_Active_Civil_Airmen_Statistics_FINAL.ods</c>, states
+/// <strong>23 number-format maps and no conditional format at all</strong>, which is also why the
+/// rule would not have closed it. <c>probes/ods-residue-r95/stylemap-census.py</c>.
 /// </para>
 /// <para>
 /// <c>calcext:target-range-address</c> is a space-separated list in the same OOO syntax

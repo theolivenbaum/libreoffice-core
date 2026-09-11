@@ -1477,3 +1477,28 @@ dotnet/probes/words-seat-r94/plain-margins-crop.png	2026-09-11	current	26.2.4.2	
 dotnet/probes/words-seat-r94/results.md	2026-09-11	current	26.2.4.2	present	current	
 dotnet/probes/words-seat-r94/selfmove.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
 dotnet/probes/words-seat-r94/variant-columnx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/ods-residue-r95/base-ods-rows.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/base-orig-rows.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/compare-ods.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/compare-orig.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/compare.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/condfmt-census.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/condfmt-census.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/condfont-census.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/condfont-census.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/confine-renders.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/confine.list	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/head-ods-rows.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/head-orig-rows.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/lineshape-census.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/lineshape-census.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/render-ours.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/results.md	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/stylemap-census.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/stylemap-census.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/stylemap-cover.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/stylemap-cover.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/sweep-ours.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/variants-ods.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/xls-rowflags.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/ods-residue-r95/xls.list	2026-09-11	current	26.2.4.2	present	current	

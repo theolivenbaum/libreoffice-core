@@ -39,10 +39,7 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 
 | # | what | seat |
 |---|---|---|
-| O3 | **ODS conditional-format row height, second spelling.** ODF 1.2 `style:map` reaches 1 of 307 and that document fails in the other direction. | `probes/ods-notes-r92` |
-| O4 | **BIFF `CONDFMT` unread**, so the `.xls` and `.ods` spellings of one workbook now disagree about a row height — a regression *between spellings* introduced by closing the ODF half. | same |
-| O5 | `017_Timeline_Templates`: the reference prints a **blank page** from a print-area extent. | same, `SheetDrawingArea` |
-| O6 | `sistem-rekod-markah-srm`: pages 2 and 4 are narrow **spill columns** we fit onto the previous page. | same |
+| O6 | `sistem-rekod-markah-srm`: **not spill columns — a row height.** Its forty student rows are 276 twips here and 298 at the reference, on exactly the rows its `C4:T43` conditional format covers; every cell in that range is Arial 9 and 298 is one measured line of the document default's **11 pt**. Six one-attribute variants pin it (rewriting every `9pt` to `6pt` leaves 298.2; rewriting every `11pt` to `20pt` gives 522.1 against the 489.3 arithmetic elsewhere), and a clean four-cell probe **refutes** the rule fitted to them — a conditional cell is measured in its *own* font, 298 for an 11 pt cell under a 20 pt `Default`. The two measurements contradict and the seat is `ScColumn::GetNeededSize`'s font construction, not `ScPrintFunc::CalcPages`. Implementing the fitted rule is +1 −1 on the gate and was not kept. | `probes/ods-residue-r95` §4 |
 | O7 | **Six documents made worse by the drawing-layer clip**, worst +0.48 — the clip now exposes our own band edge where it differs from the reference's (`Template Pilot Logbook` p18 cuts 22 pt early). A column-width/break question. | `probes/ink-pass-r92`, crop banked |
 | O8 | **Frame capture, the half that can still move the eight**: r85 clamped to the sheet where the C++ clamps to the page **body** at every relation but `PAGE_FRAME`/`PAGE_PRINT_AREA` (`anchoredobjectposition.cxx`:562-573). Separately, `bConsidered` is `&&` for a fly and `\|\|` for a draw object (:130-141) — checked, does not move these ten. | `probes/words-seat-r94` |
 | O9 | **`Body Text` and `caption` track the document's own `Normal`** — inheritance from *Standard*, not a pool value; needs `ConvertStyleName`'s two hundred names to be safe. `APoolStyleUnderStandardIsNotModelledYet` pins the gap. | `probes/rtf-bookmark-r88` |
@@ -60,6 +57,8 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | N4 | `FrameLayout` positions an anchored frame against `page.BodyArea` | **no** corpus document has a frame inside an indented text section |
 | N5 | An `.xlsx` row with no `ht` and no `sheetFormatPr`: 12.800 pt from the reference, 13.777 from us | **no** corpus document reaches it |
 | N6 | `c:layoutTarget val="inner"`; an axis `rot` of exactly ±90° | **0** corpus documents each |
+| N7 | **The ODF 1.2 `style:map` spelling of a conditional format** (was O3) | **0 of the 307 converted `.ods`** state a table-cell `style:map` without a `calcext:conditional-format`, and **0 cells** in the 53 that state both fall outside a `calcext:target-range-address`. LibreOffice writes both from one `ScConditionalFormatList` (`xmlexprt.cxx`:4779-4800 and `xmlstyle.cxx`:700-810), so it cannot. *The "1 of 307" this replaces counted `style:map` on **number** styles.* `probes/ods-residue-r95` §2 |
+| N8 | **BIFF `CONDFMT` unread** (was O4) | 4 of the 64 `.xls` state one, 29 records over 35 ranges — and none can reach a row height, because `ImportExcel8::Read` holds its `AdjustRowHeight()` inside an `#if 0` (`read.cxx`:1284-1288) so **no BIFF8 row height is ever recomputed**: a workbook whose `ROW` records are patched to a uniform **100 twips**, `fUnsynced` clear, comes back from the reference at 100. Reading the record anyway leaves **64 of 64** renderings byte-identical. *The witness named with it, `Special-Procedures_2025-07-10.xls`, is an OPC zip wearing a `.xls` name and was never BIFF.* `probes/ods-residue-r95` §1 |
 
 ---
 

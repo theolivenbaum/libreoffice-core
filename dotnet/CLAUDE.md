@@ -1298,9 +1298,37 @@ A twelve-size sweep confirms the arithmetic branch is exact at every size (6–1
 floor, 11 → 276, 12 → 300, 24 → 583), so the 298 is the other branch and not a different sum.
 Reach **95 of the 307 converted `.ods` state a conditional format and 74 hold a `text:a`**; the
 `.ods` gate goes **274 → 278** and the same 307 documents as `.xlsx`/`.xls`/`.xlsm` stay at 294.
-The spelling read is `calcext:conditional-format`, which is what LibreOffice writes — the ODF 1.2
-`style:map` spelling is left, and exactly **one** of the 307 states it without the other.
+The spelling read is `calcext:conditional-format`, which is what LibreOffice writes.
 `probes/ods-notes-r92/results.md` §2.
+
+***And reading that spelling alone is exact rather than a compromise — the "one of the 307 states a
+`style:map` without it" that stood here counted the wrong element.*** `style:map` is also how a
+`number:*-style` states its positive, negative and zero sub-formats, and a *conditional* one is the
+one that sits on a `style:style style:family="table-cell"` and carries `style:base-cell-address`.
+Censused that way over the 307 converted `.ods`: **53 documents carry a conditional `style:map`,
+every one of the 53 also states `calcext:conditional-format`, and 0 of them hold a single mapped
+cell outside a `calcext:target-range-address`.** LibreOffice writes both from one
+`ScConditionalFormatList` in one pass — `ScXMLExport::ExportConditionalFormat`
+(`sc/source/filter/xml/xmlexprt.cxx`:4779-4800) and `ScXMLAutoStylePoolP::exportStyleContent`
+(`sc/source/filter/xml/xmlstyle.cxx`:700-810) — so for any file it wrote they cannot disagree. The
+document that census named, `2025_Active_Civil_Airmen_Statistics_FINAL.ods`, states 23
+number-format maps and **no conditional format at all**.
+`probes/ods-residue-r95/results.md` §2.
+
+***The BIFF half is nil too, and for a reason that is not about `CONDFMT`.*** 4 of the corpus's 64
+`.xls` state one — 29 records over 35 ranges, reproducing 26.2.4.2's own
+`calcext:target-range-address` export of the same four workbooks 35 of 35 — and **no BIFF8 row
+height is ever recomputed**, because `ImportExcel8::Read` holds its `AdjustRowHeight()` inside an
+`#if 0` whose comment is the rule: *"Excel documents look much better without this call; better in
+the sense that the row heights are identical to the original heights in Excel"*
+(`sc/source/filter/excel/read.cxx`:1284-1288). `ImportExcel::Read`, BIFF2 through BIFF7, calls it
+unguarded (`:779-780`), which is exactly the version test `SheetGrid.RowHeightsAreManual` already
+makes. Measured: a BIFF8 workbook whose `ROW` records are patched to a uniform **100 twips** with
+`fUnsynced` clear comes back from `--convert-to fods` at 100. Reading `CONDFMT` anyway leaves 64 of
+64 `.xls` renderings byte-identical. *And `Special-Procedures_2025-07-10.xls`, named as the witness
+that the two spellings disagree, opens `PK\x03\x04` — an OPC zip wearing a `.xls` name, read by the
+SpreadsheetML path, and 22 pages of 22 before round 92 as well as after.*
+`probes/ods-residue-r95/results.md` §1.
 
 **And the ODF half of "Comments: at end of sheet" needed three inputs, not two.** The flag is a
 token inside a list — `style:print="… annotations …"`, mapped to `PROP_PrintAnnotations` by
