@@ -1371,6 +1371,21 @@ dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	presen
 dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/base-ods-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/base-orig-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/compare-ods.txt	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/compare-orig.txt	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/compare.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/confine.list	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/head-ods-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/head-orig-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/movers.txt	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/render-ours.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/results.md	2026-09-10	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-notes-r92/rowheights.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/sizes.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/sweep.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/variants.py	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/confine-odt-after.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/confine-odt-base.tsv	2026-09-08	current	26.2.4.2	present	current	

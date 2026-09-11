@@ -430,11 +430,37 @@ there. Worth doing for symmetry, not for a number.
 > page layout's `style:print` token and the cells' `office:annotation` text, of which
 > `Hazard Analysis Template.ods` holds 16 and `RMP` 12. `probes/ods-track-r88/results.md` §4.
 
-One instrument note for the next agent: **LibreOffice's flat-ODS export drops cell annotations
-entirely.** Measured on two documents whose notes demonstrably print — `office:annotation` appears
-zero times in the `.fods` and twenty-four times in the `.ods` of the same workbook. So the
-`--convert-to fods` trick, which has settled several questions on this track, is the wrong
-instrument for anything about notes; use `--convert-to ods` and read `content.xml`.
+> ***Done in round 92, and both documents are page-exact.*** `OdsPrintSetup` reads
+> `prints.Contains("annotations")` into `PrintsNotes` and `OdsNotes` walks the table for
+> `office:annotation` children of each `table:table-cell` — the address comes from the walk,
+> because ODF fastens a note to its cell by containment and `OdfContentReader` hoists the
+> annotation into a section of its own, which is right for extraction and loses the cell.
+> `Hazard Analysis Template.ods` goes 2 pages / 2131 glyphs → **3 / 3309** against the
+> reference's 3 / 3313 — the same four glyphs its `.xls` original is short by — and
+> `RMP 2011-2014 and Inventory.ods` 36 / 97 952 → **38 / 98 381**, character-exact. **The third
+> input nobody had named is that the author line is inside the text**: every annotation in both
+> documents says `<dc:creator>Unknown Author</dc:creator>` and the reference prints none of them,
+> so a reader that composed the creator with the paragraphs would print the wrong name on every
+> note. `probes/ods-notes-r92/results.md` §1.
+
+One instrument note for the next agent, ~~and it is wrong~~ — **corrected in round 92**:
+
+> ~~**LibreOffice's flat-ODS export drops cell annotations entirely.** Measured on two documents
+> whose notes demonstrably print — `office:annotation` appears zero times in the `.fods` and
+> twenty-four times in the `.ods` of the same workbook. So the `--convert-to fods` trick, which
+> has settled several questions on this track, is the wrong instrument for anything about notes;
+> use `--convert-to ods` and read `content.xml`.~~
+
+It does not drop them. Measured on both witnesses against 26.2.4.2:
+`RMP 2011-2014 and Inventory.ods` holds **12** `<office:annotation` and its `--convert-to fods`
+holds **12**; `Hazard Analysis Template.ods` holds **8** and its flat export holds **8**. The
+origin of the wrong figure is almost certainly the instrument rather than the binary: a packaged
+`content.xml` is one long line, so `grep -c '<office:annotation'` on it answers **1** where
+`grep -o … | wc -l` answers 12, and the same `grep -c` on a pretty-printed `.fods` answers 12 —
+which reads as *zero in the flat file* only if the two counts are taken the other way round.
+**Count occurrences, not lines.** The flat-ODF trick is usable for notes, and round 92's
+`sheet-print-notes.fods` fixture is 26.2.4.2's own `--convert-to fods` of the `.xls` fixture
+beside it, annotations and all.
 
 ### The `Tj`-splitting artefact costs this track three matches, not one
 
@@ -3632,6 +3658,34 @@ cell in several faces, whose lines are each as tall as the tallest portion on th
 cannot lose text, because the arithmetic height is a lower bound in Calc too — `bStdAllowed` stays
 true for such a cell and its attribute height is written into the array before any measurement is
 compared against it.
+
+> ***And two things put a cell on the measured branch that are not properties of its string at
+> all — round 92.*** `bStdOnly` is cleared for a cell whose **pattern carries a conditional
+> format**, whatever the condition says and whether or not it fires:
+> `if (bStdOnly && !pPattern->GetItem(ATTR_CONDITIONAL).GetCondFormatData().empty())
+> bStdOnly = false;` (`column2.cxx:937-941`, *"conditional formatting: loop all cells"*). It is
+> the pattern that is tested, so a rule declared over a whole column makes every row of it
+> measured. Separately, a **hyperlink** cell is an `EditTextObject` holding one field — the same
+> object a rich string makes, reached by a door nothing here had opened. Both come out at one
+> line of the cell's own face, so both are `StandingEditLine`: **298** twips for Calibri 11
+> against the arithmetic's **276**.
+>
+> Established by one-attribute variant against 26.2.4.2, read back through its own
+> `--convert-to fods` rather than off a page — which matters, because
+> `Special-Procedures_2025-07-10.ods` prints at `style:scale-to="39%"` and neither side's pitch
+> is a row height. Deleting its `calcext:conditional-formats` element moves rows 6–200 from 298
+> to 276; on `hdss-bulletin-index-2019-2022.ods`, whose rows are hyperlinks, rewriting every
+> `<text:a>` to its own text does the same, and its header row — the one row holding no link —
+> is 276 either way. Reach in the converted `.ods`: **95 of 307 state a conditional format and
+> 74 hold a `text:a`**; `.ods` gate **274 → 278**, 64 renderings moved of which 57 get closer to
+> the reference, and the original `.xlsx`/`.xls`/`.xlsm` track is **294 → 294** with one
+> rendering of the sixteen that moved changing a column and none changing a verdict.
+>
+> Two residuals. The **`style:map` spelling** of a conditional format is not read — 1 of the 307
+> states it without a `calcext:` one, and closing it means resolving automatic cell styles back
+> to the cells naming them. And **BIFF `CONDFMT` is not read at all**, so the conditional half
+> does not reach `.xls`: nothing in the corpus needs it, but the two spellings of one workbook
+> now disagree about a row height. `probes/ods-notes-r92/results.md` §2.
 
 **Calc will not replace a height that rounds to the same pixel.** `lcl_pixelSizeChanged`
 (`sc/source/core/data/table2.cxx:3388`) compares `trunc(height × nPPTY)` and leaves the file's value

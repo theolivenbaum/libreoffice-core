@@ -522,9 +522,33 @@ internal static class SheetOptimalRowHeights
                 // narrow or wide its column is, so Calc measures it through the EditEngine branch
                 // even when it does not wrap — and one EditEngine line is not the same number as
                 // the arithmetic height. See <see cref="StandingEditLine"/>.
+                //
+                // **Two more things put a cell on that branch and neither is a property of its
+                // string**, which is why they were missed for as long as the arithmetic has been
+                // here. A cell whose content Calc replaced with a `SvxURLField` is an
+                // `EditTextObject` holding one field — the same object a rich string makes — and a
+                // cell whose *pattern* carries a conditional format clears `bStdOnly` outright
+                // (`column2.cxx:937-941`, "conditional formatting: loop all cells"), so it is
+                // measured through `GetNeededSize`'s direct-output branch, `pDev->GetTextHeight()`
+                // plus the two margins. Both answers are one line of the cell's own face, so both
+                // are `StandingEditLine`.
+                //
+                // Established by one-attribute variant against 26.2.4.2, reading the row heights
+                // out of its own `--convert-to fods` rather than off a page. On
+                // `hdss-bulletin-index-2019-2022.ods` rows 1–200 come back at **298** twips and
+                // row 0 — the header, the one row holding no `text:a` — at **276**; rewriting
+                // every `<text:a>` to its own text makes all 201 of them 276. On
+                // `Special-Procedures_2025-07-10.ods`, which holds no hyperlink and five
+                // conditional formats over whole columns, rows 6–200 come back at 298 and
+                // deleting the `calcext:conditional-formats` element makes them 276. Both
+                // documents are 11 pt Calibri throughout, where the arithmetic is
+                // `trunc(220 × 1.18) + 40 − 23 = 276` and one line is
+                // `(14 + 4 + 1 + 1) px / 0.067 = 298`.
                 bool standing = !breaks && !turned && !opaque
                                 && (portions is { Count: > 0 }
-                                    || text.AsSpan().IndexOfAny('\n', '\r') >= 0);
+                                    || text.AsSpan().IndexOfAny('\n', '\r') >= 0
+                                    || sheet.HoldsField(cell.Row, cell.Column)
+                                    || sheet.CarriesCondition(cell.Row, cell.Column));
 
                 if (!breaks && !turned && !opaque && !standing) continue;
 

@@ -187,6 +187,46 @@ public sealed class SheetLayout
         return false;
     }
 
+    /// <summary>The blocks a conditional format covers, as the file states them.</summary>
+    /// <remarks>
+    /// <para>
+    /// Not for what the condition paints — nothing here evaluates one — but for the row height,
+    /// which a conditional format changes whether or not any rule fires. Calc's
+    /// <c>ScColumn::GetOptimalHeight</c> clears <c>bStdOnly</c> when the cell's pattern carries a
+    /// non-empty <c>ATTR_CONDITIONAL</c> (<c>sc/source/core/data/column2.cxx:937-941</c>, under
+    /// the comment <em>"conditional formatting: loop all cells"</em>), so such a cell is measured
+    /// through <c>GetNeededSize</c> instead of taking <c>lcl_GetAttribHeight</c>'s arithmetic —
+    /// and the two answers differ by 22 twips at 11 pt, 298 against 276.
+    /// </para>
+    /// <para>
+    /// The condition itself cannot decide it, because <c>ATTR_CONDITIONAL</c> is applied to the
+    /// whole target range when the format is imported and is never consulted for truth here. A
+    /// range covering a column therefore makes every row of that column measured.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<SheetRange> ConditionalRanges { get; init; } = [];
+
+    /// <summary>
+    /// Whether the cell's pattern carries a conditional format, so that its row is measured.
+    /// </summary>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    public bool CarriesCondition(int row, int column)
+    {
+        if (ConditionalRanges is not { Count: > 0 } ranges) return false;
+
+        foreach (SheetRange range in ranges)
+        {
+            if (row >= range.FirstRow && row <= range.LastRow
+                && column >= range.FirstColumn && column <= range.LastColumn)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// What is painted behind and around the cells: their fills and their borders.
     /// </summary>

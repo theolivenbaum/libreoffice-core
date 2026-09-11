@@ -147,6 +147,7 @@ public static class XlsxReader
                     Cells = table,
                     StatedMerges = XlsxSheetReader.ReadMerges(worksheet),
                     HyperlinkRanges = XlsxSheetReader.ReadHyperlinks(worksheet),
+                    ConditionalRanges = XlsxSheetReader.ReadConditionalRanges(worksheet),
                     Formatting = XlsxCellDecoration.Read(file.StyleSheet, file.ThemeRoot, worksheet),
                     Formats = formats,
                     RichText = rich,
