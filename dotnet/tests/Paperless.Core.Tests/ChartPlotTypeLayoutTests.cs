@@ -357,6 +357,67 @@ public class ChartPlotTypeLayoutTests
     };
 
     /// <summary>
+    /// Both of-pie forms fall back to a plain pie below four points and split at four, and the
+    /// wedge counts either side are the reference's own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 rather than read off the source, over 28 one-attribute
+    /// variants of <c>029_Unit_Circle_Chart_Pie_Theme_8a922142.docx</c></strong> —
+    /// <c>probes/chart-rest-r104/o38-ofpie.tsv</c>. The reference draws exactly two connector
+    /// lines whenever it draws an of-pie and none when it does not, so the fallback is binary in
+    /// its own output: three points give none and four give two, in the <em>pie</em> form as well
+    /// as in the bar form. Round 102 read the pie form as needing something more than four points
+    /// and that is retracted — its instrument clustered filled marks by x and could not tell a
+    /// pie-of-pie's two rings from one ring's wedges.
+    /// </para>
+    /// <para>
+    /// The wedge counts over ten point counts and four split positions are
+    /// <c>n + 1</c> for the pie form — both rings, whatever the split — and <c>n − split + 1</c>
+    /// for the bar form, whose second plot is rectangles. At <c>n = 8</c> the reference draws 9
+    /// wedges for <c>pie</c> at splits 1, 2, 3 and 5, and 8, 7, 6 and 4 for <c>bar</c>.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(ChartOfPieType.Pie, 3, 2, 3)]     // below the minimum: one plain pie
+    [InlineData(ChartOfPieType.Bar, 3, 2, 3)]
+    [InlineData(ChartOfPieType.Pie, 4, 2, 5)]     // n + 1
+    [InlineData(ChartOfPieType.Pie, 8, 1, 9)]
+    [InlineData(ChartOfPieType.Pie, 8, 3, 9)]
+    [InlineData(ChartOfPieType.Pie, 8, 5, 9)]
+    [InlineData(ChartOfPieType.Bar, 8, 1, 8)]     // n - split + 1
+    [InlineData(ChartOfPieType.Bar, 8, 3, 6)]
+    [InlineData(ChartOfPieType.Bar, 8, 5, 4)]
+    public void AnOfPieDrawsTheReferencesOwnWedgeCounts(
+        ChartOfPieType type, int points, int split, int wedges)
+    {
+        ChartPlot plot = new()
+        {
+            Kind = ChartPlotKind.OfPie,
+            OfPieType = type,
+            SplitType = ChartSplitType.Position,
+            SplitPosition = split,
+            Series =
+            [
+                new ChartSeries(
+                    "S",
+                    [.. Enumerable.Range(0, points).Select(i => (double?)(60 - 3 * i))],
+                    Colour.FromRgb(0x004586)),
+            ],
+        };
+
+        ChartDrawing drawing = Place(plot);
+
+        bool split_ = points >= 4;
+        drawing.Lines.Count.ShouldBe(split_ ? 2 : 0);
+
+        // The bar form's second plot is rectangles rather than wedges, so the wedge count is the
+        // main ring alone; the pie form's counts both rings.
+        int expected = split_ && type is ChartOfPieType.Bar ? wedges + split : wedges;
+        drawing.Shapes.Count.ShouldBe(expected);
+    }
+
+    /// <summary>
     /// The split takes the series' <em>last</em> points, and the main pie gains a composite wedge.
     /// </summary>
     /// <remarks>

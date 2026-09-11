@@ -228,7 +228,23 @@ internal static class XlsxDrawings
             XElement? data =
                 Child(Child(frame, MainNamespace, "graphic"), MainNamespace, "graphicData");
 
-            if (Attribute(data, "uri") != ChartUri) return drawing;
+            string? uri = Attribute(data, "uri");
+
+            // The extended ("chartex") vocabulary is a second chart payload with a second
+            // namespace, and 26.2.4.2 draws it — see `DrawingChartex`. Reaching it at all needs
+            // `OoxmlXml.ResolveAlternateContent` to have preferred the `cx1` choice, which it
+            // does, and which is now worth doing for the chart rather than for the absence of
+            // the fallback's advisory sentence.
+            if (uri == DrawingChartex.ChartUri)
+            {
+                return drawing with
+                {
+                    IsChart = true,
+                    Chart = ExtendedPlot(data, package, images, theme, ranges),
+                };
+            }
+
+            if (uri != ChartUri) return drawing;
 
             return drawing with
             {
@@ -387,6 +403,36 @@ internal static class XlsxDrawings
                 ranges?.Resolver(DrawingChart.PlotsVisibleCellsOnly(
                     chartSpace, OoxmlMetadata.IsOffice2007(package))),
                 automaticChartAreaLine: true);
+    }
+
+    /// <summary>The chartex chart a <c>cx:chart</c> graphic frame names, or null.</summary>
+    /// <remarks>
+    /// The same shape as <see cref="Plot"/> and a different namespace at every step: the
+    /// relationship id is on <c>cx:chart</c> rather than on <c>c:chart</c>, and the part's root is
+    /// <c>cx:chartSpace</c>. The resolver is bound unconditionally — chartex has no
+    /// <c>c:plotVisOnly</c>, and `plotVisibleOnly`'s own default is what a chart written by Excel
+    /// 2010 or later means.
+    /// </remarks>
+    private static ChartPlot? ExtendedPlot(
+        XElement? data,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> parts,
+        DrawingTheme? theme,
+        XlsxChartRanges? ranges)
+    {
+        string? id = Attribute(
+            Child(data, OoxmlNamespaces.ExtendedChart, "chart"),
+            XName.Get("id", RelationshipNamespace));
+
+        if (id is null || !parts.TryGetValue(id, out OpcXml.Relationship chart)) return null;
+        if (chart.IsExternal || package.GetPart(chart.Target) is not { } chartPart) return null;
+
+        XElement? chartSpace;
+        using (Stream content = chartPart.Open()) chartSpace = OoxmlXml.TryLoad(content, out _);
+
+        return chartSpace is null
+            ? null
+            : DrawingChartex.Read(chartSpace, theme, styles: null, ranges?.Resolver(true));
     }
 
     /// <summary>
