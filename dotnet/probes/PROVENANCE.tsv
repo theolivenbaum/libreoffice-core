@@ -454,6 +454,31 @@ dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	prese
 dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-style-r97/both-sides-2.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/both-sides-3.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/corpusfodt.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/corpusfodt.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/genpool2.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/genpool3.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/hasbyname-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/hasbyname-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/intermediates.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/intermediates.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/measurepool.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/mover-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/mover-ink.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/pool-resolved-2.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/pool-resolved-3.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/reach-base.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/reach-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/reach-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/reach-head.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/reach-sweep.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/readfodt.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/whichproperty.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/whichproperty.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/writer-names.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/sheet-fill-r84/census-ods.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/census-ods.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/census-shapebox.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
