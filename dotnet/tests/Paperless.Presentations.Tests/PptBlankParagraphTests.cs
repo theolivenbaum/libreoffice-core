@@ -152,11 +152,27 @@ public class PptBlankParagraphTests
     }
 
     /// <summary>
-    /// A trailing empty paragraph is still dropped, because it is the terminator's artefact rather
-    /// than a line the author wrote.
+    /// A trailing return leaves an empty paragraph behind, and it is a line.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This asserted the opposite for as long as the reader has existed, and it was never
+    /// measured.</strong> <c>PPTStyleTextPropReader::Init</c> reads the string under
+    /// <c>while (nCharReadCnt &lt; nStringLen)</c> and then, once the loop is done, appends one
+    /// more portion in one more paragraph whenever the last portion it made belongs to the
+    /// paragraph before the counter — <c>filter/source/msfilter/svdfppt.cxx</c>:5403-5409 — which
+    /// is exactly the case where the text ended on a newline marker.
+    /// </para>
+    /// <para>
+    /// Read out of the reference's own resolved view as well: <c>--convert-to fodp</c> on
+    /// <c>pres_ioc_phuket.ppt</c> gives page 26's banner, whose whole text is a single <c>\r</c>,
+    /// <b>two</b> <c>&lt;text:p&gt;</c> elements and a shape 3.647 cm — 103.38 pt — tall against
+    /// the 2.289 cm its own anchor states. Dropping the second paragraph drew that bar 38.5 pt
+    /// short.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void ATrailingEmptyParagraphIsStillNotALine()
+    public void ATrailingEmptyParagraphIsALine()
     {
         PptTextRun run = new(
             PptTextKind.Other,
@@ -168,6 +184,43 @@ public class PptBlankParagraphTests
             run, styles: null, Scheme, Fonts, SlideTextBody.DefaultInsets,
             TextAnchor.Top, wraps: true).ShouldNotBeNull();
 
-        body.Paragraphs.Count.ShouldBe(1);
+        body.Paragraphs.Count.ShouldBe(2);
+        body.Paragraphs[1].Text.ShouldBe(string.Empty);
+    }
+
+    /// <summary>
+    /// That paragraph is measured in the run BEFORE it, not in the run covering its own position.
+    /// </summary>
+    /// <remarks>
+    /// A <c>.ppt</c> states one more character run than it has characters, and PowerPoint writes
+    /// something different in it — <c>pres_ioc_phuket.ppt</c> page 26's banner states 40 pt and
+    /// then 8 pt for a text of one carriage return. The reference never reads the second: its
+    /// loop stops at <c>nCharReadCnt &lt; nStringLen</c> and the portion it appends afterwards is
+    /// a copy of <c>aCharPropList.back()</c> (<c>svdfppt.cxx</c>:5403-5409). 26.2.4.2 resolves
+    /// that shape to 3.647 cm, which is two lines of 40 pt and not one of 40 and one of 8.
+    /// </remarks>
+    [Fact]
+    public void TheTrailingEmptyParagraphTakesThePrecedingRunsSizeAndNotTheOneAfterIt()
+    {
+        const uint statesHeight = 0x0002_0000;
+
+        PptTextRun run = new(
+            PptTextKind.Other,
+            $"{PptTextReader.ParagraphSeparator}",
+            [],
+            [
+                new PptCharacterRun(1, RunEmphasis.None, RunEmphasis.None, statesHeight,
+                                    FontHeight: 40),
+                new PptCharacterRun(1, RunEmphasis.None, RunEmphasis.None, statesHeight,
+                                    FontHeight: 8),
+            ]);
+
+        SlideTextBody body = PptTextBody.Build(
+            run, styles: null, Scheme, Fonts, SlideTextBody.DefaultInsets,
+            TextAnchor.Top, wraps: true).ShouldNotBeNull();
+
+        body.Paragraphs.Count.ShouldBe(2);
+        body.Paragraphs[0].Runs[0].Size.Points.ShouldBe(40, 0.01);
+        body.Paragraphs[1].Runs[0].Size.Points.ShouldBe(40, 0.01);
     }
 }

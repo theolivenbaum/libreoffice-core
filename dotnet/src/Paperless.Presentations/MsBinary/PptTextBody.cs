@@ -120,20 +120,29 @@ internal static class PptTextBody
             int stop = run.Text.IndexOf(PptTextReader.ParagraphSeparator, start);
             int length = (stop < 0 ? run.Text.Length : stop) - start;
 
+            // Where an empty paragraph looks for the character properties its blank line is
+            // measured in. That is its own position for every paragraph but the phantom one a
+            // trailing return leaves behind, which takes the *preceding* portion's — see the
+            // remarks on Runs' `inherit`.
+            int inherit = stop < 0 && start > 0 && length == 0 ? start - 1 : start;
+
             paragraphs.Add(
-                Paragraph(run, styles, scheme, fonts, start, length, counters, counting));
+                Paragraph(run, styles, scheme, fonts, start, length, inherit, counters, counting));
 
             if (stop < 0) break;
             start = stop + 1;
         }
 
-        // A run that ends with a return has one empty paragraph after it, which is an artefact of
-        // the terminator rather than a paragraph the author wrote.
-        if (paragraphs.Count > 1 && paragraphs[^1].Text.Length == 0)
-        {
-            paragraphs.RemoveAt(paragraphs.Count - 1);
-        }
-
+        // The empty paragraph a trailing return leaves behind is kept, because the reference keeps
+        // it. `PPTStyleTextPropReader::Init` appends one more portion, in one more paragraph, once
+        // the loop over the text is done and the last portion it made belongs to the paragraph
+        // before the counter (`filter/source/msfilter/svdfppt.cxx`:5403-5409) — which is exactly
+        // the case where the string ended on a newline marker. Read out of 26.2.4.2's own resolved
+        // view as well: `soffice --convert-to fodp` on `pres_ioc_phuket.ppt` gives the banner of
+        // page 26, whose whole text is a single `\r`, **two** `<text:p>` elements and a shape
+        // 3.647 cm tall — two 40 pt lines. Dropping the second drew it 38.5 pt short. A title is
+        // the exception and it is handled where the text is read, not here: `PptTextReader.Broken`
+        // turns a `PageTitle`'s returns into line breaks, so such a run never splits at all.
         if (paragraphs.Count == 0) return null;
 
         // EditEngine adds a paragraph's space above only when it is not the first, and its space
@@ -165,6 +174,7 @@ internal static class PptTextBody
         PptFontTable fonts,
         int start,
         int length,
+        int inherit,
         int[] counters,
         bool[] counting)
     {
@@ -185,7 +195,8 @@ internal static class PptTextBody
         string text = run.Text.Substring(start, length).Replace(
             PptTextReader.LineBreak, '\u2028');
 
-        List<SlideTextRun> runs = Runs(run, scheme, fonts, characters, start, length, text.Length);
+        List<SlideTextRun> runs =
+            Runs(run, scheme, fonts, characters, start, length, inherit, text.Length);
 
         // A bullet whose colour is not hard takes the first portion's -- and a hyperlink portion
         // hands it the colour it had *before* the link recoloured it, rather than the scheme's
@@ -518,6 +529,7 @@ internal static class PptTextBody
         PptCharacterLevel level,
         int start,
         int length,
+        int inherit,
         int textLength)
     {
         List<SlideTextRun> runs = [];
@@ -546,6 +558,16 @@ internal static class PptTextBody
         // Not a fraction of a line: 32 against 12 is 24 pt of surplus height per blank paragraph,
         // which on this page pushed the shrink-to-fit walk two rows down `constScaleLevels` and
         // cost the whole body 2 pt of em.
+        // `inherit` is that position, and it is `start` for every paragraph but one. The phantom
+        // paragraph a trailing return leaves behind takes the run one character EARLIER, because
+        // the reference does not read the character run covering the text's own length at all:
+        // `PPTStyleTextPropReader::Init`'s loop is bounded by `nCharReadCnt < nStringLen`, so the
+        // portion it appends afterwards is a copy of `aCharPropList.back()` — the portion of the
+        // paragraph before it (`filter/source/msfilter/svdfppt.cxx`:5403-5409). A `.ppt` states one
+        // more character run than it has characters and PowerPoint writes something different in
+        // it: `pres_ioc_phuket.ppt` page 26's banner is a single `\r` with runs of 40 pt and 8 pt,
+        // and 26.2.4.2 measures both of its lines at 40 — its own flat-ODP export gives the shape
+        // 3.647 cm, which is 2 x fround(1411 x 1.2) plus the two 127-unit insets.
         PptCharacterRun atStart = default;
         bool found = false;
 
@@ -555,7 +577,7 @@ internal static class PptTextBody
             int from = Math.Max(position, start);
             int to = Math.Min(runEnd, end);
 
-            if (!found && start >= position && start < runEnd) { atStart = character; found = true; }
+            if (!found && inherit >= position && inherit < runEnd) { atStart = character; found = true; }
 
             // A text-range hyperlink splits the portion it lands in, and each piece it covers is
             // its own field: `svdfppt.cxx:7080-7091` clones the PPTCharPropSet at the range's end
