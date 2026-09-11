@@ -22,6 +22,18 @@ format (Paperless reads), macro execution (never — Paperless only reports that
 
 1. **Never build the C++ tree.** It takes hours and is never needed. Use an installed
    `soffice` for reference output — see the `libreoffice-reference` skill.
+
+   **And the tree is not the reference binary's source.** `configure.ac`:21 declares
+   `27.2.0.0.alpha0+`; the checkout is a single bulk import dated 2026-07-29; the binary at
+   `/opt/libreoffice26.2/program/soffice` is **26.2.4.2**. Do not write *"read out of 26.2's
+   source"* — write which tree you read, and treat a hunk as *probably* also 26.2's unless it
+   matters, in which case say you could not check. Per-file `git log` cannot help: every file
+   carries the import date. There is no 26.2 branch or tag in this checkout.
+
+   This is why every arm gets confirmed **twice** — once in source, once against 26.2.4.2's
+   own output via `--convert-to fods/fodt/fodp` or a rendered fixture. The second leg is a
+   measurement of the actual reference and stands on its own; the first is now known to be a
+   different version's explanation of it.
 2. **Never execute macros.** Macro-enabled formats are read as data. `CanCarryMacros` on
    `FormatInfo` exists so callers can surface the risk; nothing executes.
 3. **Rasterise with SkiaSharp, shape with HarfBuzzSharp.** HarfBuzz is what LibreOffice
