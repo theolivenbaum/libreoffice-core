@@ -1664,3 +1664,14 @@ dotnet/probes/cond-format-r97/score-witnesses.sh	2026-09-11	current	26.2.4.2	pre
 dotnet/probes/cond-format-r97/sweep-after-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r97/results.md
 dotnet/probes/cond-format-r97/sweep-base-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r97/results.md
 dotnet/probes/cond-format-r97/sweep-keep.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r97/results.md
+dotnet/probes/rtf-heading-r98/candidate-table.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/flush-pes.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/flushlines.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/genheading.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/heading-resolved.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/headingreach.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/headingreach.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/reach-base.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/reach-head.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/readfodt2.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-heading-r98/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-heading-r98/results.md;dotnet/probes/OPEN-ISSUES.md
