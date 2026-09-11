@@ -63,6 +63,21 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
 
         if (sheet.Drawings.IsEmpty || columns.Count == 0 || rows.Count == 0) return;
 
+        // The block is a clip as well as a cull, and the two are the same rectangle. See `Block`.
+        sink.Save();
+        try
+        {
+            sink.ClipPath(GraphicsPath.Rectangle(Block(columns, rows)));
+            DrawInside(sink, columns, rows);
+        }
+        finally
+        {
+            sink.Restore();
+        }
+    }
+
+    private void DrawInside(IDrawingSink sink, List<PlacedColumn> columns, List<PlacedRow> rows)
+    {
         Dictionary<int, PlacedColumn> byColumn = [];
         foreach (PlacedColumn column in columns) byColumn.TryAdd(column.Column, column);
 
@@ -336,6 +351,42 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
     private static bool ReachesTheBlock(
         DocRect box, List<PlacedColumn> columns, List<PlacedRow> rows)
     {
+        DocRect block = Block(columns, rows);
+
+        // Inclusive on both edges, because Calc's is: `aRect` is a `tools::Rectangle`, whose
+        // `Right()` and `Bottom()` are the last coordinates *inside* it, so a drawing whose left
+        // edge sits exactly on the block's right edge still overlaps it by one unit. Measured on
+        // `sheet-shape-clip.xlsx`, whose box is anchored in the first column of the second band and
+        // which LibreOffice prints on both pages.
+        return box.X + box.Width >= block.X && box.X <= block.X + block.Width
+               && box.Y + box.Height >= block.Y && box.Y <= block.Y + block.Height;
+    }
+
+    /// <summary>
+    /// The page's own cell block: the rectangle the drawing layer is both culled and clipped to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It is a clip and not only a cull, and reading it as a cull alone lets a shape run
+    /// off the edge of the printed block.</strong> `PrePrintDrawingLayer` builds this rectangle
+    /// and hands it to <c>SdrView::BeginDrawLayers</c> as the paint <em>region</em>
+    /// (<c>sc/source/ui/view/output3.cxx</c>:41-102), so every object the drawing layer paints
+    /// afterwards is clipped to it; <c>ScPrintFunc::PrintArea</c> calls the pair once per printed
+    /// area (<c>printfun.cxx</c>:1641, 1651-1713).
+    /// </para>
+    /// <para>
+    /// It shows only once ink is being painted, which is why it surfaced with round 92's BIFF
+    /// fill rather than before it. <c>PC1000.xls</c>' <c>Rectangle 16</c> is 244 pt wide and
+    /// starts 6 pt inside the sheet's last column, so 62 pt of it hang past the block's right
+    /// edge, and on pages 2 onwards all but a 4 pt sliver of it hangs off the top. 26.2.4.2 emits
+    /// the whole rectangle into the content stream and then <c>W* n</c>s it away
+    /// — <c>q 55.389 552.019 681.846 23.981 re W* n</c> is that page's own clip, read out of the
+    /// reference's page 2 — so a reader counting the PDF's <em>path</em> operators sees a shape
+    /// the reference is not showing. Count the pixels.
+    /// </para>
+    /// </remarks>
+    private static DocRect Block(List<PlacedColumn> columns, List<PlacedRow> rows)
+    {
         Length left = columns[0].X;
         Length right = columns[0].Right;
         foreach (PlacedColumn column in columns)
@@ -352,13 +403,7 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             if (row.Bottom > bottom) bottom = row.Bottom;
         }
 
-        // Inclusive on both edges, because Calc's is: `aRect` is a `tools::Rectangle`, whose
-        // `Right()` and `Bottom()` are the last coordinates *inside* it, so a drawing whose left
-        // edge sits exactly on the block's right edge still overlaps it by one unit. Measured on
-        // `sheet-shape-clip.xlsx`, whose box is anchored in the first column of the second band and
-        // which LibreOffice prints on both pages.
-        return box.X + box.Width >= left && box.X <= right
-               && box.Y + box.Height >= top && box.Y <= bottom;
+        return new DocRect(left, top, right - left, bottom - top);
     }
 
     /// <summary>Where a drawing lands on this page, or null when it does not.</summary>

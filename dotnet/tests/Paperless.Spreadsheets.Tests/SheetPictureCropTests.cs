@@ -152,18 +152,32 @@ public sealed class SheetPictureCropTests
         => ClipsOf(name).ShouldBeGreaterThan(0);
 
     /// <summary>
-    /// And an uncropped one is not, which is the half that keeps this round's reach honest: an
-    /// unconditional clip would put a <c>q</c>/<c>W n</c>/<c>Q</c> into every rendering carrying a
-    /// picture and change all of them for nothing.
+    /// And an uncropped one takes no clip <em>of its own</em> — the one clip the page emits is
+    /// the drawing layer's, which every page carrying a drawing now takes.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>picture-crop.xlsx</c> was this control by not reading its own <c>a:srcRect</c>;
     /// <c>picture-watermark.xlsx</c> is one on purpose — a picture over cells, stating an
     /// <c>a:alphaModFix</c> and no crop.
+    /// </para>
+    /// <para>
+    /// <strong>This asserted zero until round 92, on the reasoning that "an unconditional clip
+    /// would put a <c>q</c>/<c>W n</c>/<c>Q</c> into every rendering carrying a picture and change
+    /// all of them for nothing".</strong> The premise is right and the conclusion was wrong: the
+    /// reference emits exactly that clip, from the paint region
+    /// <c>ScOutputData::PrePrintDrawingLayer</c> hands <c>BeginDrawLayers</c>
+    /// (<c>sc/source/ui/view/output3.cxx</c>:41-102), and it is not for nothing — see
+    /// <see cref="Layout.SheetPageGraphics"/>. Measured over the sheets track: it changes 164
+    /// renderings' bytes, of which <b>83 are pixel-identical</b> and 81 are not; of those 81, 68
+    /// improve on ink and 3 worsen; and it gains <b>25 gate verdicts</b>, because PyMuPDF and
+    /// <c>pdftotext</c> both drop the text the clip removes and the reference's counts already
+    /// have it removed.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void AnUncroppedPictureIsNotClipped()
-        => ClipsOf("picture-watermark.xlsx").ShouldBe(0);
+    public void AnUncroppedPictureTakesOnlyTheDrawingLayersClip()
+        => ClipsOf("picture-watermark.xlsx").ShouldBe(1);
 
     // ------------------------------------------------------------------ helpers
 
