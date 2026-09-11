@@ -119,6 +119,14 @@ public static class XlsxReader
                 (SheetCellFormats formats, SheetRichText rich) =
                     XlsxSheetFormats.Read(worksheet, cellFormats, file);
 
+                // A conditional format is the one thing that states a fill and a font at once, so
+                // its rules are evaluated with the decoration, once, and the font half comes back
+                // to be laid over the text formats.
+                SheetFormatting formatting = XlsxCellDecoration.Read(
+                    file.StyleSheet, file.ThemeRoot, worksheet, file.SharedStrings,
+                    out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText);
+                formats = formats.WithConditionalText(conditionalText);
+
                 // A shown cell comment is an object on the internal layer, which Calc prints
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
                 // cover whatever they overlap.
@@ -148,7 +156,7 @@ public static class XlsxReader
                     StatedMerges = XlsxSheetReader.ReadMerges(worksheet),
                     HyperlinkRanges = XlsxSheetReader.ReadHyperlinks(worksheet),
                     ConditionalRanges = XlsxSheetReader.ReadConditionalRanges(worksheet),
-                    Formatting = XlsxCellDecoration.Read(file.StyleSheet, file.ThemeRoot, worksheet),
+                    Formatting = formatting,
                     Formats = formats,
                     RichText = rich,
                     Drawings = drawings,

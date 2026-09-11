@@ -29,6 +29,7 @@ public sealed class SheetCellFormats
     private readonly Dictionary<int, int> _rows;
     private readonly Dictionary<int, int> _columns;
     private readonly int _sheet;
+    private readonly Dictionary<(int Row, int Column), SheetConditionalText> _conditional;
 
     private SheetCellFormats(
         List<SheetCellFormat> pool,
@@ -37,7 +38,8 @@ public sealed class SheetCellFormats
         Dictionary<int, int> rows,
         Dictionary<int, int> columns,
         int sheet,
-        int lastAllocatedColumn)
+        int lastAllocatedColumn,
+        Dictionary<(int, int), SheetConditionalText>? conditional = null)
     {
         _pool = pool;
         _cells = cells;
@@ -46,11 +48,41 @@ public sealed class SheetCellFormats
         _columns = columns;
         _sheet = sheet;
         LastAllocatedColumn = lastAllocatedColumn;
+        _conditional = conditional ?? [];
     }
 
     /// <summary>A sheet whose every cell is in the default format.</summary>
     public static SheetCellFormats Empty { get; } =
         new([SheetCellFormat.Default], [], new SheetBlockIndex(), [], [], 0, -1);
+
+    /// <summary>
+    /// The same formats with a conditional-format overlay laid over them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A new instance sharing the pool rather than a setter, for one hard reason and one soft
+    /// one. <see cref="Empty"/> is a shared singleton that a reader returns whenever a sheet
+    /// states no formats at all, and a sheet whose only text formatting is a conditional rule is
+    /// exactly that sheet — mutating it would put one workbook's rules on every other document
+    /// in the process. And the store is otherwise immutable once built, which is what lets a
+    /// layout be shared between the pages that draw it.
+    /// </para>
+    /// <para>
+    /// The overlay is asked for on every <see cref="At"/>, so it is guarded by a count rather
+    /// than by a lookup: a plain workbook pays one integer comparison per cell per page.
+    /// </para>
+    /// </remarks>
+    /// <param name="conditional">What each cell's matching rule changes about its text.</param>
+    public SheetCellFormats WithConditionalText(
+        Dictionary<(int Row, int Column), SheetConditionalText> conditional)
+    {
+        ArgumentNullException.ThrowIfNull(conditional);
+
+        return conditional.Count == 0
+            ? this
+            : new SheetCellFormats(
+                _pool, _cells, _blocks, _rows, _columns, _sheet, LastAllocatedColumn, conditional);
+    }
 
     /// <summary>
     /// The last column the sheet <em>materialises</em>, or -1 when it materialises none.
@@ -129,6 +161,17 @@ public sealed class SheetCellFormats
     /// <param name="row">The zero-based row.</param>
     /// <param name="column">The zero-based column.</param>
     public SheetCellFormat At(int row, int column)
+    {
+        SheetCellFormat stated = Stated(row, column);
+
+        return _conditional.Count > 0
+               && _conditional.TryGetValue((row, column), out SheetConditionalText rule)
+            ? rule.Over(stated)
+            : stated;
+    }
+
+    /// <summary>What a cell states, before any conditional format is applied over it.</summary>
+    private SheetCellFormat Stated(int row, int column)
     {
         if (_cells.TryGetValue((row, column), out int index)) return _pool[index];
 

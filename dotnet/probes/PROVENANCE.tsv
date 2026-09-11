@@ -1459,6 +1459,26 @@ dotnet/probes/title-font-r92/run-census-ours-page1.txt	2026-09-10	current	26.2.4
 dotnet/probes/title-font-r92/run-census-ref-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/run-census.py	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/variant-table.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/sheet-ink-r94/census-cfrules.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/cfrule-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-ink-r94/colour-census.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/csv-page18-after.png	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/ink-after.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/ink-base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/ink-movers.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-ink-r94/keep.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/movers.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/pixel-diff.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-ink-r94/score-ink.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/sweep-after-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/sweep-base-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/sweep-ours.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/tk-ink-after.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/tk-ink-base.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/tk-page1213-after.png	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/tk-page1213-before.png	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-ink-r94/tk-page52-after.png	2026-09-11	current	26.2.4.2	present	current	
 dotnet/probes/slides-ink-r94/3492-page19-after-vs-ref.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
 dotnet/probes/slides-ink-r94/census-gtext.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
 dotnet/probes/slides-ink-r94/census-srcand.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md

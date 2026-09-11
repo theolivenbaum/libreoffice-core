@@ -42,7 +42,33 @@ internal static class XlsxCellDecoration
     /// <param name="theme">The <c>theme</c> root, for colours named by index.</param>
     /// <param name="worksheet">The sheet's own root.</param>
     public static SheetFormatting Read(XElement? styles, XElement? theme, XElement? worksheet)
+        => Read(styles, theme, worksheet, XlsxSharedStrings.Empty, out _);
+
+    /// <summary>
+    /// Reads one sheet's decoration and the text half of its conditional formats with it.
+    /// </summary>
+    /// <remarks>
+    /// The two come out of one call because a <c>&lt;dxf&gt;</c> states a fill and a font
+    /// together and the rule deciding which cells take it must be evaluated once. The fill half
+    /// belongs here, over the sheet's stated fills; the font half belongs to
+    /// <see cref="SheetCellFormats"/> and is returned for the caller to lay over it. Evaluating
+    /// before the <see cref="SheetFormatting.Empty"/> shortcut is what keeps a sheet whose only
+    /// decoration is a conditional fill from being reported as having none — and what keeps the
+    /// shared empty instance from being written to.
+    /// </remarks>
+    /// <param name="styles">The <c>styleSheet</c> root, or null when the workbook has none.</param>
+    /// <param name="theme">The <c>theme</c> root, for colours named by index.</param>
+    /// <param name="worksheet">The sheet's own root.</param>
+    /// <param name="shared">The workbook's shared strings, for the cells a rule compares.</param>
+    /// <param name="conditionalText">What each matching cell's winning rule does to its text.</param>
+    public static SheetFormatting Read(
+        XElement? styles,
+        XElement? theme,
+        XElement? worksheet,
+        XlsxSharedStrings shared,
+        out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText)
     {
+        conditionalText = [];
         if (worksheet is null) return SheetFormatting.Empty;
 
         XlsxPalette palette = XlsxPalette.Read(styles, theme);
@@ -57,6 +83,8 @@ internal static class XlsxCellDecoration
         if (formats.Count == 0)
         {
             XlsxConditionalFormats.Apply(formatting, styles, theme, worksheet);
+            conditionalText = XlsxConditionalStyles.Apply(
+                formatting, styles, theme, worksheet, shared);
             return formatting.IsEmpty ? SheetFormatting.Empty : formatting;
         }
 
@@ -101,6 +129,7 @@ internal static class XlsxCellDecoration
         }
 
         XlsxConditionalFormats.Apply(formatting, styles, theme, worksheet);
+        conditionalText = XlsxConditionalStyles.Apply(formatting, styles, theme, worksheet, shared);
 
         return formatting.IsEmpty ? SheetFormatting.Empty : formatting;
     }
