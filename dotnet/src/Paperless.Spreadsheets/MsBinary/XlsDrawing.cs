@@ -675,7 +675,8 @@ internal sealed class XlsDrawingCollector(
             string.Empty,
             font.Height > Length.Zero ? font.Height : DefaultTextSize,
             font.Name is { Length: > 0 } name ? name : null,
-            font.Weight >= BoldWeight);
+            font.Weight >= BoldWeight,
+            fonts.StatedColour(font));
     }
 
     /// <summary>The weight at which a BIFF <c>FONT</c> counts as bold.</summary>

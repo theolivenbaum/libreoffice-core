@@ -140,7 +140,7 @@ internal static class SheetShapePainter
                 // The baseline is shared by every piece of the line and sits at the deepest
                 // ascent any of them needs, so a large run does not drag a small one off it.
                 Length baseline = pen + line.Ascent;
-                foreach (BandRun piece in line.Pieces)
+                foreach (Piece piece in line.Pieces)
                 {
                     // Wholly inside or not drawn, and it is the *portion* that is tested rather
                     // than the line: LibreOffice keeps one only when its start position and both
@@ -149,13 +149,14 @@ internal static class SheetShapePainter
                     // (`TextHierarchyBreakupBlockText::processDrawPortionInfo`,
                     // svx/source/svdraw/svdoutl.cxx:120-160). A dropped portion still advances the
                     // pen, because nothing reflows around it.
-                    if (!clipping || Fits(piece, baseline, top, bottom))
+                    if (!clipping || Fits(piece.Run, baseline, top, bottom))
                     {
                         sink.DrawGlyphRun(
-                            piece.At(new DocPoint(x, baseline)), Paint.Solid(Colour.Black));
+                            piece.Run.At(new DocPoint(x, baseline)),
+                            Paint.Solid(piece.Colour ?? Colour.Black));
                     }
 
-                    x += piece.Width;
+                    x += piece.Run.Width;
                 }
             }
 
@@ -205,15 +206,27 @@ internal static class SheetShapePainter
             box.X + rectangle.X, box.Y + rectangle.Y, rectangle.Width, rectangle.Height);
     }
 
-    /// <summary>The size, face and weight one stretch of a paragraph is set in.</summary>
-    private readonly record struct Format(Length Size, string? Family, bool Bold);
+    /// <summary>One shaped stretch of a line, and the ink it is drawn in.</summary>
+    /// <remarks>
+    /// The colour rides beside the shaped run rather than inside it because shaping is a text
+    /// question and the ink is not: <c>SheetBandText.Shape</c> answers the same glyphs for
+    /// two runs that differ only in colour, and a <see cref="Format"/> that differs in colour
+    /// alone must still end the stretch, because <c>Compose</c> cuts on the format and the two
+    /// halves are drawn in different ink.
+    /// </remarks>
+    /// <param name="Run">The shaped glyphs.</param>
+    /// <param name="Colour">The ink the run stated, or null for the drawing layer's black.</param>
+    private readonly record struct Piece(BandRun Run, Colour? Colour);
+
+    /// <summary>The size, face, weight and ink one stretch of a paragraph is set in.</summary>
+    private readonly record struct Format(Length Size, string? Family, bool Bold, Colour? Colour);
 
     /// <summary>
     /// One laid-out line: the shaped stretches it is made of, its width, the ascent its pieces
     /// share, the height it advances, and its alignment.
     /// </summary>
     private readonly record struct Line(
-        IReadOnlyList<BandRun> Pieces,
+        IReadOnlyList<Piece> Pieces,
         Length Width,
         Length Ascent,
         Length Height,
@@ -347,7 +360,7 @@ internal static class SheetShapePainter
             ? SheetShapeText.DefaultFamily
             : run.Family;
 
-        return new Format(size * scale, family, run.Bold);
+        return new Format(size * scale, family, run.Bold, run.Colour);
     }
 
     /// <summary>
@@ -409,7 +422,7 @@ internal static class SheetShapePainter
     private static Line Compose(
         string body, Format[] formats, int start, int end, SheetShapeAlignment alignment)
     {
-        List<BandRun> pieces = [];
+        List<Piece> pieces = [];
         Length width = Length.Zero;
         Length ascent = Length.Zero;
         Length height = Length.Zero;
@@ -433,7 +446,7 @@ internal static class SheetShapePainter
             if (SheetBandText.Shape(body[at..stop], format.Size, format.Family, format.Bold)
                     is { } run)
             {
-                pieces.Add(run);
+                pieces.Add(new Piece(run, format.Colour));
                 width += run.Width;
             }
 
