@@ -75,6 +75,35 @@ public static class RasterOperations
     }
 
     /// <summary>
+    /// True when a blit standing on its own makes its source bitmap its own transparency mask.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The transparent idiom does not need two records when the picture is its own mask.</b> A
+    /// producer whose artwork is black on white says "draw the black and leave the white alone"
+    /// with a single <c>SRCAND</c>, because ANDing with white is the identity. There is no second
+    /// blit to pair with, so <see cref="PendingBlit.PairsWith"/> never fires and the source was
+    /// drawn opaquely — a white panel where the reference shows the page through.
+    /// </para>
+    /// <para>
+    /// LibreOffice resolves it in the same function as the pair, one branch further down:
+    /// <c>MtfTools::ResolveBitmapActions</c> switches on the *low nibble* of the operation's
+    /// middle byte, and case <c>0x8</c> builds <c>Bitmap aBmpEx(aBitmap, aMask)</c> with
+    /// <c>aMask</c> a copy of the bitmap itself (<c>emfio/source/reader/mtftools.cxx</c>:2691-2708).
+    /// The nibble is what carries it rather than the named operation, so <c>SRCAND</c> and every
+    /// other operation reducing to <c>S AND D</c> take the same branch.
+    /// </para>
+    /// <para>
+    /// <b>Case <c>0x7</c> is the same construction followed by an inversion of the destination</b>,
+    /// which a display list cannot read back, so it is deliberately left to the warning: drawing
+    /// the mask without the inversion would be a different picture, where drawing the source
+    /// without the mask is at least the right artwork.
+    /// </para>
+    /// </remarks>
+    /// <param name="operation">The ternary raster operation.</param>
+    public static bool IsSelfMasked(uint operation) => ((operation >> 16) & 0x0Fu) == 0x08u;
+
+    /// <summary>
     /// Combines a colour bitmap with a monochrome mask into one bitmap with an alpha channel.
     /// </summary>
     /// <remarks>
