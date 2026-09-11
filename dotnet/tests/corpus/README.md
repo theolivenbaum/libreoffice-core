@@ -325,6 +325,31 @@ number-format type rather than from the value the cell holds
 value omitted, LibreOffice computes the formula on load and writes a genuine cached result —
 which is the only way to get a `STRING` record into a file LibreOffice wrote.
 
+### The five `sheet-cf-*.xlsx` conditional-format fixtures
+
+One per `cfRule` family `XlsxConditionalStyles` evaluates as a predicate on the cell, plus one for
+the base cell a multi-range `sqref`'s formula is written for. `probes/cond-format-r96/make-fixtures.py`
+authors them; they are about 2.5 kB each and hold every part a real writer emits — both `_rels`
+parts, `workbook.xml`, a `styles.xml` with a real `dxfs` table, `sharedStrings.xml` and one
+worksheet — because a fixture missing a part the importer takes its defaults from answers a
+different question.
+
+| file | what it separates |
+|---|---|
+| `sheet-cf-contains-text.xlsx` | the search is unanchored and case-folded, and a numeric cell is searched as its *number* rather than as what is drawn |
+| `sheet-cf-ends-with.xlsx` | the needle must be the tail, case is folded, and a cell shorter than the needle cannot match |
+| `sheet-cf-blank-cells.xlsx` | a cell holding three spaces **is** blank and the number `0` is not — `containsBlanks` is `LEN(TRIM(cell))=0`, not "states nothing" — with `notContainsBlanks` on the same range as the partition |
+| `sheet-cf-duplicate-values.xlsx` | the cache key is the lowercased string or the number and never both, so `7` and `"7"` are not duplicates of each other |
+| `sheet-cf-multi-range-anchor.xlsx` | `ScRangeList::GetTopLeftCorner` orders addresses `(tab, col, row)`, so `$B1="hit"` on `B3 A5` is anchored at **A5**; the componentwise minimum `A3` paints the *other* cell |
+
+**Every expectation in `XlsxConditionalPredicateTests` is 26.2.4.2's own output.** Each fixture was
+converted twice — `--convert-to fods` for the rule the reference thinks it imported and
+`--convert-to pdf` for which cells it then painted, read back as filled rectangles and coloured
+text spans — and both are banked under `probes/cond-format-r96/fixture-reference/`. The two
+findings a synthetic could most easily have invented, the blank rule and the anchor, were each
+established on a real corpus document first (`Application_Compliance_Checklist_5_Apr_2021.xlsx`)
+and only then reproduced minimally.
+
 ## Writing a flat-XML corpus document by hand
 
 Two traps, both found the hard way:

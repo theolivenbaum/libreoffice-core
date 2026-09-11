@@ -1515,3 +1515,25 @@ dotnet/probes/words-seat-r94/plain-margins-crop.png	2026-09-11	current	26.2.4.2	
 dotnet/probes/words-seat-r94/results.md	2026-09-11	current	26.2.4.2	present	current	
 dotnet/probes/words-seat-r94/selfmove.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
 dotnet/probes/words-seat-r94/variant-columnx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/cond-format-r96/candidate-paths.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/candidates.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/census-cfrules.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/cfrule-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/colour-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/fixture-reference/painted.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/fixture-reference/rules.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/ink-movers.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/ink-nonmovers.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/keep.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/make-fixtures.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/pixel-diff.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/results.md	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/cond-format-r96/score-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/sweep-after-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/sweep-base-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/probes/cond-format-r96/sweep-ours.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md
+dotnet/tests/corpus/features/sheet-cf-blank-cells.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
+dotnet/tests/corpus/features/sheet-cf-contains-text.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
+dotnet/tests/corpus/features/sheet-cf-duplicate-values.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
+dotnet/tests/corpus/features/sheet-cf-ends-with.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
+dotnet/tests/corpus/features/sheet-cf-multi-range-anchor.xlsx	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r96/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/XlsxConditionalPredicateTests.cs
