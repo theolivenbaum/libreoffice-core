@@ -169,18 +169,24 @@ public sealed class BiffRecordReader
             // Absorb the continuations now, so that reading is a walk over one logical
             // payload and the caller never has to know a boundary exists.
             //
-            // `OBJ` is the one record that must not: it only ever appears inside a drawing
-            // block, where a bare `CONTINUE` carries the *drawing's* Escher bytes rather than
-            // the object's. Excel stops writing `MSODRAWING` records once a sheet's Escher
-            // stream passes the 8224-byte record ceiling and writes the rest as `CONTINUE`,
-            // still interleaved one-per-`OBJ` — so absorbing them here feeds the drawing's
-            // shapes into an object record that has already ended, and every shape after the
-            // ceiling is lost. LibreOffice reads the whole block with its own continuation
-            // handling switched off for exactly this reason (`XclImpDrawing::ReadMsoDrawing`
-            // calls `rStrm.ResetRecord(false)`, `sc/source/filter/excel/xiescher.cxx:4021`),
-            // and its `ReadObj` therefore never sees one either.
+            // `OBJ` and `TXO` are the two records that must not: they only ever appear inside a
+            // drawing block, where a bare `CONTINUE` carries the *drawing's* Escher bytes rather
+            // than the record's own. Excel stops writing `MSODRAWING` records once a sheet's
+            // Escher stream passes the 8224-byte record ceiling and writes the rest as
+            // `CONTINUE`, interleaved between the `OBJ` and `TXO` records that follow — so
+            // absorbing one here feeds the drawing's shapes into a record that has already
+            // ended, and every shape after the ceiling is lost. LibreOffice reads the whole
+            // block with its own continuation handling switched off for exactly this reason
+            // (`XclImpDrawing::ReadMsoDrawing` calls `rStrm.ResetRecord(false)`,
+            // `sc/source/filter/excel/xiescher.cxx:4021` in this tree), and neither its
+            // `ReadObj8` nor its `ReadTxo` therefore sees one.
+            //
+            // A `TXO`'s own two continuations — the characters and the formatting runs — are
+            // taken by <see cref="StartContinuation"/> from the code that knows the record
+            // declares them, which is what `ReadTxo` does at `xiescher.cxx:4242-4269`.
             int next = _segments[^1].End;
             while (id != BiffRecords.Obj
+                   && id != BiffRecords.Txo
                    && next + 4 <= _data.Length
                    && BinaryPrimitives.ReadUInt16LittleEndian(_data.AsSpan(next)) == BiffRecords.Continue)
             {
@@ -206,6 +212,48 @@ public sealed class BiffRecordReader
         => position >= 0 && position + 4 <= _data.Length
             ? BinaryPrimitives.ReadUInt16LittleEndian(_data.AsSpan(position))
             : (ushort)0;
+
+    /// <summary>
+    /// Extends the current record with the <c>CONTINUE</c> that follows it, if one does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the two records <see cref="MoveNext()"/> deliberately leaves unjoined. A <c>TXO</c>
+    /// declares how many characters and how many bytes of formatting run follow it, and each of
+    /// those arrives in one <c>CONTINUE</c> of its own; every further <c>CONTINUE</c> in the
+    /// block belongs to the drawing. So the caller that read the declaration asks for exactly as
+    /// many continuations as the record said there would be, which is
+    /// <c>XclImpDrawing::ReadTxo</c>'s <c>GetNextRecId() == EXC_ID_CONT &amp;&amp;
+    /// StartNextRecord()</c> (<c>sc/source/filter/excel/xiescher.cxx:4255</c>,
+    /// <c>:4264</c> in this tree).
+    /// </para>
+    /// <para>
+    /// The stream is re-validated when a segment is added, because a caller that has read the
+    /// record to its end has already tripped <see cref="IsValid"/> on the way there.
+    /// </para>
+    /// </remarks>
+    /// <returns>True when a continuation was found and joined.</returns>
+    public bool StartContinuation()
+    {
+        if (_nextRecordPos + 4 > _data.Length) return false;
+        if (BinaryPrimitives.ReadUInt16LittleEndian(_data.AsSpan(_nextRecordPos)) != BiffRecords.Continue)
+        {
+            return false;
+        }
+
+        int declared = BinaryPrimitives.ReadUInt16LittleEndian(_data.AsSpan(_nextRecordPos + 2));
+        AddSegment(_nextRecordPos + 4, declared);
+        _nextRecordPos = _segments[^1].End;
+
+        // Reading resumes at the continuation's first byte rather than wherever the previous
+        // segment was left, which is what `StartNextRecord` does. A `TXO`'s character
+        // continuation is padded past the last character on some writers, and the formatting
+        // runs are at the start of the next record, not after that padding.
+        _segment = _segments.Count - 1;
+        _position = _segments[_segment].Start;
+        IsValid = true;
+        return true;
+    }
 
     private void AddSegment(int start, int declared)
     {
