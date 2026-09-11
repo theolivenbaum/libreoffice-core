@@ -1717,3 +1717,38 @@ dotnet/probes/biff-reader-r98/results.md	2026-09-11	current	26.2.4.2	present	cur
 dotnet/probes/biff-reader-r98/name-token-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/biff-reader-r98/results.md
 dotnet/probes/biff-reader-r98/name-token-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/biff-reader-r98/results.md
 dotnet/probes/biff-reader-r98/xlsx-confinement.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/biff-reader-r98/results.md
+dotnet/probes/sheet-wrap-r99/base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/cand.list	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/control.list	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/fills.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/fodsrows.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/head.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/ink-togaf.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/movers.list	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/render-keep.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/Layout/SheetTextLayout.cs;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/sheet-wrap-r99/rowdiff.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/rowdump.cs	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/score.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/shape-span-colours.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/spans.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/sweep.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/tk-base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/tk-head.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/trailing-census.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/trailing-empty.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/trailing-ods.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/trailing-xlsx.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/txo-colour-census.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/txo-colour.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/txo-colour.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/txo-colour2.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/score-base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/score-head.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/gate-movers.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/fidelity-names.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/tests-nonfidelity.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/ink-base.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/ink-head.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/inkx-base.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-wrap-r99/inkx-head.txt	2026-09-11	current	26.2.4.2	present	current	
