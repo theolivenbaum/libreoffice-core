@@ -1355,3 +1355,11 @@ So:
 
 The general form, again: *before believing a measurement, check it is not a fact about the
 instrument.* Here the instrument reports success for work it never did.
+
+**It happens under contention, which is exactly when you are least likely to check.** The
+instance that produced this note came back `Passed! Failed: 0, Passed: 860` for a project whose
+real total is 1938, in a whole-solution run taken while two other rounds were building and
+rendering on the same machine — the same run showed fidelity at 18m42s and presentations at
+15m49s against their usual 3-5 minutes. Re-run alone, the project passed 1938 of 1938 in 45
+seconds. So when a run is slow because the machine is busy, **check every total**, and prefer
+re-running the one project that looks short over re-running the solution.
