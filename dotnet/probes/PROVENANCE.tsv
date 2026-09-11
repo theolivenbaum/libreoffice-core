@@ -1580,3 +1580,4 @@ dotnet/tests/corpus/features/sheet-cf-multi-range-anchor.xlsx	2026-09-11	current
 dotnet/probes/biff-condfmt-r97/census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/biff-condfmt-r97/results.md
 dotnet/probes/biff-condfmt-r97/census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/biff-condfmt-r97/results.md
 dotnet/probes/biff-condfmt-r97/results.md	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/o17-pivot-r97/results.md	2026-09-11	current	26.2.4.2	present	current	
