@@ -23,9 +23,24 @@ namespace Paperless.WordProcessing.Tests;
 /// <b>Every expectation here was read out of 26.2.4.2's own <c>.fodt</c> of
 /// <c>023_Unit_Circle_Chart_Circular_Percentage</c></b>, one <c>wp:extent</c> changed at a time on a
 /// 595.30 x 841.89 pt page (<c>probes/chart-fit-r97/framesize.py</c>). The document as authored
-/// states a 682.10 x 493.50 pt chart and the reference resolves it to <b>595.30 x 430.70</b>; the
-/// same page's picture given the same extent keeps 682.10 x 493.51, because the write-back is
-/// OLE-only although the squeeze is not.
+/// states a 682.10 x 493.50 pt chart and the reference resolves it to <b>595.30 x 430.70</b>.
+/// </para>
+/// <para>
+/// The flat ODT shows a squeeze only for an OLE object, because the write-back at :638-648 is
+/// OLE-only, so the wrap and node-kind rows were <em>rendered</em> instead
+/// (<c>probes/chart-fit-r97/nodekind.py</c>): the same picture given the chart's extent is drawn
+/// at all 682.10 pt with its authored <c>wrapNone</c> and at 595.30 x 430.70 with the wrap alone
+/// changed to <c>wrapSquare</c>, and the chart with its wrap alone changed to <c>wrapNone</c> is
+/// not squeezed either. The corpus states the rule once more without being asked:
+/// <c>fleetfastfacts16nov2023.docx</c>'s anchored 606.90 x 231.60 pt picture is drawn 595.30 x
+/// 227.20 on a 595.30 pt page.
+/// </para>
+/// <para>
+/// <b>Nothing here covers an as-character object</b>, which is a <c>SwFlyInContentFrame</c> and so
+/// not a <c>SwFlyFreeFrame</c> at all (<c>sw/source/core/inc/flyfrms.hxx</c>:212 against :150).
+/// 26.2.4.2 draws <c>tibs_guidelines_2.docx</c>'s 686.20 pt <c>wp:inline</c> picture at 686.20 pt
+/// on a 612 pt page. <see cref="FrameLayout.Place"/> is never called for one, so this needs no
+/// arm — but a future reader moving the squeeze elsewhere would have to put one back.
 /// </para>
 /// </remarks>
 public sealed class FrameSqueezedToPageTests
@@ -77,6 +92,14 @@ public sealed class FrameSqueezedToPageTests
     /// A frame holding neither a picture nor a chart has its two axes cut independently: :598
     /// reaches the proportional branch only for a <c>SwNoTextFrame</c> lower.
     /// </summary>
+    /// <remarks>
+    /// <b>This arm is read out of the C++ and is not measured.</b> The corpus states no witness for
+    /// it — <c>probes/chart-fit-r97/census.py</c> finds three oversize text boxes in one document,
+    /// <c>docs-quality-MA.IMS.00001-Integrated-Management-System-manual.docx</c>, and all three are
+    /// exempt for other reasons (two <c>wp:inline</c>, one wrap-through). It is here because the
+    /// bBot/bRig cuts at :571-585 run before the <c>IsNoTextFrame</c> test and leaving it out would
+    /// need its own justification, not because a rendering was compared.
+    /// </remarks>
     [Fact]
     public void ATextFrameKeepsTheAxisThatFits()
     {
@@ -93,8 +116,10 @@ public sealed class FrameSqueezedToPageTests
     /// <remarks>
     /// <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
     /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801), the guard on
-    /// <c>CheckClip</c>:493. <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 sets the
-    /// setting for every writerfilter import.
+    /// <c>CheckClip</c>:493. <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 is the only
+    /// setter of the setting in <c>sw/</c>, and it is the <em>OOXML</em> filter — RTF's own
+    /// <c>RtfFilter::setTargetDocument</c> (<c>RtfFilter.cxx</c>:191-195) sets nothing — so only the
+    /// DOCX reader turns it on.
     /// </remarks>
     [Theory]
     [InlineData(false, TextWrap.Both, 595.30)]
@@ -110,6 +135,38 @@ public sealed class FrameSqueezedToPageTests
                 frame, Page, Page.TextArea, Length.FromPoints(100),
                 disablesOffPagePositioning: disables)
             .Width.Points.ShouldBe(expectedWidth, 0.02);
+    }
+
+    /// <summary>
+    /// A drawing object is exempt whatever it holds, because it is not a fly.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CheckClip</c> is a <c>SwFlyFreeFrame</c> method and a shape is an
+    /// <c>SwAnchoredDrawObject</c>. <strong>A shape carrying a text box is still a shape</strong>:
+    /// <c>SwTextBoxHelper</c> pairs a draw format with a fly format, the fly holds the text and
+    /// goes through <c>CheckClip</c>, and what is drawn — fill, outline, the rectangle a
+    /// <see cref="PageFrame"/> models — stays the draw object. This is the opposite answer from
+    /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/>'s <c>bConsidered</c>, which
+    /// treats a TextBox shape <em>as</em> a fly.
+    /// </para>
+    /// <para>
+    /// Measured, because the other reading cut three corpus documents the reference does not cut:
+    /// <c>ABCD-WB-08-00 Weight and Balance Report</c> and <c>ABCD-FE-01-00 Flight Envelope</c>
+    /// each state a <c>wrapSquare</c> <c>wp:anchor</c>/<c>wps:txbx</c> banner 739.25 x 56.85 pt in
+    /// a running head on a 595.30 pt page, and <c>ABCD-SDE-23-00 - Avionic System Description</c>
+    /// one of 839.80 x 56.85 — and 26.2.4.2 draws 739.2 and 839.8 pt of them, off the sheet.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(FrameObjectKind.Shape, 682.10)]
+    [InlineData(FrameObjectKind.TextBoxShape, 682.10)]
+    [InlineData(FrameObjectKind.Fly, 595.30)]
+    public void ADrawingObjectIsNotAFlyAndIsNotCut(FrameObjectKind kind, double expectedWidth)
+    {
+        PageFrame frame = Frame(682.10, 493.50) with { ObjectKind = kind };
+
+        Place(frame).Width.Points.ShouldBe(expectedWidth, 0.02);
     }
 
     /// <summary>The witness's own anchor: 45.36 pt below a paragraph at the top of the body.</summary>

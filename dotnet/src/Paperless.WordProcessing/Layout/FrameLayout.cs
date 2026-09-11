@@ -324,19 +324,45 @@ public static class FrameLayout
     ///   <item><term>393.70 x 236.22 — neither</term><description>unchanged</description></item>
     /// </list>
     /// <para>
-    /// The same document's <em>picture</em> given the chart's extent keeps 682.10 x 493.51 in the flat
-    /// ODT, which is the write-back being OLE-only and not the squeeze being OLE-only: :598 admits a
-    /// graphic node too. Re-importing the flat ODT with the chart frame enlarged back to 682.10
-    /// squeezes it again, so this is layout rather than either import.
+    /// <strong>The flat ODT can only see an OLE object, so the other three cases were rendered</strong>
+    /// (<c>probes/chart-fit-r97/nodekind.py</c>), one attribute changed at a time on the same
+    /// document and the drawn width read back out of 26.2.4.2's PDF. The write-back at :638-648 is
+    /// what puts a squeeze in the flat ODT and it is OLE-only, but the squeeze itself is not:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>the chart, <c>wrapSquare</c></term><description>682.10 -> <b>595.30 x 430.70</b></description></item>
+    ///   <item><term>the chart, wrap alone changed to <c>wrapNone</c></term><description><b>not squeezed</b> — its pie grows by 682.10/595.30</description></item>
+    ///   <item><term>the picture given the chart's extent, <c>wrapNone</c> as authored</term><description><b>not squeezed</b> — drawn 682.10 x 493.50, running 334 pt off the sheet</description></item>
+    ///   <item><term>the same picture, wrap alone changed to <c>wrapSquare</c></term><description>682.10 -> <b>595.30 x 430.70</b></description></item>
+    /// </list>
+    /// <para>
+    /// So it is the wrap that decides and not the node kind, which is the escape below; and a graphic
+    /// node is squeezed exactly as an OLE node is. The corpus carries the same rule unprompted:
+    /// <c>fleetfastfacts16nov2023.docx</c> anchors a 606.90 x 231.60 pt picture on a 595.30 pt page
+    /// and 26.2.4.2 draws it at <b>595.30 x 227.20</b>, flush with the left edge.
+    /// </para>
+    /// <para>
+    /// <strong>An as-character object is not a free fly and is never squeezed.</strong>
+    /// <c>SwFlyInContentFrame</c> derives from <c>SwFlyFrame</c> and not from <c>SwFlyFreeFrame</c>
+    /// (<c>sw/source/core/inc/flyfrms.hxx</c>:212 against :150), whose method this is. Measured:
+    /// <c>tibs_guidelines_2.docx</c> holds a 686.20 pt <c>wp:inline</c> picture on a 612 pt page and
+    /// 26.2.4.2 draws all 686.20 pt of it, and <c>PES-Technical-Report-Template_Jan_2019.docx</c>'s
+    /// 612.50 x 792.70 pt one on a 612 x 792 pt page likewise. Nothing is needed here for that:
+    /// <see cref="Place"/> is not called for an as-character frame at all — those hang on a line in
+    /// <c>HangInline</c> — so this method only ever sees a free fly.
     /// </para>
     /// <para>
     /// <strong>Three of the C++'s own sub-conditions are not modelled</strong>, each of which only
     /// stops the frame being *moved* first and so squeezes a frame that fits: a fly in a header
     /// (:497-503), a fly carrying anchored objects of its own, and a fly inside a table. And the
     /// escape is <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
-    /// (<c>anchoredobject.cxx</c>:790-801), which needs <c>DisableOffPagePositioning</c> — set by
-    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 for DOCX and RTF and by nobody else —
-    /// <em>and</em> a wrap-through object.
+    /// (<c>anchoredobject.cxx</c>:790-801), which needs <c>DisableOffPagePositioning</c> — whose only
+    /// setter anywhere in <c>sw/</c> is <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333, the
+    /// <em>OOXML</em> filter's <c>setTargetDocument</c>, and <strong>not</strong> RTF's:
+    /// <c>RtfFilter::setTargetDocument</c> (<c>RtfFilter.cxx</c>:191-195) assigns the document and
+    /// sets no property at all, and <c>filter/source/config/fragments/filters/Rich_Text_Format.xcu</c>
+    /// names <c>com.sun.star.comp.Writer.RtfFilter</c> as its service — <em>and</em> a wrap-through
+    /// object.
     /// </para>
     /// </remarks>
     /// <param name="frame">The frame, for what it holds.</param>
@@ -346,12 +372,28 @@ public static class FrameLayout
     private static DocRect Squeezed(
         PageFrame frame, DocRect page, DocRect placed, bool disablesOffPagePositioning)
     {
-        // A *drawing object* is not a fly and never reaches `SwFlyFreeFrame::CheckClip` at all:
-        // it is an `SwAnchoredDrawObject`, whose `MakeObjPos` adjusts the position and nothing
-        // else. Only the DOCX reader tells the two apart (`FrameObjectKind`), so an ODF or RTF
-        // custom shape wider than its page is squeezed here where the reference would leave it —
-        // the same gap `CapturesWrappedObjects` records, in the same place.
-        if (frame.ObjectKind == FrameObjectKind.Shape) return placed;
+        // A *drawing object* is not a fly and never reaches `SwFlyFreeFrame::CheckClip` at all: it
+        // is an `SwAnchoredDrawObject`, whose `MakeObjPos` adjusts the position and nothing else.
+        //
+        // **That includes a shape carrying a text box**, which `CapturesAnchoredObjectsOnPage`'s
+        // `bConsidered` treats as a fly and this must not. `SwTextBoxHelper` pairs a *draw* format
+        // with a fly format; the fly holds the text and goes through `CheckClip`, and the shape —
+        // its fill, its outline, the rectangle that is actually drawn — stays a draw object. A
+        // `PageFrame` here is the drawing, so both shape kinds are exempt.
+        //
+        // Measured, because reading it the other way regressed three corpus documents before it
+        // was caught. `ABCD-WB-08-00 Weight and Balance Report`, `ABCD-FE-01-00 Flight Envelope`
+        // and `ABCD-SDE-23-00 - Avionic System Description` each state a `wrapSquare`
+        // `wp:anchor`/`wps:txbx` banner in a running head — 739.25 x 56.85 pt on a 595.30 pt page
+        // for the first two, 839.80 x 56.85 for the third — and 26.2.4.2 draws all of
+        // 739.2 and 839.8 of them, running off the sheet. The same documents' *pictures* are cut:
+        // `b053-19.docx`'s header picture is 612.5 pt on a 612 pt page and the reference draws it
+        // 612.0 x 87.75, which is this method's own arithmetic.
+        //
+        // Only the DOCX reader tells the kinds apart (`FrameObjectKind`), so an ODF or RTF custom
+        // shape wider than its page is squeezed here where the reference would leave it — the same
+        // gap `CapturesWrappedObjects` records, in the same place.
+        if (frame.ObjectKind is FrameObjectKind.Shape or FrameObjectKind.TextBoxShape) return placed;
 
         if (disablesOffPagePositioning && frame.Wrap == TextWrap.Through) return placed;
 

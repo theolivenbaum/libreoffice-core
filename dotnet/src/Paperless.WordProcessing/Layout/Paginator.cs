@@ -178,11 +178,15 @@ public sealed record PaginationOptions
     /// <see cref="FrameLayout.Place"/>'s squeeze for what the setting exempts an object from.
     /// </para>
     /// <para>
-    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 sets it for every writerfilter
-    /// import, which is DOCX <em>and</em> RTF, one line below the
-    /// <c>DoNotCaptureDrawObjsOnPage</c> that <see cref="CapturesAnchoredObjectsOnPage"/> carries.
-    /// The WW8 binary filter and the ODF one do not set it at all, so it is off in
-    /// <see cref="Default"/> and in <see cref="Word"/>.
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 is its <strong>only</strong> setter
+    /// in the whole of <c>sw/</c>, one line below the <c>DoNotCaptureDrawObjsOnPage</c> that
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> carries — and that file is the <em>OOXML</em>
+    /// filter. <strong>RTF does not share it</strong>, although it shares the writerfilter tokeniser:
+    /// <c>Rich_Text_Format.xcu</c> names <c>com.sun.star.comp.Writer.RtfFilter</c> as its service and
+    /// <c>RtfFilter::setTargetDocument</c> (<c>sw/source/writerfilter/filter/RtfFilter.cxx</c>:191-195)
+    /// sets no document property whatsoever. The WW8 binary filter and the ODF one do not set it
+    /// either, so it is off in <see cref="Default"/> and in <see cref="Word"/> and true only for
+    /// DOCX.
     /// </para>
     /// </remarks>
     public bool DisablesOffPagePositioning { get; init; }

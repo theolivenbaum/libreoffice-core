@@ -1669,7 +1669,8 @@ public static partial class ChartLayout
     /// <remarks>
     /// <para>
     /// tdf#48041, in <c>VCartesianAxis::estimateMaximumAutoMainIncrementCount</c>
-    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1577-1616). Every tick of the pass just
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1578-1600, lowering the estimate at
+    /// :1611-1615). Every tick of the pass just
     /// finished is formatted through the axis' own number format, the longest run of consecutive
     /// equal strings is counted, and the estimate is lowered to
     /// <c>m_aAllTickInfos[0].size() / (nMaxSameLabel + 1)</c> whenever that is smaller. It is
@@ -1677,7 +1678,7 @@ public static partial class ChartLayout
     /// </para>
     /// <para>
     /// <strong>The comparison starts against an empty string</strong> — <c>OUString
-    /// sPreviousValueLabel;</c> at :1581, and the first tick is compared with it before it is ever
+    /// sPreviousValueLabel;</c> at :1582, and the first tick is compared with it before it is ever
     /// assigned. So an axis whose <em>first</em> tick formats to nothing scores one repeat although
     /// no two of its labels are alike, and its cap is halved. That is not an incidental detail: it
     /// is the whole of the disagreement on <c>048_Expense_trends_budget</c>, whose value axis
@@ -1710,7 +1711,7 @@ public static partial class ChartLayout
         int longest = 0;
 
         // The seed is the empty string and the first tick is compared against it, exactly as
-        // :1581-1596 does. Reading this as "no two labels are alike" would miss the witness.
+        // :1582-1597 does. Reading this as "no two labels are alike" would miss the witness.
         string previous = string.Empty;
 
         foreach (double tick in scale.MajorTicks())

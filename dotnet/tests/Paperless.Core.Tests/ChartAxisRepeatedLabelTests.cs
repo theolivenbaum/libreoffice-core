@@ -13,11 +13,11 @@ namespace Paperless.Core.Tests;
 /// <remarks>
 /// <para>
 /// tdf#48041's arm of <c>VCartesianAxis::estimateMaximumAutoMainIncrementCount</c>
-/// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1577-1616): every tick of the pass just
+/// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1578-1600): every tick of the pass just
 /// finished is formatted through the axis' number format, the longest run of consecutive equal
 /// strings is counted, and the estimate is lowered to
 /// <c>m_aAllTickInfos[0].size() / (nMaxSameLabel + 1)</c> when that is smaller. Its comparison
-/// starts against an <em>empty</em> <c>OUString</c> (:1581), so a first tick that draws nothing
+/// starts against an <em>empty</em> <c>OUString</c> (:1582), so a first tick that draws nothing
 /// scores a repeat although no two of the axis' labels are alike.
 /// </para>
 /// <para>
@@ -103,7 +103,7 @@ public class ChartAxisRepeatedLabelTests
     /// <c>0,,"M"</c> scales by a million, so every tick of a 0…500 axis rounds to <c>0M</c> and
     /// ten of the eleven are repeats: <c>11 / 11 = 1</c>, raised to the floor of two by
     /// <c>ScaleAutomatism::setMaximumAutoMainIncrementCount</c>'s clamp
-    /// (<c>chart2/source/view/axes/ScaleAutomatism.cxx</c>:143-151).
+    /// (<c>chart2/source/view/axes/ScaleAutomatism.cxx</c>:142-150).
     /// </remarks>
     [Fact]
     public void RepeatsInsideTheAxisLowerItToo()
