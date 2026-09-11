@@ -105,8 +105,9 @@ public class PptOdfPlacementTests
 
                 if (slide == 1 && shape == 1)
                 {
-                    // The one shape whose height the two paths are NOT allowed to agree on. See
-                    // TheBinarysGrownShapeIsWhatTwentySixTwoResolvesForIt.
+                    // The deck's ellipse: the one shape whose height the two paths are NOT
+                    // allowed to agree on, because 26.2.4.2 does not resolve it the same way
+                    // through them either. See the remarks on GrownEllipsePoints.
                     mine.Height.Points.ShouldBe(GrownEllipsePoints, TolerancePoints, $"{where}: height");
                     continue;
                 }
