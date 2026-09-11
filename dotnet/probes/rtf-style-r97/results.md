@@ -111,13 +111,20 @@ reproduces r95's rule **20 of 20**. The docstring records it, and this is the ro
 instance of *the measurement was measuring the instrument*.
 
 `pool-resolved-2.txt` and `pool-resolved-3.txt` are the corrected readings, and **they are the
-reference's side only** — the flat ODF is an instrument this tree has no counterpart for. Our side
-is checked by the test suite rather than by a 116-row raster comparison: `RtfStyleFormattingTests`
-carries **36 cases** over these names, 28 of them added by this round, each transcribed from these
-two files; §7 shows which fail at the base. `measurepool.py` — the both-sides raster
-measurer the salvaged draft cited a table from — is kept in this directory **unrun**, because the
-disk this round had (3.2 GB, five rounds live) did not stretch to 232 more PDFs. That is a gap and
-it is stated as one.
+reference's side only** — the flat ODF is an instrument this tree has no counterpart for. The
+common channel is the raster, and `measurepool.py` is it: both sides rendered to PDF, HEAD's drawn
+size, face and the baseline gaps either side read out with PyMuPDF.
+
+| | agree | differ |
+|---|---:|---:|
+| `genpool2.py` — 10 names × 3 arms × 2 `Normal` sizes (`both-sides-2.txt`) | **60** | **0** |
+| `genpool3.py` — 14 names × 2 arms × 2 `Normal` sizes (`both-sides-3.txt`) | **52** | **4** |
+| total | **112** | **4** |
+
+**The four are `List Indent`** — `p_listindent_{plain,withcap}_{20,28}`, the `COLL_TEXT`
+intermediate this round deliberately does not model (§5) — and they are reported as differing
+rather than dropped. Beside the raster, `RtfStyleFormattingTests` carries **36 cases** over these
+names, 28 of them added by this round; §7 shows which fail at the base.
 
 At 26.2.4.2:
 
@@ -319,8 +326,9 @@ never reaches either. 26.2.4.2 answers the document's own `Normal` size with `0i
 *Text body*; this tree answers `\pard\plain`'s twelve points and no spacing.
 `AnIntermediateBelowTextBodyIsNotModelledYet` pins it, and it is left open for two reasons:
 `RtfStyleFormatting` carries no proportional line spacing, and the reach is **nil** — 0 of 338 apply
-any `COLL_TEXT`-parented name. Four of the 116 probes are these and are reported as differing rather
-than quietly dropped.
+any `COLL_TEXT`-parented name. It is `N17` in the register. Four of the 116 both-sides probes are
+these and are **the only four that differ**; `both-sides-3.txt` shows the reference at 10/14 pt with
+20.25/20.89 pt below against this tree's 12 pt and 11.52.
 
 **The rest of `ConvertStyleName`'s map and the rest of the 126 pool styles.** `PoolParentOf` holds
 the names this round measured plus the numeric siblings of measured families. Specifically not
@@ -332,8 +340,9 @@ other named map entries whose Writer style exists. None of the 84 applied names 
 the walk stops, so a `Normal` stating bold or a colour does not reach a heading-parented style
 although §1 establishes that `COLL_HEADLINE_BASE`'s parent is `COLL_STANDARD`. That is r87's and
 r95's model unchanged; this round did not measure it and deliberately did not change it, because the
-nine headings are 12 of 338 documents and a wrong answer there is far more expensive than the two
-this round is about. **It is the obvious next seat.**
+nine headings are 12 of 338 documents — three times this round's candidate set — and a wrong answer
+there is far more expensive than the two this round is about. **It is the obvious next seat, and it
+is `O25` in the register.**
 
 **A candidate residual that turned out not to be one, recorded because the first reading of it was
 wrong.** `corpusfodt.txt` shows 26.2.4.2 giving `231164`'s `Figure` paragraph
@@ -351,8 +360,11 @@ The container restart's commit is `f7f5572aa` and none of it had been run. Re-me
 things, in descending order of how much they mattered:
 
 1. **`pool-resolved-2.txt` was empty** — a header line and no rows. The draft's table of "60 agree,
-   0 differ" for `genpool2` had no evidence on disk at all, and neither did §4's "112 agree, 4
-   differ" over both generators; `measurepool.py` had produced no output. The 60 rows now exist.
+   0 differ" for `genpool2` had no evidence on disk at all, and neither did its "112 agree, 4
+   differ" over both generators; `measurepool.py` had produced no output. Re-run, both of those
+   numbers turn out to be **right** — which is the least comfortable of the five findings, because
+   a claim that is correct and unsupported is indistinguishable from one that is neither until
+   somebody runs it. The 60 fodt rows and the 116 raster rows now exist.
 2. **`readfodt.py` was reading the wrong thing on the `own` arm** (§2). Left uncorrected it reports
    that a style's own `\fs` *does* reach the paragraph, contradicting O9 on eight probes.
 3. **The reach figure was a count of documents that declare a name.** `reach-census.txt` says

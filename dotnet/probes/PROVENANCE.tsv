@@ -454,6 +454,8 @@ dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	prese
 dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-style-r97/both-sides-2.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/rtf-style-r97/both-sides-3.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/rtf-style-r97/corpusfodt.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/rtf-style-r97/corpusfodt.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/rtf-style-r97/genpool2.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/rtf-style-r97/results.md;dotnet/probes/OPEN-ISSUES.md
