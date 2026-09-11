@@ -441,6 +441,9 @@ internal static class BiffChartFixture
     public const ushort ChBegin = 0x1033;
     public const ushort ChEnd = 0x1034;
     public const ushort ChAxesSet = 0x1041;
+
+    /// <summary><c>CHFRAMEPOS</c>, <c>xlchart.hxx</c>:641.</summary>
+    public const ushort ChFramePos = 0x104F;
     public const ushort ChTypeGroup = 0x1014;
     public const ushort ChSeriesGroup = 0x1045;
     public const ushort ChValueRange = 0x101F;

@@ -388,6 +388,26 @@ public static partial class ChartLayout
     /// </remarks>
     private static readonly Length PieMargin = Length.FromMm100(350);
 
+    /// <summary>How many chart units a BIFF chart's frame is divided into on each axis.</summary>
+    /// <remarks><c>EXC_CHART_TOTALUNITS</c>, <c>sc/source/filter/inc/xlchart.hxx</c>:163.</remarks>
+    private const int ChartTotalUnits = 4000;
+
+    /// <summary>
+    /// The border a BIFF chart's unit grid leaves at each edge, in hundredths of a millimetre.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclChRootData::InitConversion</c> (<c>sc/source/filter/excel/xlchart.cxx</c>:1245-1251,
+    /// this tree) takes <c>GetHmmFromPixelX(5.0)</c> off each edge before dividing the rest into
+    /// <see cref="ChartTotalUnits"/>. A screen pixel is <c>XclRootData</c>'s
+    /// <c>mfScreenPixelX</c>, initialised to <strong>50.0</strong> hundredths of a millimetre
+    /// (<c>xlroot.cxx</c>:105) and replaced only when an active frame can be asked for its device
+    /// (<c>:150-163</c>) — which headless conversion cannot, so the default stands and five
+    /// pixels is 250. That is the reference this project calibrates against, and it is measured:
+    /// solving the two charts of <c>Template Pilot Logbook JAR-FCL V3.0.xls</c> for the gap gives
+    /// 249.7 and 249.4 against 26.2.4.2's own resolved plot rectangles.
+    /// </remarks>
+    private const int ChartBorderGapMm100 = 250;
+
     /// <summary>The gap between the legend and the diagram, left or right.</summary>
     /// <remarks>
     /// <para>
@@ -1770,6 +1790,37 @@ public static partial class ChartLayout
     /// proportional margin.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The outer plot rectangle a BIFF chart states, resolved against the frame, or null.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChRoot::CalcHmmFromChartRect</c> (<c>sc/source/filter/excel/xichart.cxx</c>:320-327,
+    /// this tree) run in hundredths of a millimetre, which is the unit its integer truncation is
+    /// defined in. Its border gap is added to the <em>width</em> as well as to the position — that
+    /// is what the function does, and both charts of <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>
+    /// confirm it against 26.2.4.2's own resolved model, in x and in y.
+    /// </remarks>
+    private static DocRect? StatedOuterArea(ChartPlot plot, DocRect frame)
+    {
+        if (plot.OuterPlotAreaUnits is not { } units) return null;
+
+        static long Resolve(long span, int chartUnits)
+        {
+            double unit = Math.Max(span - (2 * ChartBorderGapMm100), ChartBorderGapMm100)
+                          / (double)ChartTotalUnits;
+            return (long)((unit * chartUnits) + ChartBorderGapMm100 + 0.5);
+        }
+
+        long width = frame.Width.Mm100;
+        long height = frame.Height.Mm100;
+
+        return new DocRect(
+            frame.X + Length.FromMm100(Resolve(width, units.X)),
+            frame.Y + Length.FromMm100(Resolve(height, units.Y)),
+            Length.FromMm100(Resolve(width, units.Width)),
+            Length.FromMm100(Resolve(height, units.Height)));
+    }
+
     private static DocRect DiagramAreaOf(ChartPlot plot, DocRect frame, ChartText measurer)
     {
         Length marginX = plot.Kind is ChartPlotKind.Pie or ChartPlotKind.OfPie && !plot.Rings
@@ -1876,7 +1927,9 @@ public static partial class ChartLayout
         // The computed path, which is what every OOXML chart takes: the outer rectangle, then the
         // axes' labels and titles out of it — AXIS2D_TICKLENGTH and AXIS2D_TICKLABELSPACING for
         // the gaps, ChartView.cxx:1070-1077 for the axis titles.
-        DocRect area = DiagramAreaOf(plot, frame, measurer);
+        // A BIFF chart states that outer rectangle instead of leaving it to be computed, and the
+        // labels still come out of it: setDiagramPositionIncludingAxes.
+        DocRect area = StatedOuterArea(plot, frame) ?? DiagramAreaOf(plot, frame, measurer);
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return DocRect.Empty;
 
         Length left = area.Left;

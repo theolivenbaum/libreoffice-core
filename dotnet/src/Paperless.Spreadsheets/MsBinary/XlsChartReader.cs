@@ -42,6 +42,17 @@ internal static class BiffChartRecords
     public const ushort AxesSet = 0x1041;
 
     /// <summary>
+    /// <c>CHFRAMEPOS</c> — a frame's position and size, in the units of its parent.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_ID_CHFRAMEPOS</c>, <c>sc/source/filter/inc/xlchart.hxx</c>:641. Read by
+    /// <c>XclImpChFramePos::ReadChFramePos</c> (<c>xichart.cxx</c>:441-452): two 16-bit modes and
+    /// then four 16-bit values each padded to 32 bits, whose upper halves the spec says may hold
+    /// garbage.
+    /// </remarks>
+    public const ushort FramePos = 0x104F;
+
+    /// <summary>
     /// <c>CHPROPERTIES</c>, whose empty mode decides what a blank cell plots as.
     /// </summary>
     /// <remarks><c>EXC_ID_CHPROPERTIES</c>, <c>sc/source/filter/inc/xlchart.hxx:596</c>.</remarks>
@@ -115,6 +126,9 @@ internal sealed class XlsChartBuilder
 
     private string? _pendingText;
     private int _pendingLink = -1;
+
+    private (int X, int Y, int Width, int Height)? _outerPlotArea;
+    private bool _manualPlotArea;
 
     private int _axis = -1;
     private bool _valueGrid;
@@ -411,6 +425,14 @@ internal sealed class XlsChartBuilder
                 _axesSet = stream.ReadUInt16();
                 break;
 
+            // The plot area, stated. Only the primary axes set's counts —
+            // XclImpChChart::Convert reads mxPrimAxesSet->GetPlotAreaFramePos() and no other
+            // (xichart.cxx:4031) — and only when both ends are placed in the parent's units.
+            case BiffChartRecords.FramePos
+                when InnermostIs(BiffChartRecords.AxesSet) && _axesSet == PrimaryAxesSet:
+                ReadPlotAreaPos(stream);
+                break;
+
             case BiffChartRecords.TypeGroup:
                 ReadTypeGroup(stream);
                 break;
@@ -428,9 +450,13 @@ internal sealed class XlsChartBuilder
                 break;
 
             case BiffChartRecords.Properties:
-                _visibleCellsOnly = (stream.ReadUInt16() & ShowVisibleOnly) != 0;
+            {
+                ushort flags = stream.ReadUInt16();
+                _visibleCellsOnly = (flags & ShowVisibleOnly) != 0;
+                _manualPlotArea = (flags & UseManualPlotArea) != 0;
                 _blanksAsZero = stream.ReadByte() == EmptyCellsAsZero;
                 break;
+            }
 
             case BiffChartRecords.Legend:
                 _hasLegend = true;
@@ -597,6 +623,7 @@ internal sealed class XlsChartBuilder
             TextFamily = FamilyOf(fonts),
             Background = _background?.Resolve(fonts),
             PlotBackground = _plotBackground?.Resolve(fonts),
+            OuterPlotAreaUnits = _manualPlotArea ? _outerPlotArea : null,
         };
 
         // Each of the three is overridden only where the substream names a font for it, so a
@@ -1126,6 +1153,36 @@ internal sealed class XlsChartBuilder
     /// all of which fall through <c>ReadSubRecord</c> to <c>maType.ReadChType</c>
     /// (<c>:2714-2715</c>) — so <see cref="SetKind"/> files it against whichever group is open.
     /// </remarks>
+    /// <summary>Reads the primary axes set's <c>CHFRAMEPOS</c> — the outer plot rectangle.</summary>
+    /// <remarks>
+    /// <para>
+    /// The record is four 16-bit values each followed by two ignored bytes
+    /// (<c>XclImpChFramePos::ReadChFramePos</c>, <c>xichart.cxx</c>:441-452). Both position modes
+    /// have to be <c>EXC_CHFRAMEPOS_PARENT</c> or <c>XclImpChChart::Convert</c> (<c>:4035</c>)
+    /// leaves the plot area alone.
+    /// </para>
+    /// <para>
+    /// The units are 1/4000 of the frame and stay that way until layout, which is the only place
+    /// the frame is known; <see cref="ChartPlot.OuterPlotAreaUnits"/> carries the conversion.
+    /// </para>
+    /// </remarks>
+    private void ReadPlotAreaPos(BiffRecordReader stream)
+    {
+        ushort topLeft = stream.ReadUInt16();
+        ushort bottomRight = stream.ReadUInt16();
+        if (topLeft != FramePosParent || bottomRight != FramePosParent) return;
+
+        int x = stream.ReadInt16();
+        stream.Skip(2);
+        int y = stream.ReadInt16();
+        stream.Skip(2);
+        int width = stream.ReadInt16();
+        stream.Skip(2);
+        int height = stream.ReadInt16();
+
+        if (width > 0 && height > 0) _outerPlotArea = (x, y, width, height);
+    }
+
     private void ReadTypeGroup(BiffRecordReader stream)
     {
         stream.Skip(18);
@@ -1533,6 +1590,21 @@ internal sealed class XlsChartBuilder
 
     /// <summary><c>EXC_CHPROPS_SHOWVISIBLEONLY</c>, <c>xlchart.hxx</c>:599.</summary>
     private const ushort ShowVisibleOnly = 0x0002;
+
+    /// <summary>
+    /// <c>EXC_CHPROPS_USEMANPLOTAREA</c>, <c>xlchart.hxx</c>:601 — "manual plot area layout in
+    /// CHFRAMEPOS record".
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChChart::IsManualPlotArea</c> (<c>xichart.cxx</c>:3973-3977) is this flag or
+    /// BIFF5-and-earlier, "there is no real automatic mode in BIFF5 charts". Only the flag is
+    /// modelled: every one of the corpus' sixteen BIFF chart substreams sets it, so the
+    /// generation arm has no witness to separate it from this one.
+    /// </remarks>
+    private const ushort UseManualPlotArea = 0x0010;
+
+    /// <summary><c>EXC_CHFRAMEPOS_PARENT</c>, <c>xlchart.hxx</c>:643.</summary>
+    private const ushort FramePosParent = 2;
 
     private const ushort MajorGridLine = 1;
 

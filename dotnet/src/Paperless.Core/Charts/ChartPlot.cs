@@ -1462,6 +1462,38 @@ public sealed partial record ChartPlot
     public (double X, double Y, double Width, double Height)? PlotAreaFraction { get; init; }
 
     /// <summary>
+    /// The <em>outer</em> plot rectangle a BIFF chart states, in 1/4000 of the chart frame.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CHFRAMEPOS</c> (0x104F) inside the primary <c>CHAXESSET</c> group. A BIFF chart has no
+    /// real automatic plot area: <c>XclImpChChart::Convert</c>
+    /// (<c>sc/source/filter/excel/xichart.cxx</c>:4030-4048, this tree) hands the record's
+    /// rectangle straight to <c>XDiagramPositioning</c> whenever
+    /// <c>IsManualPlotArea()</c> holds and both position modes are
+    /// <c>EXC_CHFRAMEPOS_PARENT</c>, so no layout heuristic runs at all.
+    /// </para>
+    /// <para>
+    /// It is the rectangle <em>including</em> the axes' labels and excluding their titles —
+    /// <c>setDiagramPositionIncludingAxes</c> — which is why it stands beside
+    /// <see cref="PlotArea"/> (ODF's inner <c>chart:coordinate-region</c>) rather than replacing
+    /// it: what it supplies is the rectangle the labels are then taken out of.
+    /// </para>
+    /// <para>
+    /// Kept in chart units rather than resolved by the reader because the conversion needs the
+    /// frame: <c>XclImpChRoot::CalcHmmFromChartX</c> (<c>:310-318</c>) is
+    /// <c>unit * n + gap</c> with <c>unit = (frame - 2 * gap) / 4000</c> and
+    /// <c>gap = GetHmmFromPixelX(5.0)</c> (<c>xlchart.cxx</c>:1245-1251). The gap is
+    /// <strong>250 in hundredths of a millimetre</strong> for the headless reference, because
+    /// <c>XclRootData</c>'s screen-pixel width keeps its 50.0 default when there is no active
+    /// frame to ask (<c>xlroot.cxx</c>:105 against :150-163) — and headless conversion has none.
+    /// Measured against 26.2.4.2's own resolved model in
+    /// <c>probes/chart-resid-r99/results.md</c> §1.
+    /// </para>
+    /// </remarks>
+    public (int X, int Y, int Width, int Height)? OuterPlotAreaUnits { get; init; }
+
+    /// <summary>
     /// Whether a pie is drawn as concentric rings — a doughnut — rather than as one filled disc.
     /// </summary>
     /// <remarks>
