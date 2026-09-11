@@ -1664,3 +1664,22 @@ dotnet/probes/cond-format-r97/score-witnesses.sh	2026-09-11	current	26.2.4.2	pre
 dotnet/probes/cond-format-r97/sweep-after-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r97/results.md
 dotnet/probes/cond-format-r97/sweep-base-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r97/results.md
 dotnet/probes/cond-format-r97/sweep-keep.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/cond-format-r97/results.md
+dotnet/probes/sheet-rows-r98/base-ods-rows.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/compare-ods.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/condfont-reach.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/condfont-reach.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/confine-base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/confine-head.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/confine.list	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/five-base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/five-head.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/fodscells.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/fodsrows.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/fodsstyles.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/head-ods-rows.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/mkprobe.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/render-ours.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/results.md	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/sweep-ours.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/variant.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-rows-r98/variants.md	2026-09-11	current	26.2.4.2	present	current	

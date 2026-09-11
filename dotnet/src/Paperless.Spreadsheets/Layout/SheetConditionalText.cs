@@ -1,5 +1,6 @@
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -60,10 +61,24 @@ public readonly record struct SheetConditionalText
     /// <summary>The face, or null to keep the cell's own.</summary>
     public string? FontFamily { get; init; }
 
+    /// <summary>
+    /// The generic class the rule's face was declared with, for the substitution its name alone
+    /// does not settle, or null to keep the cell's own.
+    /// </summary>
+    /// <remarks>
+    /// It travels with <see cref="FontFamily"/> and only with it: a rule that replaces the face
+    /// replaces what the face falls back to, and one that is silent about the face must leave
+    /// both alone. An ODF conditional style carries the pair on its own
+    /// <c>style:text-properties</c> exactly as a cell style does, so the reader has it to hand;
+    /// a SpreadsheetML <c>&lt;dxf&gt;</c> states no such thing and leaves this null.
+    /// </remarks>
+    public FontFamilyClass? DeclaredFontClass { get; init; }
+
     /// <summary>True when the rule changes nothing about the text.</summary>
     public bool IsNone
         => Colour is null && IsStruckThrough is null && FontWeight is null && IsItalic is null
-           && Underline is null && FontSize is null && FontFamily is null;
+           && Underline is null && FontSize is null && FontFamily is null
+           && DeclaredFontClass is null;
 
     /// <summary>Applies this rule's properties over what a cell states.</summary>
     /// <param name="stated">The format the cell would be drawn in with no rule matching.</param>
@@ -81,6 +96,7 @@ public readonly record struct SheetConditionalText
             Underline = Underline ?? stated.Underline,
             FontSize = FontSize ?? stated.FontSize,
             FontFamily = FontFamily ?? stated.FontFamily,
+            DeclaredFontClass = DeclaredFontClass ?? stated.DeclaredFontClass,
         };
     }
 }
