@@ -152,8 +152,7 @@ public sealed class SheetPictureCropTests
         => ClipsOf(name).ShouldBeGreaterThan(0);
 
     /// <summary>
-    /// And an uncropped one takes no clip <em>of its own</em> — the one clip the page emits is
-    /// the drawing layer's, which every page carrying a drawing now takes.
+    /// And an uncropped one takes no clip at all when its picture stays inside the printed block.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -162,22 +161,35 @@ public sealed class SheetPictureCropTests
     /// <c>a:alphaModFix</c> and no crop.
     /// </para>
     /// <para>
-    /// <strong>This asserted zero until round 92, on the reasoning that "an unconditional clip
-    /// would put a <c>q</c>/<c>W n</c>/<c>Q</c> into every rendering carrying a picture and change
-    /// all of them for nothing".</strong> The premise is right and the conclusion was wrong: the
-    /// reference emits exactly that clip, from the paint region
-    /// <c>ScOutputData::PrePrintDrawingLayer</c> hands <c>BeginDrawLayers</c>
-    /// (<c>sc/source/ui/view/output3.cxx</c>:41-102), and it is not for nothing — see
-    /// <see cref="Layout.SheetPageGraphics"/>. Measured over the sheets track: it changes 164
-    /// renderings' bytes, of which <b>83 are pixel-identical</b> and 81 are not; of those 81, 68
-    /// improve on ink and 3 worsen; and it gains <b>25 gate verdicts</b>, because PyMuPDF and
-    /// <c>pdftotext</c> both drop the text the clip removes and the reference's counts already
-    /// have it removed.
+    /// <strong>Two rounds wrote the drawing-layer clip independently and disagreed about this
+    /// assertion; it is back at zero, and the reason is measured.</strong> The clip itself is real
+    /// — <c>ScOutputData::PrePrintDrawingLayer</c> hands its rectangle to
+    /// <c>BeginDrawLayers</c> as the paint region (<c>sc/source/ui/view/output3.cxx</c>:41-102).
+    /// What was in dispute is whether it should be taken <em>unconditionally</em> and whether it
+    /// should remove text. One round asserted 1 here, on the ground that "the reference's counts
+    /// already have the clipped text removed"; the other took the clip only where a drawing
+    /// actually leaves the block, and as <c>ClipPathKeepingText</c>.
+    /// </para>
+    /// <para>
+    /// The conditional, text-keeping rule is the one that survives measurement.
+    /// <b>Of 834 reference pages carrying a genuine (non-page-sized) drawing-layer clip, 733 still
+    /// extract text lying wholly outside it</b> — so the reference's counts plainly do <em>not</em>
+    /// have that text removed. And the sheets gate at the commit carrying the conditional rule
+    /// reads <b>278 of 307</b>, which is exactly what the ODS round measured for its own change
+    /// alone: the clip moved no verdict either way. The 262→287 attributed to the unconditional
+    /// form was measured at load 15, where <c>dotnet/CLAUDE.md</c> records that the gate
+    /// undercounts on the reference side, and its 262 base disagrees by 12 rows with an
+    /// independent sweep of a neighbouring commit.
+    /// </para>
+    /// <para>
+    /// Left open, and narrower than what was claimed: whether a clipped <em>shape's own</em> text
+    /// should leave the text layer. The 733 pages above are mostly cell text, which the drawing
+    /// layer's clip never governed.
     /// </para>
     /// </remarks>
     [Fact]
-    public void AnUncroppedPictureTakesOnlyTheDrawingLayersClip()
-        => ClipsOf("picture-watermark.xlsx").ShouldBe(1);
+    public void AnUncroppedPictureIsNotClipped()
+        => ClipsOf("picture-watermark.xlsx").ShouldBe(0);
 
     // ------------------------------------------------------------------ helpers
 
