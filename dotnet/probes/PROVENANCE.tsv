@@ -1988,3 +1988,14 @@ dotnet/probes/chart-rest-r104/o36-confine.tsv	2026-09-11	current	26.2.4.2	presen
 dotnet/probes/chart-rest-r104/o38-ofpie.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
 dotnet/probes/chart-rest-r104/o38-ofpie.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
 dotnet/probes/chart-rest-r104/o38-ofpie-028.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-hyph-r105/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-hyph-r105/chart-lang-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/axis-language-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/delang.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/language-sweep.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/language-sweep.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/classify.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/ref45.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/ref-45deg-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/hyphenator-off.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/chart-hyph-r105/control-en-GB.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
