@@ -1324,3 +1324,34 @@ marker file or an explicit self-exclusion works.
 The general form is the one this skill keeps meeting: **before believing a measurement, check
 it is not a fact about the instrument.** A waiter that never fires and a sweep that never
 finishes look identical from outside.
+
+## A truncated test run announces itself as a pass
+
+Worse than the lost-detail problem above, and seen twice in one session: `dotnet test` printed
+
+```
+Passed!  - Failed: 0, Passed:  870, … - Paperless.WordProcessing.Tests.dll
+```
+
+and later, from the same tree, `Passed! - Failed: 0, Passed: 1885`. `--list-tests` says 1885. The
+870 run did not fail — **it stopped early and reported the tests it had got through as a clean
+pass.** Nothing in the output says so. A round that runs the suite once, sees `Failed: 0`, and
+moves on has verified nothing.
+
+The same fault has a second face: a suite that never ran at all. One round's `tests.log` stopped
+at its `== Fidelity` line on an `NU1900` restore error, and its write-up reported
+"542 passed / 10 failed — the briefed baseline exactly". The number was correct. It had been
+*asserted*, because the expected value was known in advance. A baseline you already know is a
+baseline you can accidentally write down without measuring.
+
+So:
+
+- **Check the total, not just the failure count.** Know what N should be for each project and
+  compare; `Failed: 0` out of the wrong N is not a pass.
+- **Check the run reached the last project.** A suite that ends before Fidelity has told you
+  nothing about Fidelity.
+- **Never write down an expected number you did not read out of this run's output.** If the log
+  does not contain it, say the run did not complete.
+
+The general form, again: *before believing a measurement, check it is not a fact about the
+instrument.* Here the instrument reports success for work it never did.
