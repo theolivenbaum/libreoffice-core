@@ -223,15 +223,22 @@ style with `COLL_STANDARD` somewhere above it are:
 | `caption` / `Caption` | **0** | `Caption`, `COLL_LABEL` | `COLL_STANDARD` — **done, nil reach** |
 | `header`, `footer` | 5 each | `Header`, `Footer` | `COLL_HEADERFOOTER`, then Standard |
 | `toc 1`, `toc 2`, `toc 3` | 2, 1, 1 | `Contents N` | `COLL_REGISTER_BASE`, then Standard |
-| `Heading` (bare) | 1 | `Heading`, `COLL_HEADLINE_BASE` | `COLL_STANDARD` |
+| `Heading` (bare) | 1 | `Heading`, `COLL_HEADLINE_BASE` | `COLL_STANDARD`, but see below |
 | `Figure` | 1 | `Figure`, `COLL_LABEL_FIGURE` | `COLL_LABEL`, then Standard |
 
-The six that are left out are left out for a stated reason rather than for caution: their pool
-parent is **not** `COLL_STANDARD` directly, and the style in between is a real pool style whose own
-properties the import does *not* reset — so each needs its own measurement, not this branch. The
-control family is every name the map answers with an **empty** Writer name — `Quote`,
+**The six that are left out are left out for two stated reasons, not for caution.** `header`,
+`footer`, `toc 1`…`toc 3` and `Figure` reach `COLL_STANDARD` only through an *intermediate* pool
+style — `COLL_HEADERFOOTER`, `COLL_REGISTER_BASE`, `COLL_LABEL` — and unlike the entry's own
+properties those intermediates' are **not** reset by the import, so each needs its own measurement
+rather than this branch. A bare `Heading` is a different gap again: it is not in
+`ConvertStyleName`'s map at all, and what makes Writer reuse its style is the second lookup,
+`xStyles->hasByName` on the *unconverted* name (`StyleSheetTable.cxx`:1099-1121) — a set this round
+did not census and whose members are Writer's UI names rather than Word's.
+
+The control family is every name the map answers with an **empty** Writer name — `Quote`,
 `List Paragraph` and `Normal (Web)` (`StyleSheetTable.cxx`:1794, :1883-1884) — which keeps
-`\pard\plain`'s twelve points and must not move.
+`\pard\plain`'s twelve points and must not move. `ANameWriterHasNoStyleForKeepsTheResetSize` is
+that control as a test, and `standard-own-size.txt` measures `Quote` at the reference.
 
 ### 2.3 The fix, and why it is not a constant
 
