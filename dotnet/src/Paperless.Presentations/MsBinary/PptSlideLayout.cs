@@ -70,6 +70,7 @@ internal sealed class PptSlideLayout
     private readonly SlideFonts _fonts;
     private readonly EscherDrawingReader _escher;
     private readonly byte[] _pictures;
+    private readonly byte[] _summary;
 
     private readonly Dictionary<uint, PptStyleSheet> _stylesByMaster = [];
     private readonly Dictionary<uint, PptColourScheme> _schemesByMaster = [];
@@ -102,13 +103,20 @@ internal sealed class PptSlideLayout
     /// Empty for a deck with no pictures, and for a caller that has none to give: the deck then
     /// draws every frame empty, which is what it did before this stream was passed at all.
     /// </param>
+    /// <param name="summary">
+    /// The compound file's <c>\u0005DocumentSummaryInformation</c> stream, whose
+    /// <c>_PID_HLINKS</c> blob caps how many of the deck's hyperlink identifiers resolve — see
+    /// <see cref="PptHyperlinkBlob"/>. Empty for a caller that has none to give.
+    /// </param>
     public PptSlideLayout(
         DffRecordBuffer stream,
         PptPersistDirectory persist,
         SlideFonts fonts,
         List<Diagnostic> diagnostics,
-        byte[]? pictures = null)
+        byte[]? pictures = null,
+        byte[]? summary = null)
     {
+        _summary = summary ?? [];
         _stream = stream;
         _persist = persist;
         _fonts = fonts;
@@ -129,7 +137,7 @@ internal sealed class PptSlideLayout
 
         DocSize size = SlideSize(pages);
         _fontTable = PptFontTable.Read(_stream, pages.Environment);
-        _hyperlinks = PptHyperlinks.Read(_stream, pages.Document);
+        _hyperlinks = PptHyperlinks.Read(_stream, pages.Document, _summary);
         _blips = ReadBlips(pages);
         _deckHeadersFooters = DeckHeadersFooters(pages);
         _titlePlaceholdersOmitted = TitlePlaceholdersOmitted(pages);
