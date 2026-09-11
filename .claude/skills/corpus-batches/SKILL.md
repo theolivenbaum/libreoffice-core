@@ -1381,3 +1381,14 @@ same either way and it is *not* to shrug and call it flaky:
 - **Ask whether the failing tests have anything to do with the change.** Two words-and-sheets
   tests failing on a slides-only merge is the tell.
 - Only then say what happened, including that it happened.
+
+**And a third mode: the run is killed and reports nothing at all.** Under memory pressure a
+whole-solution run came back with `Test Run Aborted` for one project and **exit code 137** for
+another — killed at 1063 of 1938 — and **zero reported failures** for either. Re-run alone, both
+were green at full count. So the three modes are: a short run reporting a clean pass, a loaded
+run inventing failures, and a killed run reporting neither. All three are invisible if you read
+only `Failed:`.
+
+The single check that catches all three is the same one: **know what N should be for every
+project and compare it.** A project that is missing from the output entirely is the loudest
+signal of the three and the easiest to scroll past.
