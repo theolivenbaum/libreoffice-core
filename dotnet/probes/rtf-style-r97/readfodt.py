@@ -11,6 +11,15 @@ style may name a parent, and Writer writes only what each level states. That is 
 chain the question is about, so an inherited value shows up as a property found at an *ancestor*
 and the level it was found at is reported.
 
+**The paragraph-style chain is not the whole of it, and a first cut of this script that read only
+that chain reported the opposite answer on one arm of the probe set.** When a stylesheet entry
+states its own `\fs`, the reference writes RTF's reset back over the run as *direct* character
+formatting -- an automatic `style:family="text"` style on a `text:span` inside the paragraph, which
+no walk up `style:parent-style-name` can see. So a style whose own `\fs28` is discarded still shows
+`fo:font-size="12pt"` on the style object, and only the span says the run is 12 pt. Character
+properties are therefore resolved from the first span of the paragraph *before* the paragraph-style
+chain, and a value found there is reported as `@direct`.
+
   readfodt.py <dir of .fodt> [<second dir>]
 """
 import pathlib
@@ -35,6 +44,20 @@ WANT = [
     ('left', Q['fo'] + 'margin-left', 'para'),
     ('keep', Q['fo'] + 'keep-with-next', 'para'),
 ]
+
+
+def text_styles_of(root):
+    """{name -> style:text-properties} over the automatic `text` family, for the direct run."""
+    out = {}
+    for holder in ('styles', 'automatic-styles'):
+        node = root.find(Q['office'] + holder)
+        if node is None:
+            continue
+        for st in node.findall(Q['style'] + 'style'):
+            if st.get(Q['style'] + 'family') != 'text':
+                continue
+            out[st.get(Q['style'] + 'name')] = st.find(Q['style'] + 'text-properties')
+    return out
 
 
 def styles_of(root):
@@ -62,7 +85,7 @@ def styles_of(root):
     return out
 
 
-def resolve(styles, start):
+def resolve(styles, start, direct=None):
     chain, seen, cur = [], set(), start
     while cur and cur in styles and cur not in seen:
         seen.add(cur)
@@ -70,6 +93,11 @@ def resolve(styles, start):
         cur = styles[cur]['parent']
     row = {'chain': '>'.join(chain)}
     for key, attr, where in WANT:
+        # Direct character formatting on the run beats the whole paragraph-style chain, and it is
+        # where the reference puts the reset it writes over a style's own `\fs`.
+        if where == 'text' and direct is not None and direct.get(attr) is not None:
+            row[key] = direct.get(attr) + '@direct'
+            continue
         for depth, name in enumerate(chain):
             node = styles[name][where]
             if node is not None and node.get(attr) is not None:
@@ -90,21 +118,28 @@ def resolve(styles, start):
 def read(path):
     root = ET.parse(path).getroot()
     styles = styles_of(root)
+    texts = text_styles_of(root)
     body = root.find(Q['office'] + 'body/' + Q['office'] + 'text')
+
+    def answer(p):
+        span = next((s for s in p.iter(Q['text'] + 'span') if ''.join(s.itertext())), None)
+        direct = texts.get(span.get(Q['text'] + 'style-name')) if span is not None else None
+        return resolve(styles, p.get(Q['text'] + 'style-name'), direct)
+
     for p in body.iter(Q['text'] + 'p'):
         if ''.join(p.itertext()).strip().startswith('HEAD') or \
            ''.join(p.itertext()).strip().endswith('HEAD'):
-            return resolve(styles, p.get(Q['text'] + 'style-name'))
+            return answer(p)
         if 'HEAD' in ''.join(p.itertext()):
-            return resolve(styles, p.get(Q['text'] + 'style-name'))
+            return answer(p)
     return None
 
 
 dirs = [pathlib.Path(d) for d in sys.argv[1:]] or [pathlib.Path('.')]
 names = sorted({p.stem for d in dirs for p in d.glob('p_*.fodt')})
 width = max((len(n) for n in names), default=10)
-print(f'{"probe":<{width}}  {"style chain":<34} {"size":<12} {"ital":<8} {"above":<10} '
-      f'{"below":<10} tabs')
+print(f'{"probe":<{width}}  {"style chain":<34} {"size":<12} {"ital":<8} {"weight":<10} '
+      f'{"above":<10} {"below":<10} {"keep":<8} tabs')
 for name in names:
     for d in dirs:
         path = d / f'{name}.fodt'
@@ -113,4 +148,5 @@ for name in names:
             print(f'{name:<{width}}  -')
             continue
         print(f'{name:<{width}}  {row["chain"]:<34} {row["size"]:<12} {row["italic"]:<8} '
-              f'{row["above"]:<10} {row["below"]:<10} {row["tabs"]}')
+              f'{row["weight"]:<10} {row["above"]:<10} {row["below"]:<10} {row["keep"]:<8} '
+              f'{row["tabs"]}')

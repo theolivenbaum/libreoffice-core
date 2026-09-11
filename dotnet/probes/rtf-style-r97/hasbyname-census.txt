@@ -38,7 +38,7 @@
   'toc 2': 231164_SystemDesignDocument.rtf
   'toc 3': 231164_SystemDesignDocument.rtf
 
-names the map answers but that reach no Writer style (the empty-value control):
+names that reach no Writer paragraph style at all:
    24  'Default'                  hasByName  -> 'Default'
    17  'No Spacing'               hasByName  -> 'No Spacing'
     2  'Document 1'               hasByName  -> 'Document 1'
@@ -106,3 +106,5 @@ names the map answers but that reach no Writer style (the empty-value control):
     1  'paragraph'                hasByName  -> 'paragraph'
     1  'table copy'               hasByName  -> 'table copy'
     1  'tcs:ric'                  hasByName  -> 'tcs:ric'
+
+0 names the UI-spelling rule would have added and FillUIName rejects: none

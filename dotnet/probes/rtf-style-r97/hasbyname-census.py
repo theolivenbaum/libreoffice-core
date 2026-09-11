@@ -18,8 +18,16 @@ The rules modelled here, all from `ConvertStyleName` and `SwXStyleFamily::hasByN
   1. a map entry with a non-empty value answers that Writer name, and it always exists;
   2. otherwise the name passes through -- but if it collides with any *value* of the map it gets
      a ` (WW)` suffix and then matches nothing (`:2093-2112`);
-  3. `hasByName` maps a programmatic name to a UI name and looks the UI name up, so either
-     spelling hits.
+  3. `hasByName` resolves the name through `SwStyleNameMapper::FillUIName`
+     (`sw/source/core/doc/SwStyleNameMapper.cxx`:306-335) and looks the answer up in the document's
+     style pool. **That is a programmatic-name lookup and not "either spelling"**, which is what a
+     first cut of this script assumed: a name that is a pool style's *UI* name and not its
+     programmatic one falls into `FillUIName`'s `else` branch and is handed to `Find` with
+     **`" (user)"` appended**, so it matches nothing. `Body Text` is the example -- it is
+     `COLL_TEXT`'s UI name and `Text body` is its programmatic one -- and it reaches Writer's style
+     only because `ConvertStyleName` maps it to the programmatic spelling first. The rule below
+     therefore takes the programmatic column for the pass-through route and both columns for the
+     map's answer, and prints any name where the two rules disagree.
 
 The pool parent chain is `GetPoolParent` (`sw/source/core/doc/poolfmt.cxx`:169-296), transcribed
 per group.
@@ -60,15 +68,16 @@ PARENT['NUMBER_BULLET_BASE'] = 'TEXT'
 
 
 def load_writer_names(path):
-    """{name -> STR_POOLCOLL_* suffix} over both spellings, and {suffix -> group}."""
-    by_name, group = {}, {}
+    """{prog -> suffix}, {either spelling -> suffix}, {suffix -> group}."""
+    by_prog, by_either, group = {}, {}, {}
     for line in pathlib.Path(path).read_text(encoding='utf-8').splitlines():
         g, macro, prog, ui = line.split('\t')
         suffix = macro[len('STR_POOLCOLL_'):]
         group[suffix] = g
-        by_name.setdefault(prog, suffix)
-        by_name.setdefault(ui, suffix)
-    return by_name, group
+        by_prog.setdefault(prog, suffix)
+        by_either.setdefault(prog, suffix)
+        by_either.setdefault(ui, suffix)
+    return by_prog, by_either, group
 
 
 def load_map(path):
@@ -119,19 +128,25 @@ def name_of(entry):
 
 
 def main():
-    by_name, group = load_writer_names(sys.argv[1])
+    by_prog, by_either, group = load_writer_names(sys.argv[1])
     name_map = load_map(sys.argv[2])
     reserved = set(name_map.values())
 
-    def resolve(raw):
-        """(converted name, route, pool suffix or None) -- ConvertStyleName then hasByName."""
+    def resolve(raw, lenient=False):
+        """(converted name, route, pool suffix or None) -- ConvertStyleName then hasByName.
+
+        `lenient` is the rejected rule: it lets a pool style's UI name hit as well, which is what
+        this script asserted before `FillUIName` was read. Kept so the two can be differenced.
+        """
+        table = by_either if lenient else by_prog
         name = raw.strip()
         mapped = name_map.get(name)
         if mapped:
-            return mapped, 'map', by_name.get(mapped)
+            # A map value is a programmatic name by construction, so the two tables agree here.
+            return mapped, 'map', by_either.get(mapped)
         if name in reserved or name.endswith(' (WW)'):
             return name + ' (WW)', 'suffixed', None
-        return name, 'hasByName', by_name.get(name)
+        return name, 'hasByName', table.get(name)
 
     documents = collections.Counter()
     where = collections.defaultdict(set)
@@ -188,10 +203,16 @@ def main():
         if suffix and count <= 6:
             print(f'  {name!r}: {", ".join(sorted(where[name]))}')
     print()
-    print('names the map answers but that reach no Writer style (the empty-value control):')
+    print('names that reach no Writer paragraph style at all:')
     for name, count, converted, route, suffix, chain in rows:
         if not suffix:
             print(f'{count:>5}  {name!r:<26} {route:<10} -> {converted!r}')
+    print()
+    lenient = [(n, c) for n, c, *_ in rows if not resolve(n)[2] and resolve(n, True)[2]]
+    print(f'{len(lenient)} names the UI-spelling rule would have added and FillUIName rejects:'
+          + (' none' if not lenient else ''))
+    for name, count in lenient:
+        print(f'{count:>5}  {name!r}')
 
 
 main()
