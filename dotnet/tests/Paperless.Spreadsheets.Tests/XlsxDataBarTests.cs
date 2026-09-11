@@ -25,7 +25,7 @@ namespace Paperless.Spreadsheets.Tests;
 /// <c>ExtCfDataBarRule::finalizeImport</c> moves it, defaulting an extension with no
 /// <c>axisPosition</c> to <c>AUTOMATIC</c> (<c>:1630-1643</c>) — and
 /// <c>ScDataBarFormat::GetDataBarInfo</c>'s <c>AUTOMATIC</c> arm ignores both lengths
-/// (<c>sc/source/core/data/colorscale.cxx</c>:1004-1043). So two files whose main-namespace
+/// (<c>sc/source/core/data/colorscale.cxx</c>:1008-1049). So two files whose main-namespace
 /// markup is identical draw 10/30/50/70/90 % and 0/25/50/75/100 %, and it is the second that
 /// every corpus rule is.
 /// </para>
@@ -37,6 +37,11 @@ public sealed class XlsxDataBarTests
 
     /// <summary>The negative colour the third one states.</summary>
     private const string Negative = "#C00000";
+
+    /// <summary>
+    /// <c>COL_LIGHTRED</c>, which a rule stating no negative colour of its own falls back to.
+    /// </summary>
+    private const string SourceRed = "#FF0000";
 
     [Fact]
     public void WithNoExtensionTheAxisIsNoneAndTheTwoLengthsDecideTheBar()
@@ -116,6 +121,39 @@ public sealed class XlsxDataBarTests
         formatting.BarAt(1, 0)!.Value.Colour.ToString().ShouldBe(Negative);
         formatting.BarAt(3, 0)!.Value.Colour.ToString().ShouldBe(Bar);
         formatting.BarAt(4, 0)!.Value.Colour.ToString().ShouldBe(Bar);
+    }
+
+    [Fact]
+    public void WithNoNegativeFillColourANegativeValueTakesTheSourcesOwnRedAndNotTheBarsColour()
+    {
+        // The one-attribute control for the fixture above: the same rule over the same −100…100,
+        // differing only in that its extension states **no** `x14:negativeFillColor`.
+        //
+        // `mbNeg` does not mean "a negative colour was stated". It is `ScDataBarFormatData`'s own
+        // default of **true** (`sc/inc/colorscale.hxx`:107); the OOXML importer's only assignment
+        // sets it true again beside `mxNegativeColor` (`condformatbuffer.cxx`:1658-1664), and the
+        // single place in `sc/` that clears it is the **ODF** importer
+        // (`sc/source/filter/xml/xmlcondformat.cxx`:483). So the `COL_LIGHTRED` fallback at
+        // `sc/source/core/data/colorscale.cxx`:1082 is not unreachable from SpreadsheetML — it is
+        // the usual answer there, taken by every bar whose extension omits the element.
+        //
+        // Measured twice at 26.2.4.2, both on this fixture: `--convert-to fods` writes
+        // `calcext:negative-color="#ff0000"`, as it does for eight of the corpus's nine rules; and
+        // `--convert-to pdf` paints A1 and A2 `#ff0000` at exactly the geometry the `#c00000`
+        // fixture paints them. `probes/cond-format-r97/fixture-reference/painted.txt`.
+        SheetFormatting formatting = Read("sheet-cf-data-bar-default-negative.xlsx");
+
+        formatting.BarAt(0, 0)!.Value.Colour.ToString().ShouldBe(SourceRed);
+        formatting.BarAt(1, 0)!.Value.Colour.ToString().ShouldBe(SourceRed);
+
+        // The positives are untouched, so this is the negative arm alone and not a palette fault.
+        formatting.BarAt(3, 0)!.Value.Colour.ToString().ShouldBe(Bar);
+        formatting.BarAt(4, 0)!.Value.Colour.ToString().ShouldBe(Bar);
+
+        // And the geometry is the stated-colour fixture's, which is what makes the pair a control.
+        Length(formatting, 0).ShouldBe(-100);
+        Length(formatting, 4).ShouldBe(100);
+        formatting.BarAt(0, 0)!.Value.Zero.ShouldBe(50);
     }
 
     [Fact]

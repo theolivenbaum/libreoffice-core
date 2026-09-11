@@ -375,7 +375,7 @@ public sealed class SheetFormatting
     /// <remarks>
     /// <c>showValue="0"</c>. The reference does not hide the number behind the bar, it does not
     /// draw it: <c>ScOutputData::DrawStrings</c> clears <c>bDoCell</c> before laying anything out
-    /// (<c>sc/source/ui/view/output2.cxx</c>:1691-1697), and 26.2.4.2's own PDF of
+    /// (<c>sc/source/ui/view/output2.cxx</c>:1691-1698), and 26.2.4.2's own PDF of
     /// <c>tests/corpus/features/sheet-cf-data-bar-only.xlsx</c> holds no text-showing operator at
     /// all. The row's height is unaffected, which is why this is asked at drawing time rather
     /// than folded into the cell's text.

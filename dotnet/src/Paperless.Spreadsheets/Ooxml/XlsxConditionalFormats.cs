@@ -54,17 +54,22 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// </para>
 /// <para>
 /// <strong>What is left unread is <c>iconSet</c>, and it is left because its glyph is a
-/// LibreOffice bitmap.</strong> <c>drawIconSets</c> (<c>sc/source/ui/view/output.cxx</c>:955-985)
-/// paints <c>ScIconSetFormat::getBitmap</c>'s image at ten points square in the cell's
-/// bottom-left corner, and that image is one of the application's own icon-theme assets rather
-/// than anything derivable from the file. Every other part of the family is readable and is
-/// written down in <c>probes/cond-format-r97/results.md</c>: which bucket a value falls into
-/// (<c>GetIconSetInfo</c>, <c>colorscale.cxx</c>:1185-1252 — the *last* entry whose threshold the
+/// LibreOffice bitmap.</strong> <c>drawIconSets</c> (<c>sc/source/ui/view/output.cxx</c>:960-989)
+/// paints <c>ScIconSetFormat::getBitmap</c>'s image into the cell's bottom-left corner, and that
+/// image is one of the application's own icon-theme assets rather than anything derivable from
+/// the file. It is drawn at <strong>the cell's own font height</strong> and not at a fixed size:
+/// the ten points at <c>:967</c> is a fallback for a null <c>mnHeight</c>, and
+/// <c>GetIconSetInfo</c> always sets that field from <c>ATTR_FONT_HEIGHT</c>
+/// (<c>colorscale.cxx</c>:1222-1224), so the branch at <c>:969-980</c> always wins — measured, the
+/// corpus's icons run 19.4 pt² to 103.9 pt² each. Every other part of the family is readable and
+/// is written down in <c>probes/cond-format-r97/results.md</c>: which bucket a value falls into
+/// (<c>GetIconSetInfo</c>, <c>colorscale.cxx</c>:1186-1253 — the *last* entry whose threshold the
 /// value satisfies wins, and a <c>NoIcons</c> custom entry answers <c>nullptr</c>, so such a cell
 /// keeps its own text however <c>showValue</c> is set). Censused 2026-09-11 over every corpus
-/// document that opens as an OPC spreadsheet: <strong>20 rules in 9 documents</strong> — 2 in the
-/// main namespace and 18 stated only in the <c>x14</c> extension list — and 26.2.4.2's own
-/// renderings of those nine draw <strong>60 icons over 1549 pt²</strong> in seven of them.
+/// document that opens as an OPC spreadsheet: <strong>20 rules in 10 documents</strong> — 2 in the
+/// main namespace and 18 stated only in the <c>x14</c> extension list, in two disjoint sets of
+/// documents — and 26.2.4.2's own renderings of those ten draw <strong>60 icons over
+/// 1549 pt²</strong> in seven of them.
 /// </para>
 /// </remarks>
 internal static class XlsxConditionalFormats

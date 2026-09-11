@@ -154,7 +154,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// <summary>Paints the bars a <c>dataBar</c> conditional format draws over its cells.</summary>
     /// <remarks>
     /// <para>
-    /// <c>drawDataBars</c> (<c>sc/source/ui/view/output.cxx</c>:883-950) is the whole of the
+    /// <c>drawDataBars</c> (<c>sc/source/ui/view/output.cxx</c>:883-953) is the whole of the
     /// geometry and it is short. The cell's rectangle is inset by two device pixels on every
     /// edge; the axis sits at <see cref="SheetDataBar.Zero"/> per cent of what is left; and the
     /// bar runs from there to <see cref="SheetDataBar.Length"/> per cent of the remaining width

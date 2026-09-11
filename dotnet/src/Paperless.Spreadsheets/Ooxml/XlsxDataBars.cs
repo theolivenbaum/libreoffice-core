@@ -35,7 +35,7 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// extension moves it — anything but <c>none</c> and <c>middle</c> becomes <c>AUTOMATIC</c>,
 /// including the <c>automatic</c> default of a <c>x14:dataBar</c> that states no
 /// <c>axisPosition</c>. <c>ScDataBarFormat::GetDataBarInfo</c>
-/// (<c>colorscale.cxx</c>:968-1090) uses <c>mnMinLength</c>/<c>mnMaxLength</c> in the
+/// (<c>colorscale.cxx</c>:968-1094) uses <c>mnMinLength</c>/<c>mnMaxLength</c> in the
 /// <c>NONE</c> and <c>MIDDLE</c> arms and <strong>ignores both in the <c>AUTOMATIC</c> arm</strong>,
 /// where the bar is a plain percentage of the range. So a rule with an extension and one without
 /// draw different bars from identical main-namespace markup, and it is the extension-bearing
@@ -54,6 +54,17 @@ internal static class XlsxDataBars
 {
     /// <summary>The <c>x14</c> conditional-formatting namespace.</summary>
     private const string X14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+
+    /// <summary>
+    /// What a negative value takes when the rule states no negative colour of its own.
+    /// </summary>
+    /// <remarks>
+    /// <c>COL_LIGHTRED</c>, the fallback beside <c>mxNegativeColor</c> in
+    /// <c>ScDataBarFormat::GetDataBarInfo</c> (<c>colorscale.cxx</c>:1082). It is reachable from an
+    /// OOXML import — indeed it is the *usual* answer there — because <c>mbNeg</c> defaults to true
+    /// and no SpreadsheetML path clears it.
+    /// </remarks>
+    private static readonly Colour DefaultNegative = new(0xFF, 0x00, 0x00);
 
     /// <summary>The <c>xm</c> namespace its formulas and ranges are in.</summary>
     private const string Xm = "http://schemas.microsoft.com/office/excel/2006/main";
@@ -118,7 +129,7 @@ internal static class XlsxDataBars
             // the shape `XlsxConditionalFormats` uses for a colour scale and needs no position
             // budget: a rule declared over `A1:XFD1048576` costs one pass of the sheet's own
             // cells. The reference bounds it the same way — `ScColorFormat::getValues` shrinks a
-            // range reaching `MaxRow` to the used data area (`colorscale.cxx`:530-537).
+            // range reaching `MaxRow` to the used data area (`colorscale.cxx`:532-537).
             List<(int Row, int Column)> covered = [];
             List<double> values = [];
 
@@ -276,8 +287,9 @@ internal static class XlsxDataBars
                         if (extendedCfvos.Count > 1)
                             (upperKind, upperValue) = ExtendedLimit(extendedCfvos[1], upperKind, upperValue);
 
-                        // `mbNeg` is set by the presence of the element and never otherwise, so a
-                        // rule with no extension paints a negative value in its positive colour.
+                        // The element supplies `mxNegativeColor`. It does not decide *whether* a
+                        // negative value is treated as negative — `mbNeg` is already true — so a
+                        // rule stating none falls back to <see cref="DefaultNegative"/>.
                         if (palette.Read(body.Element(XName.Get("negativeFillColor", X14))) is { } n)
                             negative = n;
                         if (palette.Read(body.Element(XName.Get("axisColor", X14))) is { } a)
@@ -344,7 +356,7 @@ internal static class XlsxDataBars
 
     /// <summary>What a main-namespace <c>cfvo</c> resolves to.</summary>
     /// <remarks>
-    /// <c>SetCfvoData</c> through <c>ConvertToModel</c>, <c>condformatbuffer.cxx</c>:311-336.
+    /// <c>SetCfvoData</c> through <c>ConvertToModel</c>, <c>condformatbuffer.cxx</c>:313-337.
     /// <c>formula</c> keeps the <c>val</c> it parsed, which is what this tree does with a
     /// colour scale's formula stop for the same reason: no corpus stop is an expression.
     /// </remarks>
@@ -403,7 +415,7 @@ internal static class XlsxDataBars
     /// The bar one cell takes, which is <c>ScDataBarFormat::GetDataBarInfo</c> line for line.
     /// </summary>
     /// <remarks>
-    /// <c>colorscale.cxx</c>:968-1090. The three axis arms are genuinely three different
+    /// <c>colorscale.cxx</c>:968-1094. The three axis arms are genuinely three different
     /// formulas rather than one with a shifted origin, and only two of them read
     /// <see cref="Rule.MinLength"/> and <see cref="Rule.MaxLength"/>.
     /// </remarks>
@@ -479,10 +491,15 @@ internal static class XlsxDataBars
 
         return new SheetDataBar
         {
-            // `mbNeg` is the presence of a negative colour and nothing else, so a rule without one
-            // paints a negative value in its positive colour rather than in the red the source's
-            // unreachable `COL_LIGHTRED` fallback names.
-            Colour = rule.Negative is { } below && value < 0 ? below : rule.Positive,
+            // `mbNeg` is `ScDataBarFormatData`'s own default of **true** (`colorscale.hxx`:107) and
+            // the OOXML importer only ever sets it true again (`condformatbuffer.cxx`:1662); the one
+            // place it is cleared is the *ODF* importer (`xmlcondformat.cxx`:483). So every bar read
+            // from OOXML treats a negative value as negative, and one whose extension states no
+            // `x14:negativeFillColor` paints it in the source's own `COL_LIGHTRED`
+            // (`colorscale.cxx`:1073-1085, the colour at :1082) rather than in its positive colour.
+            // Measured: 26.2.4.2's PDF of an extension stating no negative colour over -100…100
+            // paints the two negative cells `#ff0000`. `probes/cond-format-r97` §2 arm (4).
+            Colour = value < 0 ? rule.Negative ?? DefaultNegative : rule.Positive,
             Length = length,
             Zero = zero,
             AxisColour = rule.AxisColour,

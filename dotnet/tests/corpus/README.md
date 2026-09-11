@@ -350,6 +350,35 @@ findings a synthetic could most easily have invented, the blank rule and the anc
 established on a real corpus document first (`Application_Compliance_Checklist_5_Apr_2021.xlsx`)
 and only then reproduced minimally.
 
+### The six `sheet-cf-stored-vs-drawn` / `sheet-cf-data-bar-*.xlsx` fixtures
+
+Round 97's, authored by `probes/cond-format-r97/make-fixtures.py` on the same terms — every part a
+real writer emits, and every expectation read back out of 26.2.4.2's own PDF by
+`probes/cond-format-r97/fixture-paint.py` into `fixture-reference/painted.txt`.
+
+| file | what it separates |
+|---|---|
+| `sheet-cf-stored-vs-drawn.xlsx` | a cell's **drawn** text and its **compared** value are two different strings: `\talpha` and `alpha` draw the same five glyphs and are not duplicates, and a cell holding one tab is *not* blank because `TRIM` takes spaces and not tabs |
+| `sheet-cf-data-bar-lengths.xlsx` | no `x14` extension, so the axis stays `NONE` and `minLength`/`maxLength` decide the bar |
+| `sheet-cf-data-bar-auto.xlsx` | the *same* main-namespace markup plus an extension with no `axisPosition`: the axis becomes `AUTOMATIC`, the two lengths stop being read, and a cell on the minimum draws nothing. This is the shape every corpus rule has |
+| `sheet-cf-data-bar-negative.xlsx` | the zero position, the dashed axis (drawn over the *whole* cell where the bar is inset 0.2 pt), and a stated `x14:negativeFillColor` |
+| `sheet-cf-data-bar-default-negative.xlsx` | the same rule with **no** `negativeFillColor` — the control for the one above. `mbNeg` defaults to *true*, so the negatives take the source's `COL_LIGHTRED` |
+| `sheet-cf-data-bar-only.xlsx` | `showValue="0"` takes the cell's number off the page rather than hiding it behind the bar, and does not change the row's height |
+
+**The last pair is why an optional attribute needs a fixture that omits it.** The first four were
+authored to exercise the feature, so each states the optional attribute — and the arm that
+`…-negative` was built to pin was written up backwards for exactly that reason, because the file
+that would have refuted it had not been authored. The corpus is the other way round: eight of its
+nine rules state no negative colour at all. **Author the absent case as well as the present one**,
+and prefer a pair differing in one attribute over two unrelated fixtures.
+
+**A stem is a filename, and `soffice --convert-to` names its output after the stem alone.** Two
+fixtures sharing one anywhere the same conversion runs silently overwrite each other's PDF, and
+each is then scored against the other's rendering. `dotnet/tests/corpus` already holds 69
+stems duplicated between its own subdirectories, so check a new one against the whole corpus —
+`features/`, `minimal/`, `/home/user/sample-files` and `/home/user/corpus-odf` — before authoring
+it, and render one document per output directory regardless.
+
 ## Writing a flat-XML corpus document by hand
 
 Two traps, both found the hard way:

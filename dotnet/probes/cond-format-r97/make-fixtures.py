@@ -209,6 +209,18 @@ def main():
           [],
           x14_data_bar(guid, "A1:A5", [("num", "-100"), ("num", "100")], negative=NEGATIVE))
 
+    # 4b. The same rule with NO `x14:negativeFillColor`. `mbNeg` is `ScDataBarFormatData`'s own
+    #     default of true and no OOXML path clears it, so the negative cells take the source's
+    #     `COL_LIGHTRED` fallback rather than the positive colour. 26.2.4.2 paints them #ff0000.
+    #     The corpus cannot witness this — 8 of its 9 rules state no negative colour and none of
+    #     the 75 cells they cover is negative — so the fixture is the only witness there is.
+    guid = "{2D9F4E31-3333-4D3B-9F0A-0000000000A3}"
+    write(out / "sheet-cf-data-bar-default-negative.xlsx",
+          {(1, "A"): -100, (2, "A"): -50, (3, "A"): 0, (4, "A"): 50, (5, "A"): 100},
+          data_bar("A1:A5", [("num", "-100"), ("num", "100")], ext=guid),
+          [],
+          x14_data_bar(guid, "A1:A5", [("num", "-100"), ("num", "100")]))
+
     # 5. `showValue="0"`. The rule paints its bar and the cell's own number is not drawn.
     write(out / "sheet-cf-data-bar-only.xlsx",
           {(1, "A"): 20, (2, "A"): 40, (3, "A"): 60, (4, "A"): 80, (5, "A"): 100},

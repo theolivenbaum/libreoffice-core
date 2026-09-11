@@ -9,9 +9,9 @@ namespace Paperless.Spreadsheets.Layout;
 /// <remarks>
 /// <para>
 /// The reference splits the same job in the same place. <c>ScDataBarFormat::GetDataBarInfo</c>
-/// (<c>sc/source/core/data/colorscale.cxx</c>:968-1090) turns the rule, the cell's value and the
+/// (<c>sc/source/core/data/colorscale.cxx</c>:968-1094) turns the rule, the cell's value and the
 /// numbers in the rule's range into an <c>ScDataBarInfo</c> holding a length and a zero position
-/// as percentages and a colour; <c>drawDataBars</c> (<c>sc/source/ui/view/output.cxx</c>:883-950)
+/// as percentages and a colour; <c>drawDataBars</c> (<c>sc/source/ui/view/output.cxx</c>:883-953)
 /// is the only code that knows where the cell is. Everything here is the first half's output, so
 /// the drawing side needs the cell rectangle and nothing else.
 /// </para>
@@ -26,10 +26,18 @@ public readonly record struct SheetDataBar
 {
     /// <summary>The colour the bar is painted in.</summary>
     /// <remarks>
-    /// The rule's positive colour, or its negative one when the cell's value is below zero and
-    /// the rule states that a negative colour exists at all — <c>mbNeg</c>, which only an
-    /// <c>x14:negativeFillColor</c> sets. With no negative colour stated the bar is
-    /// <c>COL_LIGHTRED</c>; <c>GetDataBarInfo</c>:1062-1078.
+    /// The rule's positive colour, or — for a value below zero — its <c>x14:negativeFillColor</c>
+    /// if it states one and <c>COL_LIGHTRED</c> if it does not.
+    /// <para>
+    /// <c>mbNeg</c> does <em>not</em> mean "a negative colour was stated". It is
+    /// <c>ScDataBarFormatData</c>'s own default of <strong>true</strong>
+    /// (<c>sc/inc/colorscale.hxx</c>:107), the OOXML importer only ever sets it true again
+    /// (<c>condformatbuffer.cxx</c>:1658-1664), and the single place in <c>sc/</c> that clears it
+    /// is the <em>ODF</em> importer (<c>sc/source/filter/xml/xmlcondformat.cxx</c>:483). So the
+    /// fallback at <c>GetDataBarInfo</c>'s <c>colorscale.cxx</c>:1073-1085 — the colour at
+    /// <c>:1082</c> — is not merely reachable from SpreadsheetML, it is the usual answer there.
+    /// Measured at 26.2.4.2 on <c>sheet-cf-data-bar-default-negative.xlsx</c>.
+    /// </para>
     /// </remarks>
     public Colour Colour { get; init; }
 
@@ -52,7 +60,7 @@ public readonly record struct SheetDataBar
     /// <summary>Whether the cell's own value is still drawn over the bar.</summary>
     /// <remarks>
     /// <c>showValue="0"</c> on the rule. <c>ScOutputData::DrawStrings</c> clears <c>bDoCell</c>
-    /// for such a cell (<c>sc/source/ui/view/output2.cxx</c>:1691-1697), so the number is not
+    /// for such a cell (<c>sc/source/ui/view/output2.cxx</c>:1691-1698), so the number is not
     /// drawn at all — not merely hidden behind the bar.
     /// </remarks>
     public bool ShowValue { get; init; }

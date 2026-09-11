@@ -929,7 +929,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         // A `dataBar` stating `showValue="0"` takes the cell's own value off the page rather than
         // hiding it behind the bar, and it does so at drawing time: `ScOutputData::DrawStrings`
         // clears `bDoCell` after the row's height is already settled
-        // (`sc/source/ui/view/output2.cxx`:1691-1697), so the layout keeps the cell and only the
+        // (`sc/source/ui/view/output2.cxx`:1691-1698), so the layout keeps the cell and only the
         // paint drops it.
         if (sheet.Formatting.HidesValue(row.Row, column.Column)) return;
 
