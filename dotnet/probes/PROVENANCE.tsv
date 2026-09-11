@@ -6,41 +6,16 @@ dotnet/probes/advance-ppem/width.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	presen
 dotnet/probes/advance-ppem/word-pens.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetTextComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SlideChartFaceComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetDrawingComparisonTests.cs;dotnet/src/Paperless.Spreadsheets/Ooxml/XlsxCellFormats.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetIndentUnitTests.cs
 dotnet/probes/caption-keepnext-table/README.md	2026-08-16	current	26.2.4.2	present	current	-
 dotnet/probes/chart-axis-r87/axes-chartset.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/chart-axis-r87/axes-chartset.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/chart-axis-r87/axes-chartset.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/chart-axis-r87/axisticks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/axisticks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/axisticks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/census.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/chart-axis-r87/census.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/chart-axis-r87/census.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/chart-axis-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/chart-axis-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/chart-axis-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/chart-axis-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Charts/ChartPlot.cs;dotnet/src/Paperless.Core/Charts/ChartLayout.cs;dotnet/tests/Paperless.Core.Tests/ChartAxisIntervalZoomTests.cs
-dotnet/probes/chart-axis-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Charts/ChartPlot.cs;dotnet/src/Paperless.Core/Charts/ChartLayout.cs;dotnet/tests/Paperless.Core.Tests/ChartAxisIntervalZoomTests.cs
-dotnet/probes/chart-axis-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Charts/ChartPlot.cs;dotnet/src/Paperless.Core/Charts/ChartLayout.cs;dotnet/tests/Paperless.Core.Tests/ChartAxisIntervalZoomTests.cs
-dotnet/probes/chart-axis-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/score-axes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/score-axes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/score-axes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/sweep-ours.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/sweep-ours.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/sweep-ours.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/vary-h.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/vary-h.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/vary-h.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
 dotnet/probes/chart-axis-r87/vary-h.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/vary-h.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axis-r87/vary-h.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
-dotnet/probes/chart-axisrot-r91/frame-sweep.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
-dotnet/probes/chart-axisrot-r91/label-variants.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
-dotnet/probes/chart-axisrot-r91/turned-census.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
 dotnet/probes/chart-text-metafile/chart-gap.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
 dotnet/probes/chart-text-metafile/chart-vs-textbox.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
 dotnet/probes/chart-text-metafile/facts.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
@@ -172,20 +147,12 @@ dotnet/probes/odp-chart-r72/slides-ours-after.tsv	2026-09-07	current	26.2.4.2	pr
 dotnet/probes/odp-chart-r72/slides-ours-base.tsv	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/TODO.raster-ceiling.md
 dotnet/probes/odp-chart-r72/variants.py	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/TODO.raster-ceiling.md
 dotnet/probes/odp-embed-r79/baselines.py	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/baselines.py	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/census.py	2026-09-07	current	26.2.4.2	present	current	-
 dotnet/probes/odp-embed-r79/census.py	2026-09-07	current	26.2.4.2	present	current	-
 dotnet/probes/odp-embed-r79/count-rules.py	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/count-rules.py	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/empty-paragraph-variants.py	2026-09-07	current	26.2.4.2	present	current	-
 dotnet/probes/odp-embed-r79/empty-paragraph-variants.py	2026-09-07	current	26.2.4.2	present	current	-
 dotnet/probes/odp-embed-r79/ref-render.sh	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/ref-render.sh	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/results.md	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odp-embed-r79/results.md	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odp-embed-r79/spacing-variants.py	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/spacing-variants.py	2026-09-07	current	26.2.4.2	present	current	-
-dotnet/probes/odp-embed-r79/sweep-ours.sh	2026-09-07	current	26.2.4.2	present	current	-
 dotnet/probes/odp-embed-r79/sweep-ours.sh	2026-09-07	current	26.2.4.2	present	current	-
 dotnet/probes/odp-running-r71/README.md	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odp-running-r71/census.py	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md
@@ -209,34 +176,19 @@ dotnet/probes/odp-running-r71/score-bank.py	2026-09-07	current	26.2.4.2	present	
 dotnet/probes/odp-running-r71/slides-ours-after.tsv	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odp-running-r71/slides-ours-head.tsv	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odp-visual-r80/background.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/background.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/baselines.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/baselines.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/confine.sh	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/confine.sh	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/confinement.tsv	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/confinement.tsv	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/count-rules.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/count-rules.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/field-variants.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/field-variants.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/inkgrid.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/inkgrid.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/make-bullet-fixture.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/make-bullet-fixture.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/make-fixture.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/make-fixture.py	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/marks.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/marks.py	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/odp-after.tsv	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/odp-after.tsv	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/odp-before.tsv	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/odp-before.tsv	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/ref-render.sh	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/ref-render.sh	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/results.md	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/results.md	2026-09-08	current	26.2.4.2	present	current	-
-dotnet/probes/odp-visual-r80/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/odp-visual-r80/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	-
 dotnet/probes/ods-band-r75/band-family-1.tsv	2026-09-07	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/TODO.md;dotnet/src/Paperless.Spreadsheets/Layout/SheetBandHeight.cs;dotnet/src/Paperless.Spreadsheets/OpenDocument/OdsPrintSetup.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetOdfBandHeightTests.cs
 dotnet/probes/ods-band-r75/band-family-2.tsv	2026-09-07	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/TODO.md;dotnet/src/Paperless.Spreadsheets/Layout/SheetBandHeight.cs;dotnet/src/Paperless.Spreadsheets/OpenDocument/OdsPrintSetup.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetOdfBandHeightTests.cs
@@ -258,363 +210,147 @@ dotnet/probes/ods-band-r75/results.md	2026-09-07	current	26.2.4.2	present	curren
 dotnet/probes/ods-band-r75/samediff.py	2026-09-07	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/TODO.md;dotnet/src/Paperless.Spreadsheets/Layout/SheetBandHeight.cs;dotnet/src/Paperless.Spreadsheets/OpenDocument/OdsPrintSetup.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetOdfBandHeightTests.cs
 dotnet/probes/ods-band-r75/spans.py	2026-09-07	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/TODO.md;dotnet/src/Paperless.Spreadsheets/Layout/SheetBandHeight.cs;dotnet/src/Paperless.Spreadsheets/OpenDocument/OdsPrintSetup.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetOdfBandHeightTests.cs
 dotnet/probes/ods-band-r75/variants.py	2026-09-07	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/TODO.md;dotnet/src/Paperless.Spreadsheets/Layout/SheetBandHeight.cs;dotnet/src/Paperless.Spreadsheets/OpenDocument/OdsPrintSetup.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetOdfBandHeightTests.cs
-dotnet/probes/ods-notes-r92/base-ods-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/base-orig-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/compare-ods.txt	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/compare-orig.txt	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/compare.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/confine.list	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/head-ods-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/head-orig-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/movers.txt	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/render-ours.sh	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/results.md	2026-09-10	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-notes-r92/rowheights.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/sizes.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/sweep.sh	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-notes-r92/variants.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/ods-resid-r80/after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/census-breaks.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/census-breaks.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/census-rowlimit.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/census-rowlimit.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/census-shapetext.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/census-shapetext.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/cis-variants.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/cis-variants.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/cis-variants.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/cis-variants.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/compare.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/compare.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/moved.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/moved.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/refpages.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/refpages.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/render-hash.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/render-hash.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/rowlimit-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/rowlimit-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/score.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/score.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
 dotnet/probes/ods-resid-r80/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-resid-r80/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-track-r88/after-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/after-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/after-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/batch-check-tmo.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/ods-track-r88/batch-check-tmo.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/ods-track-r88/batch-check-tmo.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/ods-track-r88/head-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/head-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/head-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/head-split.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/head-split.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/head-split.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/join.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/join.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/join.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/movers.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/movers.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/movers.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/refail-times.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/refail-times.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/refail-times.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/refail.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/refail.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/refail.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/render-ours.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/render-ours.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/render-ours.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.OpenDocument/TODO.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-track-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.OpenDocument/TODO.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-track-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.OpenDocument/TODO.md;dotnet/src/Paperless.Spreadsheets/TODO.md
-dotnet/probes/ods-track-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/ods-track-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/ods-track-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/odt-page-r87/agree.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/agree.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/agree.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/anchor.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/anchor.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/anchor.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/census-tabs.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/census-tabs.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/census-tabs.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/confinement.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/confinement.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/confinement.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/movers.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/movers.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/movers.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/pagediff.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/pagediff.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/pagediff.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/render-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/render-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/render-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/residual-startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/residual-startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/residual-startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/residual.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/residual.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/residual.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/rows.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/rows.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/rows.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/startx.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/startx.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/startx.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/odt-page-r87/sweep-odt-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/sweep-odt-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-page-r87/sweep-odt-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/odt-sectable-r92/census-nested.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/compare.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/confine.list	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/confine.sh	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/confinement.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/movers.list	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/nested.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/rows-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/rows-before.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-sectable-r92/startx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/below-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/below-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/belowsheet.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/belowsheet.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/census-writingmode-all.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/census-writingmode-all.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/census-writingmode.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/census-writingmode.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/gen.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/gen.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/offsheet.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/offsheet.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/overdraw.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/overdraw.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/overdraw.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/overdraw.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/poscensus.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/poscensus.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probe-reading.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probe-reading.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/a-spellings.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/a-spellings.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/b0-len2.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/b0-len2.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/b1-len4.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/b1-len4.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/b2-len6.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/b2-len6.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/b3-len10.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/b3-len10.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/d-alone.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/d-alone.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/e-tallrow.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/e-tallrow.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/f-rowheight-0.5in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/f-rowheight-0.5in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/f-rowheight-1in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/f-rowheight-1in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/probes/f-rowheight-2in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/probes/f-rowheight-2in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/read.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/read.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/render.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/render.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/rows-split-firstcut.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/rows-split-firstcut.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/rows-writingmode.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/rows-writingmode.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/split-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/split-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/split-reach.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/split-reach.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/td-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/td-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/tdrange.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/tdrange.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/tmrange.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/tmrange.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/unsplit-control.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/unsplit-control.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/unsplit.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/unsplit.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-split-r82/unsplit.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/unsplit.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/census-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/census-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/census-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/census-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/census-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/census-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/census-tables-in-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/census-tables-in-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/census-tables-in-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/confine.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/confine.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/confine.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/confine.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/confine.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/confine.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/confinement.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/confinement.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/confinement.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/dump.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/dump.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/dump.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/gen-section-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/gen-section-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/gen-section-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/movers.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/movers.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/movers.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/movers.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/movers.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/movers.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/movers.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/movers.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/movers.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/render-list.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/render-list.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/render-list.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/rows-after.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/rows-after.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/rows-after.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/rows-before.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/rows-before.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/rows-before.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/sect-variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/sect-variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/sect-variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/startx.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/startx.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/startx.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/startx.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/startx.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/startx.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/sweep-odt-ours.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/sweep-odt-ours.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/sweep-odt-ours.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/odt-startx-r88/variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-startx-r88/variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/overflow-r69/base-movers.tsv	2026-09-06	current	-	present	current	dotnet/probes/overflow-r69/results.md
 dotnet/probes/overflow-r69/sheets-after.tsv	2026-09-06	current	24.2.7.2	present	current	dotnet/probes/overflow-r69/results.md
 dotnet/probes/ppt-autofit-r84/autofit-trace.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/autofit-trace.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/linkcolour.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/linkcolour.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/linkverdict.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/linkverdict.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/mover-scores.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/mover-scores.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/reach.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/reach.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/size-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/size-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/sizes.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/sizes.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/stream-scan-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/stream-scan-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
 dotnet/probes/ppt-autofit-r84/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-autofit-r84/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
-dotnet/probes/ppt-fit-r85/autofit-trace.patch	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/autofit-trace.patch	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/baselines.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/baselines.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/hash-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/hash-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/odp-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/odp-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/odp-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/odp-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/paths.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/paths.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/persist.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/persist.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/placeholder-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/placeholder-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/placeholder-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/placeholder-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/sample-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/sample-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/sample-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/sample-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/score.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/score.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/size-sweep.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/size-sweep.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/sizes-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/sizes-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/sizes-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/sizes-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/sizes-ref.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/sizes-ref.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/sizes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/sizes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/slides-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/slides-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/slides-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/slides-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/wrap-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/wrap-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
-dotnet/probes/ppt-fit-r85/wrap_shim.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/ppt-fit-r85/wrap_shim.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/refdev-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/refdev-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
@@ -625,293 +361,117 @@ dotnet/probes/refdev-01/slides-before.tsv	2026-08-15	current	26.2.4.2	present	cu
 dotnet/probes/refdev-01/words-after.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/refdev-01/words-before.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/rtf-bookmark-r88/base-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/base-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/base-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/base-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/base-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/base-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/base-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/base-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/base-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/check.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/check.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/check.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/drawn-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/drawn-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/drawn-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/extractdiff.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/extractdiff.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/extractdiff.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/extractdiff.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/extractdiff.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/extractdiff.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/genpool.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfStyleFormattingTests.cs
-dotnet/probes/rtf-bookmark-r88/genpool.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfStyleFormattingTests.cs
 dotnet/probes/rtf-bookmark-r88/genpool.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfStyleFormattingTests.cs
 dotnet/probes/rtf-bookmark-r88/genprobes.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfReferenceFieldTests.cs
-dotnet/probes/rtf-bookmark-r88/genprobes.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfReferenceFieldTests.cs
-dotnet/probes/rtf-bookmark-r88/genprobes.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfReferenceFieldTests.cs
-dotnet/probes/rtf-bookmark-r88/head-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/head-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/head-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/head-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/head-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/head-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/head-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/head-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/head-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/marks-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/marks-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/marks-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/pdfdiff.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/pdfdiff.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/pdfdiff.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/pool-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/pool-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/pool-reference.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/poolcensus.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/poolcensus.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/poolcensus.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/poolcensus.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/poolcensus.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/poolcensus.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/readpool.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/readpool.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/readpool.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/refcensus.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/refcensus.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/refcensus.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/refcensus.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/refcensus.txt	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/refcensus.txt	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfBookmarks.cs;dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/rtf-bookmark-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfBookmarks.cs;dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/rtf-bookmark-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfBookmarks.cs;dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/rtf-bookmark-r88/rotate.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/rotate.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/rotate.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
-dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-odt-after.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-odt-after.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/confine-odt-after.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/confine-odt-base.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-odt-base.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-odt-base.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/confine-orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/confine-orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/confine-orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/expand.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/expand.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/expand.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/fwcensus.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/fwcensus.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/fwcensus.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/genbookmarks.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/genbookmarks.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/genbookmarks.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/genstyles.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/genstyles.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/genstyles.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/head-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/head-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/head-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/patchref.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/patchref.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/patchref.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/poolcensus.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/poolcensus.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/poolcensus.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/readstyles.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/readstyles.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/readstyles.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
-dotnet/probes/rtf-holdover-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/rtf-holdover-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
 dotnet/probes/rtf-holdover-r87/score.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/score.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/score.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/sweep-hash.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/sweep-hash.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/sweep-hash.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-holdover-r87/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/base-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/base-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/bodypict-after.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/bodypict-after.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/bytediff.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/bytediff.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/census-all.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
-dotnet/probes/rtf-htmautsp-r85/census-all.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
-dotnet/probes/rtf-htmautsp-r85/census-all.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/census-all.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/census.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/census.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/census.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/census.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/column.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/column.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/compare.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/compare.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/compareab.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/compareab.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/confinement.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/confinement.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/del-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/del-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genbodypict.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genbodypict.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/gendel.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/gendel.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genhead.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genhead.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genlist.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genlist.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genlistn.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genlistn.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genmove.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genmove.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genown.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genown.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genpict.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genpict.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genprefix.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genprefix.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genresidual.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genresidual.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genrow.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genrow.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/gensuffix.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/gensuffix.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/gensuper.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/gensuper.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/genwindow.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/genwindow.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/head-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/head-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/list-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/list-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/listn-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/listn-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/measureab.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/measureab.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/move-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/move-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/oursrender.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/oursrender.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/own-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/own-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/pages.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/pages.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/pict-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/pict-ref.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/prefix-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/prefix-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/refrender.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/refrender.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/residual-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/residual-ref.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
 dotnet/probes/rtf-htmautsp-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
 dotnet/probes/rtf-htmautsp-r85/row-after.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/row-after.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/rowcuts.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/rowcuts.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/scan.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/scan.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/score.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/score.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/snap.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/snap.py	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
-dotnet/probes/sheet-fill-r84/census-ods.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/census-ods.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/census-ods.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/census-ods.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/census-shapebox.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/census-shapebox.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/census-style.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/census-style.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/compare.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/compare.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/make-fixture.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/make-fixture.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/marks-table.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/marks-table.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/marks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/marks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/ods-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/ods-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/ods-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/ods-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/orig-sheets-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/orig-sheets-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/orig-sheets-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/orig-sheets-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/orig-slides-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/orig-slides-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/orig-words-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/orig-words-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/score-bank.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/score-bank.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-fill-r84/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/census-msoclr.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/census-txo.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/clip-pixels.tsv	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/dump-escher.py	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/expected-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/expected-ink.tsv	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/gate-check.txt	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/gate-sheets.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/ink-after.tsv	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/ink-base.tsv	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/ink-movers.tsv	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/ink-ranking.tsv	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/movers-clip.txt	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/movers.txt	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/msoclr-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/pixel-diff.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/sheet-shapefill-r92/score-ink.py	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/sweep-ours.py	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/ticap-page3-triptych.png	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/sheet-shapefill-r92/txo-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheets-b-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-b-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-b011-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
@@ -1097,24 +657,6 @@ dotnet/probes/slides-f-01/census-slides.tsv	2026-08-13	current	26.2.4.2	present	
 dotnet/probes/slides-f-01/census-words.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/slides-f-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/slides-f-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
-dotnet/probes/slides-ink-r94/3492-page19-after-vs-ref.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/census-gtext.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/census-srcand.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/esch.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/faa67-after.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/faa67-before.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/fontscale-variants.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/fontscale-variants.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md;dotnet/src/Paperless.Presentations/Layout/SlideAutofit.cs
-dotnet/probes/slides-ink-r94/gtext-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/ink.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/nas11-table.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/ole.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/phuket26-wordart.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/src/Paperless.Vector/Metafiles/MetafileBlits.cs;dotnet/src/Paperless.Presentations/Layout/SlideAutofit.cs;dotnet/tests/Paperless.Vector.Tests/MetafileTransparencyTests.cs
-dotnet/probes/slides-ink-r94/score-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/srcand-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
-dotnet/probes/slides-ink-r94/sweep-ours.sh	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
 dotnet/probes/slides-ink-ranking.tsv	2026-08-09	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/TODO.raster-ceiling.md
 dotnet/probes/slides-metrics-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/slides-metrics-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
@@ -1192,38 +734,21 @@ dotnet/probes/slides-verify-01/results.md	2026-08-15	current	26.2.4.2	present	cu
 dotnet/probes/slides-verify-01/third-conversion.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/tab-over-spacing/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/title-font-r92/candidate-scores.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
-dotnet/probes/title-font-r92/candidate-scores.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
-dotnet/probes/title-font-r92/dump-stream.py	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/dump-stream.py	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/face-scan-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
-dotnet/probes/title-font-r92/face-scan-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
-dotnet/probes/title-font-r92/face-scan-v8-roman.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/face-scan-v8-roman.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/face-scan.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/face-scan.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/implied-advances-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/implied-advances-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/implied-advances.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/implied-advances.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/make-variants.sh	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/make-variants.sh	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/reach-census.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/reach-census.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/reach-census.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/reach-census.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/reach-documents.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
-dotnet/probes/title-font-r92/reach-documents.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
-dotnet/probes/title-font-r92/render-ref.sh	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/render-ref.sh	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/results.md	2026-09-10	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/probes/slide-title-track-r90/findings.md;dotnet/src/Paperless.Presentations/Layout/SlideText.cs
-dotnet/probes/title-font-r92/results.md	2026-09-10	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/probes/slide-title-track-r90/findings.md;dotnet/src/Paperless.Presentations/Layout/SlideText.cs
-dotnet/probes/title-font-r92/run-census-ours-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/run-census-ours-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/run-census-ref-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
-dotnet/probes/title-font-r92/run-census-ref-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/run-census.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/run-census.py	2026-09-10	current	26.2.4.2	present	current	
-dotnet/probes/title-font-r92/variant-table.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/variant-table.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/tooling-01/analyze-534.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/tooling-01/poppler-534-words_of.tsv	2026-08-13	current	26.2.4.2	present	current	-
@@ -1415,24 +940,6 @@ dotnet/probes/words-regress-01/words-after.tsv	2026-08-15	current	26.2.4.2	prese
 dotnet/probes/words-regress-01/words-before.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-row-height/pitch.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/words-row-height/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	dotnet/CLAUDE.md
-dotnet/probes/words-seat-r94/anchor-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/anchor-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/anchor-kind.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/anchor-kind.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/colscore.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/columnx.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/confine.list	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/confinement.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/odt-colscore.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/odt-movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/odt-rows-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/odt-rows-before.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/odt-selfmove.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/odt-startx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/plain-margins-crop.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/results.md	2026-09-11	current	26.2.4.2	present	current	
-dotnet/probes/words-seat-r94/selfmove.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
-dotnet/probes/words-seat-r94/variant-columnx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
 dotnet/probes/words-table-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-table-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-version-screen/bucket.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
@@ -1510,3 +1017,496 @@ dotnet/research/probes/slides-r30/final-ink.tsv	2026-08-09	pre-container	24.2.7.
 dotnet/research/probes/slides-r30/final-parity.tsv	2026-08-09	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/slides-r30/weight-ink.tsv	2026-08-09	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/slides-r30/weight-parity.tsv	2026-08-09	pre-container	24.2.7.2	unverified	archival	-
+dotnet/probes/chart-axis-r87/axes-chartset.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/axisticks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/census.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Charts/ChartPlot.cs;dotnet/src/Paperless.Core/Charts/ChartLayout.cs;dotnet/tests/Paperless.Core.Tests/ChartAxisIntervalZoomTests.cs
+dotnet/probes/chart-axis-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/score-axes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/sweep-ours.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/vary-h.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/vary-h.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axisrot-r91/frame-sweep.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
+dotnet/probes/chart-axisrot-r91/label-variants.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
+dotnet/probes/chart-axisrot-r91/turned-census.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/chart-axisrot-r91/results.md
+dotnet/probes/odp-embed-r79/baselines.py	2026-09-07	current	26.2.4.2	present	current	-
+dotnet/probes/odp-embed-r79/census.py	2026-09-07	current	26.2.4.2	present	current	-
+dotnet/probes/odp-embed-r79/count-rules.py	2026-09-07	current	26.2.4.2	present	current	-
+dotnet/probes/odp-embed-r79/empty-paragraph-variants.py	2026-09-07	current	26.2.4.2	present	current	-
+dotnet/probes/odp-embed-r79/ref-render.sh	2026-09-07	current	26.2.4.2	present	current	-
+dotnet/probes/odp-embed-r79/results.md	2026-09-07	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odp-embed-r79/spacing-variants.py	2026-09-07	current	26.2.4.2	present	current	-
+dotnet/probes/odp-embed-r79/sweep-ours.sh	2026-09-07	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/background.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/baselines.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/confine.sh	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/confinement.tsv	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/count-rules.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/field-variants.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/inkgrid.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/make-bullet-fixture.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/make-fixture.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/marks.py	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/odp-after.tsv	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/odp-before.tsv	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/ref-render.sh	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/results.md	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/odp-visual-r80/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	-
+dotnet/probes/ods-resid-r80/after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/census-breaks.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/census-rowlimit.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/census-shapetext.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/cis-variants.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/cis-variants.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/compare.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/moved.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/refpages.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/render-hash.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/rowlimit-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/score.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-resid-r80/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-track-r88/after-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/batch-check-tmo.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/ods-track-r88/head-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/head-split.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/join.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/movers.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/refail-times.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/refail.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/render-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.OpenDocument/TODO.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-track-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/odt-page-r87/agree.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/anchor.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/census-tabs.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/confinement.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/pagediff.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/render-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/residual-startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/residual.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/startx.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/sweep-odt-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-split-r82/below-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/belowsheet.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/census-writingmode-all.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/census-writingmode.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/gen.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/offsheet.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/overdraw.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/overdraw.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/poscensus.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probe-reading.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/a-spellings.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/b0-len2.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/b1-len4.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/b2-len6.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/b3-len10.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/d-alone.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/e-tallrow.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/f-rowheight-0.5in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/f-rowheight-1in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/probes/f-rowheight-2in.fodt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/read.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/render.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/rows-split-firstcut.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/rows-writingmode.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/split-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/split-reach.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/td-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/tdrange.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/tmrange.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/unsplit-control.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/unsplit.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/unsplit.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/census-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/census-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/census-tables-in-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/confine.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/confine.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/confinement.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/dump.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/gen-section-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/movers.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/movers.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/movers.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/render-list.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/rows-after.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/rows-before.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/sect-variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/startx.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/startx.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/sweep-odt-ours.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/ppt-autofit-r84/autofit-trace.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/linkcolour.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/linkverdict.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/mover-scores.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/reach.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/size-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/sizes.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/stream-scan-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-fit-r85/autofit-trace.patch	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/baselines.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/hash-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/odp-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/odp-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/paths.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/persist.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/placeholder-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/placeholder-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sample-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sample-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/score.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/size-sweep.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes-ref.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/slides-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/slides-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/wrap-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/wrap_shim.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/rtf-bookmark-r88/base-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/base-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/base-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/check.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/drawn-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/extractdiff.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/extractdiff.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/genpool.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfStyleFormattingTests.cs
+dotnet/probes/rtf-bookmark-r88/genprobes.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfReferenceFieldTests.cs
+dotnet/probes/rtf-bookmark-r88/head-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/head-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/head-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/marks-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/pdfdiff.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/pool-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/poolcensus.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/poolcensus.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/readpool.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/refcensus.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/refcensus.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfBookmarks.cs;dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/rtf-bookmark-r88/rotate.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-odt-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-odt-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/expand.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/fwcensus.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/genbookmarks.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/genstyles.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/head-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/patchref.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/poolcensus.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/readstyles.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/rtf-holdover-r87/score.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/sweep-hash.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/base-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/bodypict-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/bytediff.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/census-all.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
+dotnet/probes/rtf-htmautsp-r85/census-all.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/census.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/census.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/column.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/compare.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/compareab.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/confinement.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/del-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genbodypict.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/gendel.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genhead.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genlist.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genlistn.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genmove.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genown.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genpict.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genprefix.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genresidual.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genrow.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/gensuffix.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/gensuper.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genwindow.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/head-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/list-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/listn-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/measureab.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/move-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/oursrender.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/own-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/pages.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/pict-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/prefix-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/refrender.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/residual-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
+dotnet/probes/rtf-htmautsp-r85/row-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/rowcuts.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/scan.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/score.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/snap.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/axes-chartset.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/axisticks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/census.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Charts/ChartPlot.cs;dotnet/src/Paperless.Core/Charts/ChartLayout.cs;dotnet/tests/Paperless.Core.Tests/ChartAxisIntervalZoomTests.cs
+dotnet/probes/chart-axis-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/score-axes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/sweep-ours.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/vary-h.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/vary-h.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/ods-track-r88/after-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/batch-check-tmo.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/ods-track-r88/head-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/head-split.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/join.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/movers.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/refail-times.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/refail.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/render-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.OpenDocument/TODO.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-track-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/odt-page-r87/agree.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/anchor.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/census-tabs.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/confinement.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/pagediff.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/render-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/residual-startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/residual.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/startx.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/sweep-odt-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-sectable-r92/census-nested.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/compare.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/confine.list	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/confine.sh	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/confinement.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/movers.list	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/nested.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/rows-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/rows-before.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-sectable-r92/startx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/census-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/census-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/census-tables-in-sections.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/confine.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/confine.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/confinement.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/dump.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/gen-section-columns.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/movers.list	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/movers.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/movers.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/render-list.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/rows-after.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/rows-before.tsv	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/sect-variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/startx.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/startx.txt	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/sweep-odt-ours.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-startx-r88/variants.py	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/rtf-bookmark-r88/base-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/base-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/base-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/check.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/drawn-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/extractdiff.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/extractdiff.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/genpool.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfStyleFormattingTests.cs
+dotnet/probes/rtf-bookmark-r88/genprobes.py	2026-09-09	current	26.2.4.2	present	current	dotnet/tests/Paperless.WordProcessing.Tests/RtfReferenceFieldTests.cs
+dotnet/probes/rtf-bookmark-r88/head-odt.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/head-orig.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/head-rtf.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/marks-vs-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/pdfdiff.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/pool-reference.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/poolcensus.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/poolcensus.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/readpool.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/refcensus.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/refcensus.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfBookmarks.cs;dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/rtf-bookmark-r88/rotate.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/rtf-movers.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/score.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/sweep-hash.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/rtf-bookmark-r88/sweep-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/base-ods-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/base-orig-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/compare-ods.txt	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/compare-orig.txt	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/compare.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/confine.list	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/head-ods-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/head-orig-rows.tsv	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/movers.txt	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/render-ours.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/results.md	2026-09-10	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-notes-r92/rowheights.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/sizes.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/sweep.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/ods-notes-r92/variants.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-odt-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-odt-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/expand.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/fwcensus.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/genbookmarks.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/genstyles.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/head-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/patchref.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/poolcensus.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/readstyles.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/rtf-holdover-r87/score.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/sweep-hash.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/sheet-fill-r84/census-ods.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/census-ods.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/census-shapebox.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/census-style.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/compare.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/make-fixture.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/marks-table.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/marks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/ods-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/ods-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/orig-sheets-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/orig-sheets-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/orig-slides-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/orig-words-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/score-bank.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-fill-r84/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/census-msoclr.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/census-txo.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/clip-pixels.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/dump-escher.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/expected-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/expected-ink.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/gate-check.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/gate-sheets.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/ink-after.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ink-base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ink-movers.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ink-ranking.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/movers-clip.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/movers.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/msoclr-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/pixel-diff.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/score-ink.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/sweep-ours.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ticap-page3-triptych.png	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/txo-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/title-font-r92/candidate-scores.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/dump-stream.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/face-scan-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/face-scan-v8-roman.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/face-scan.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/implied-advances-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/implied-advances.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/make-variants.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/reach-census.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/reach-census.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/reach-documents.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/render-ref.sh	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/results.md	2026-09-10	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/probes/slide-title-track-r90/findings.md;dotnet/src/Paperless.Presentations/Layout/SlideText.cs
+dotnet/probes/title-font-r92/run-census-ours-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/run-census-ref-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/title-font-r92/run-census.py	2026-09-10	current	26.2.4.2	present	current	
+dotnet/probes/title-font-r92/variant-table.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/slides-ink-r94/3492-page19-after-vs-ref.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/census-gtext.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/census-srcand.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/esch.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/faa67-after.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/faa67-before.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/fontscale-variants.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/fontscale-variants.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md;dotnet/src/Paperless.Presentations/Layout/SlideAutofit.cs
+dotnet/probes/slides-ink-r94/gtext-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/ink.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/nas11-table.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/ole.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/phuket26-wordart.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/src/Paperless.Vector/Metafiles/MetafileBlits.cs;dotnet/src/Paperless.Presentations/Layout/SlideAutofit.cs;dotnet/tests/Paperless.Vector.Tests/MetafileTransparencyTests.cs
+dotnet/probes/slides-ink-r94/score-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/srcand-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/sweep-ours.sh	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/words-seat-r94/anchor-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/anchor-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/anchor-kind.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/anchor-kind.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/colscore.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/columnx.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/confine.list	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/confinement.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-colscore.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-rows-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-rows-before.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-selfmove.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-startx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/plain-margins-crop.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/results.md	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/words-seat-r94/selfmove.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/variant-columnx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
