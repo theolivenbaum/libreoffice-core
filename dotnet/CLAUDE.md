@@ -1182,10 +1182,32 @@ counting columns.**
 last section's.** `LaidOutPage.BodyArea` is `geometry.TextArea` at the moment the page is *emitted*,
 so a `text:section`'s own indents reach the layout and not the drawing wherever a later section on
 the same page restores the master's margins — 26.2.4.2 draws a 0.5 in-indented two-column section's
-first column at 108.10 and this tree at 72.00, with the same wrap. **Left**, because the only one of
-the corpus's 10 indented sections the gate can see, `644730BRI0mna000BOX361539B00public0`, runs to
-the end of the body and is page-for-page exact. What *was* closed is the line-level half of the same
-confusion: `PageContent.ColumnArea(PlacedLine)` used to send a line stating one column to the
+first column at 108.10 and this tree at 72.00, with the same wrap.
+
+***Done, and the gate could not have scored it — the fixture is where the 36 pt is.*** A
+`PlacedLine` now carries the text area it was laid out in (`BodyLeft`/`BodyWidth`, horizontal only:
+a text section's top and height are the page's) and `LaidOutPage.BodyAreaOf` divides *that* rather
+than `BodyArea`; `PageDrawing.DrawBody` groups by it as well as by the column, **and its
+single-column fast path had to learn about it too**, or a page of one-column text drawn from two
+different left edges takes that branch and is drawn from one. On `odt-sectable-r92/nested.py`'s
+`plain-margins` the three left edges go 72.00/—/324.00 to **72.00/108.00/315.00** against
+26.2.4.2's 72.10/108.10/315.10, with every span count equal; over five variants mean |Δx|
+**14.500 → 0.100 pt**, which is the two writers' constant text-origin offset. On the corpus **5 of
+338 `.odt` renderings move and they are exactly the five documents with an indented `text:section`**
+— 71 spans in all, each document moving its own by one constant — and the two whose pagination
+agrees with 26.2.4.2 improve (2.931 → 2.885 and 2.462 → 1.347 pt of left-edge distance). `.odt`
+gate 293 of 338 before and after, **no verdict either way**, and 1305 words, slides and sheets
+renderings byte-identical. `probes/words-seat-r94/`.
+
+**The instrument that hides this is the one two rounds already used.** A merged-baseline line
+matcher samples only the *first* column of a two-column page, so a wrong *second* column is
+invisible in it — `odt-startx-r88/startx.py` reports the three `150_5300_13` revisions as
+unchanged when 6, 14 and 1 of their spans moved. `probes/words-seat-r94/columnx.py` clusters every
+span's own left edge and merges nothing; `colscore.py` pairs those clusters with the reference's;
+`selfmove.py` pairs spans between our own two legs, which is what a document that sits a page out
+needs.
+
+What was closed with the line-level half of the same confusion in the round before: `PageContent.ColumnArea(PlacedLine)` used to send a line stating one column to the
 **page's** column at that line's index, which drew a full-measure heading inside a column — 4 of 696
 `.docx`/`.doc`/`.rtf` renderings move with it, none changes a page or a glyph count, and
 `150_5300_13_chg8`'s centred `Chapter 3.  RUNWAY DESIGN` goes from 205.05 to **231.75** against

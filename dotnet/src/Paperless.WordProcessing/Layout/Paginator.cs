@@ -98,14 +98,34 @@ public sealed record PaginationOptions
     /// origin. Applied that widely to this tree it moves <b>10 of the 338</b> words renderings and is
     /// net worse against 26.2.4.2: the three documents this exists for improve (mean page ink
     /// 1.347 → 0.588, 2.302 → 0.868, 3.065 → 2.441), and <c>b053-19</c> goes 11.254 → 19.508 and
-    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524. The likely missing half is
-    /// <c>bCheckBottom = !DoesObjFollowsTextFlow()</c>
-    /// (<c>tocntntanchoredobjectposition.cxx</c>:457): a frame that follows the text flow has its
-    /// <em>bottom</em> correction skipped, and <c>PROP_FOLLOW_TEXT_FLOW</c> is written only for an
-    /// anchor inside a table (<c>GraphicImport.cxx</c>:1316-1318, :1859-1861), so the pool default
-    /// decides everywhere else. Establishing that is its own round; until then the capture is applied
-    /// where this round measured it — the two margin bands — and nowhere else, which regresses nothing
-    /// because those two origins reach nothing that was placed before.
+    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524.
+    /// </para>
+    /// <para>
+    /// <b>The missing half is not <c>bCheckBottom = !DoesObjFollowsTextFlow()</c>, which this remark
+    /// used to name, and that suspect is refuted rather than untested.</b> The bottom correction is
+    /// skipped only for an object that follows the text flow
+    /// (<c>tocntntanchoredobjectposition.cxx</c>:457), and <c>IsFollowingTextFlow</c>'s pool default is
+    /// <em>false</em> (<c>sw/source/core/bastyp/init.cxx</c>:437) with no writerfilter path changing
+    /// it: the three seats that write <c>PROP_FOLLOW_TEXT_FLOW</c> are each gated on the anchor being
+    /// inside a table (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
+    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883). So the bottom check is <em>on</em> for every
+    /// object not in a table — which is what the wide rule already does. Censused over the corpus,
+    /// <b>552 of 6055</b> absolutely positioned objects in 40 of the 272 DOCX are inside a
+    /// <c>w:tbl</c>, and <b>none of them is in any of the ten documents the wide rule moved</b>.
+    /// <c>probes/words-seat-r94/anchor-census.txt</c>.
+    /// </para>
+    /// <para>
+    /// Two other halves are named there instead, and one of them corrects this remark's own reading.
+    /// <c>mbDoNotCaptureAnchoredObj</c> is <c>bConsidered &amp;&amp; !mbFollowTextFlow &amp;&amp;
+    /// DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE</c>, and <c>bConsidered</c> asks a different question of the two
+    /// object kinds (<c>anchoredobjectposition.cxx</c>:125-144): a fly is
+    /// <c>bWrapThrough &amp;&amp; !bTextBox</c> and a draw object is <c>bWrapThrough || !bTextBox</c>, so
+    /// a <em>shape with no text box</em> is never captured whatever its wrap, not only a wrap-through
+    /// one. And the area of the wide rule is wrong: r85 clamped to the sheet at every origin where the
+    /// C++ clamps to the page <em>body</em> at every origin but <c>PAGE_FRAME</c> and
+    /// <c>PAGE_PRINT_AREA</c> (:562-573). Until one of those is measured the capture is applied where
+    /// r85 measured it — the two margin bands — and nowhere else, which regresses nothing because those
+    /// two origins reach nothing that was placed before.
     /// </para>
     /// <para>
     /// Set for a DOCX stating <c>compatibilityMode</c> 15 or more. Below 15 the C++ area is the sheet
@@ -1743,7 +1763,14 @@ public sealed class Paginator
                     // an anchored frame takes back off again. See `PlacedLine.FlyDisplacement`.
                     lineIndex + i == 0 && paragraphIndex == displacedBlock
                         ? displacedBy
-                        : Length.Zero));
+                        : Length.Zero,
+
+                    // And the text area in force *here*, for the same reason the columns are: a text
+                    // section is inset from the body's sides, and the page is written with whichever
+                    // section's area is current when it is emitted. Horizontal only — see
+                    // `PageContent.BodyAreaOf`.
+                    page.TextArea.X,
+                    page.TextWidth));
 
                 // A stretch that shares its line with the next one leaves the pen where it is: the box
                 // after it is more of the same line, at the same top.

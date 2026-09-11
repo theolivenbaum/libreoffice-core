@@ -2349,12 +2349,28 @@ is read and verified, so what remains is the filling of pages rather than the me
   *body* (`anchoredobjectposition.cxx`:562-573). Applied that widely it moves 10 of the 338 words
   renderings and is net worse: `b053-19` goes 11.254 to 19.508 of page ink against 26.2.4.2 and
   `023_Unit_Circle_Chart_Circular_Percentage` 10.820 to 16.524, while the three documents it exists
-  for improve. **The likely missing half is `bCheckBottom = !DoesObjFollowsTextFlow()`**
-  (`tocntntanchoredobjectposition.cxx`:457), which skips the *bottom* correction for a frame that
-  follows the text flow — and `PROP_FOLLOW_TEXT_FLOW` is written only for an anchor inside a table
-  (`GraphicImport.cxx`:1316-1318, :1859-1861), so the pool default decides it everywhere else. Until
-  that is established the capture is applied to the two margin bands alone, which regresses nothing
-  because no frame reached those origins before.
+  for improve.
+
+  **`bCheckBottom = !DoesObjFollowsTextFlow()` was named here as the likely missing half and is now
+  refuted.** The bottom correction is skipped only for an object that follows the text flow
+  (`tocntntanchoredobjectposition.cxx`:457); `IsFollowingTextFlow`'s pool default is **false**
+  (`sw/source/core/bastyp/init.cxx`:437), no writerfilter path changes that default, and its three
+  per-object writes are each gated on the anchor being inside a table (`GraphicImport.cxx`:1316-1318,
+  :1859-1861, `OOXMLFastContextHandler.cxx`:1879-1883). So the bottom check is *on* for every object
+  not in a table, which is what the wide rule already does. Censused: **552 of 6055** absolutely
+  positioned objects in 40 of the 272 DOCX are inside a `w:tbl`, and **none of them is in any of the
+  ten documents the wide rule moved**. `probes/words-seat-r94/`.
+
+  **Two halves are left in its place.** (1) `mbDoNotCaptureAnchoredObj` is
+  `bConsidered && !mbFollowTextFlow && DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE`, and `bConsidered` is
+  `bWrapThrough && !bTextBox` for a fly but `bWrapThrough || !bTextBox` for a draw object
+  (`anchoredobjectposition.cxx`:125-144) — so a *shape with no text box* is never captured whatever
+  its wrap, and "wrap-through and nothing else" is not the whole escape. (2) The wide rule clamped to
+  the **sheet** at every origin where the C++ clamps to the page **body** at every origin but
+  `PAGE_FRAME` and `PAGE_PRINT_AREA` (:562-573); that is the one that can still move the eight, and
+  on the three `Unit_Circle` documents it has to be separated from `ChartLayout`'s own fit before it
+  can be scored. Until then the capture is applied to the two margin bands alone, which regresses
+  nothing because no frame reached those origins before.
 
 - **`wp14:sizeRelH` and `wp14:sizeRelV` are unread, and the reach is three documents.** 1873
   `sizeRel*` elements in 146 of the 272 corpus DOCX, of which exactly **three carry a non-zero

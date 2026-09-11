@@ -243,16 +243,20 @@ public static class PageDrawing
         IDrawingSink sink,
         Colour background = default)
     {
-        if (page.ColumnCount <= 1 && page.Lines.All(line => line.Columns <= 1))
+        if (page.ColumnCount <= 1
+            && page.Lines.All(line => line.Columns <= 1 && page.BodyAreaOf(line) == page.BodyArea))
         {
             DrawLines(page.BodyArea, page.Lines, blocks, sink, background);
             return;
         }
 
         // Grouped by the *line's* own band rather than by the page's column index, because one page can
-        // carry sections that disagree about how many columns there are — see `PlacedLine.Columns`.
-        foreach (IGrouping<(int Columns, int Column), PlacedLine> band in
-                 page.Lines.GroupBy(line => (line.Columns, line.Column)))
+        // carry sections that disagree about how many columns there are — see `PlacedLine.Columns` — and
+        // about the text area those columns divide, which is what the last two members are: a text
+        // section's own indents make a full-measure line above it and one below it different bands.
+        foreach (IGrouping<(int Columns, int Column, Length Left, Length Width), PlacedLine> band in
+                 page.Lines.GroupBy(
+                     line => (line.Columns, line.Column, line.BodyLeft, line.BodyWidth)))
         {
             DrawLines(page.ColumnArea(band.First()), [.. band], blocks, sink, background);
         }
