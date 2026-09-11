@@ -1295,3 +1295,32 @@ done
 And do not let a single unreproduced failure pass silently as "flaky". Say it happened, say it
 did not reproduce, and say you could not name it — a project this dependent on measured counts
 cannot afford a habit of explaining away the ones that disagree.
+
+## A waiter that greps for the job it is waiting on will never exit
+
+`until ! pgrep -f 'confine.sh' >/dev/null; do sleep 20; done` looks obviously correct and
+cannot terminate. `pgrep -f` matches against the **full command line of every process**,
+including the waiting shell's own — and that command line contains the string `confine.sh`.
+So the waiter matches itself, forever, whether or not the sweep is running.
+
+Ten of these accumulated in one session before anyone noticed, because the failure is silent:
+the waiter simply never reports, which looks exactly like a sweep that is still going. They
+were found only when something else asked why background work had been pending for an hour.
+
+Two ways out, either is fine:
+
+```sh
+# 1. Wait on a marker the job itself writes, not on the job's name.
+until [ -f "$OUT/DONE" ]; do sleep 20; done
+
+# 2. If you must match a name, exclude your own process.
+until ! pgrep -f 'confine[.]sh' | grep -qv "^$$\$"; do sleep 20; done
+```
+
+The bracket trick — `confine[.]sh` — is the habitual `ps | grep` dodge and it does **not**
+help here, because the waiter's command line contains the bracketed pattern too. Only the
+marker file or an explicit self-exclusion works.
+
+The general form is the one this skill keeps meeting: **before believing a measurement, check
+it is not a fact about the instrument.** A waiter that never fires and a sweep that never
+finishes look identical from outside.
