@@ -34,10 +34,15 @@ namespace Paperless.Spreadsheets.MsBinary;
 /// walk is done here from the shape side, which needs no map.
 /// </para>
 /// <para>
-/// <strong>A shape contributes its picture and its text, not its fill or its outline.</strong> That
-/// is the SpreadsheetML path's limit too (<see cref="SheetShapePainter"/>), so the two formats
-/// produce the same page from the same document. Fills and outlines are recorded in the module's
-/// TODO.
+/// <strong>A shape's fill and outline are read, and three object kinds must not take them.</strong>
+/// Calc builds its own <c>SdrObject</c> for a chart, a form control and an OLE object — the three
+/// that <c>SetCustomDffObj(true)</c> marks (<c>sc/source/filter/excel/xiescher.cxx</c>:1666, 2066,
+/// 2954) — and the replacement is not the object the Escher attributes were applied to, so the
+/// fill and the line are dropped with it. Measured at the reference on
+/// <c>TICAPCapability_Final.xls</c> and <c>014_Contextures_chart_sample</c>: their <c>Chart 1</c>,
+/// <c>OptionButton1</c> and <c>Picture 228</c> all state a fill colour and all come back from
+/// 26.2.4.2's own flat ODF as <c>draw:fill="none" draw:stroke="none"</c>, while the text boxes
+/// beside them come back filled and stroked. See <see cref="EscherInk"/>.
 /// </para>
 /// <para>
 /// <strong>A picture is named by a <c>pib</c> and stored in the workbook, not in the sheet.</strong>
@@ -55,8 +60,15 @@ namespace Paperless.Spreadsheets.MsBinary;
 /// The workbook's picture store, keyed by the one-based index a shape's <c>pib</c> holds. Empty for
 /// a workbook with no drawing group, which is most of them.
 /// </param>
+/// <param name="palette">
+/// The workbook's colour table, which a shape's <c>MSO_CLR</c> nearly always references rather
+/// than stating a literal colour. Null for a caller that has none, which resolves every such
+/// reference to the format's own white or black.
+/// </param>
 internal sealed class XlsDrawingCollector(
-    List<Diagnostic> diagnostics, IReadOnlyDictionary<int, EscherBlip>? blips = null)
+    List<Diagnostic> diagnostics,
+    IReadOnlyDictionary<int, EscherBlip>? blips = null,
+    XlsCellFormats? palette = null)
 {
     /// <summary>
     /// How many bytes of Escher stream are accepted before the rest is dropped.
@@ -309,7 +321,10 @@ internal sealed class XlsDrawingCollector(
             // Calc's ODF import has no such guard: `ScXMLTableRowCellContext` hands every
             // `draw:` child to `XMLShapeImportHelper` and every one of them is inserted.
             SheetPicture picture = PictureOf(shape);
-            EscherInk.Ink ink = EscherInk.Read(shape.Properties);
+            EscherInk.Ink ink = KeepsEscherInk(shape, entry)
+                ? EscherInk.Read(shape.Properties, shape.ShapeType, palette is null ? null : palette.SchemeColour)
+                : default;
+
             if (picture.IsEmpty && entry.Text is not { Length: > 0 } && entry.Type != ChartObject
                 && !ink.HasInk)
             {
@@ -642,6 +657,37 @@ internal sealed class XlsDrawingCollector(
     /// </remarks>
     /// <param name="type">The <c>ftCmo</c> object type.</param>
     private static bool IsFormControl(ushort type) => type is 7 or (>= 11 and <= 20);
+
+    /// <summary>
+    /// Whether a shape's Escher fill and outline survive Calc's import of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// They survive for every object that keeps the <c>SdrObject</c> the DFF import built for it,
+    /// and only for those. <c>XclImpDffConverter::ProcessObj</c> asks the Excel object to
+    /// <c>CreateSdrObject</c> and puts whatever it returns <em>in place of</em> the DFF one
+    /// (<c>sc/source/filter/excel/xiescher.cxx</c>:3686-3689) — dropping the item set
+    /// <c>ApplyAttributes</c> filled — and the three classes that return one are the chart, the
+    /// TBX form control and the OLE object.
+    /// </para>
+    /// <para>
+    /// <strong>The OLE test is the shape's own <c>pictureId</c>, not its object type.</strong> A
+    /// plain BIFF8 picture and an embedded object are both <c>ftCmo</c> type 8, and
+    /// <c>SvxMSDffManager::ImportGraphic</c> separates them on exactly that property
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:4025-4030): with it the shape becomes an
+    /// <c>SdrOle2Obj</c> and loses its attributes, without it an <c>SdrGrafObj</c> keeps them. The
+    /// witness is <c>TICAPCapability_Final.xls</c>' <c>Picture 228</c>, which hard-states
+    /// <c>fFilled</c> and <c>fLine</c> true with a white fill and a black line and which 26.2.4.2
+    /// draws with neither; it carries <c>pictureId</c> and the OLE shape flag together.
+    /// </para>
+    /// </remarks>
+    /// <param name="shape">The Escher shape.</param>
+    /// <param name="entry">Its <c>OBJ</c> record.</param>
+    private static bool KeepsEscherInk(EscherShape shape, ObjectEntry entry)
+        => entry.Type != ChartObject
+            && !IsFormControl(entry.Type)
+            && (shape.Flags & EscherShapeAttributes.OleShape) == 0
+            && !shape.Properties.Has(EscherPropertyIds.PictureId);
 
     private const int HorizontalCentre = 2;
     private const int HorizontalRight = 3;

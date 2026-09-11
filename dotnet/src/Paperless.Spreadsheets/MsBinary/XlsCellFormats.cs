@@ -259,6 +259,70 @@ internal sealed class XlsCellFormats
         => index >= 0 && index < _palette.Count ? _palette[index] : null;
 
     /// <summary>
+    /// The colour a colour index names anywhere in the workbook, the system indices included.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclImpPalette::GetColor</c> falls through to <c>XclDefaultPalette::GetDefColor</c>
+    /// (<c>sc/source/filter/excel/xistyle.cxx</c>:158-167 and
+    /// <c>xlstyle.cxx</c>:141-163), which answers a handful of indices past the sixty-four the
+    /// table holds. They are what a drawing shape's <c>MSO_CLR</c> scheme reference nearly always
+    /// names: <c>EscherColour</c> hands 64 and 65 — window text and window background —
+    /// for the black outline and white interior of an ordinary text box.
+    /// </para>
+    /// <para>
+    /// <strong>Two of them are LibreOffice's own constants rather than the file's</strong>, and
+    /// both were read out of 26.2.4.2's flat ODF rather than guessed: the note background is
+    /// <c>0xFFFFC0</c> (<c>svtools</c>' <c>CALCNOTESBACKGROUND</c> default, and the colour
+    /// <c>TICAPCapability_Final.xls</c>' comment captions come back as) and the note text is the
+    /// document font colour, black. <strong>The face colour (67) is deliberately absent</strong>:
+    /// it is the desktop theme's, which the reference reads from
+    /// <c>Application::GetSettings()</c> and headless answers <c>0xEFEFEF</c> for. Every one of
+    /// the eleven corpus shapes naming it is a form control, which takes no Escher ink at all, so
+    /// modelling a widget theme would buy nothing and could only be wrong.
+    /// </para>
+    /// <para>
+    /// Separate from <see cref="PaletteColour"/>, which a chart's <c>CHLINEFORMAT</c> reads and
+    /// which must keep answering null past the table so a chart falls back to its layout's own
+    /// choice rather than to a system colour.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The colour index.</param>
+    public Colour? SchemeColour(int index) => index switch
+    {
+        >= 0 when index < _palette.Count => _palette[index],
+        WindowTextColour or ChartWindowTextColour or ChartAutoBorderColour or NoteTextColour
+            => Colour.Black,
+        WindowBackColour or ChartWindowBackColour => Colour.White,
+        NoteBackColour => NoteBackground,
+        _ => null,
+    };
+
+    /// <summary>System window text, <c>EXC_COLOR_WINDOWTEXT</c>.</summary>
+    private const int WindowTextColour = 64;
+
+    /// <summary>System window background, <c>EXC_COLOR_WINDOWBACK</c>.</summary>
+    private const int WindowBackColour = 65;
+
+    /// <summary>A BIFF8 chart's window text, <c>EXC_COLOR_CHWINDOWTEXT</c>.</summary>
+    private const int ChartWindowTextColour = 77;
+
+    /// <summary>A BIFF8 chart's window background, <c>EXC_COLOR_CHWINDOWBACK</c>.</summary>
+    private const int ChartWindowBackColour = 78;
+
+    /// <summary>A series' automatic frame border, <c>EXC_COLOR_CHBORDERAUTO</c>.</summary>
+    private const int ChartAutoBorderColour = 79;
+
+    /// <summary>A comment caption's background, <c>EXC_COLOR_NOTEBACK</c>.</summary>
+    private const int NoteBackColour = 80;
+
+    /// <summary>A comment caption's text, <c>EXC_COLOR_NOTETEXT</c>.</summary>
+    private const int NoteTextColour = 81;
+
+    /// <summary>The light yellow LibreOffice gives a comment caption.</summary>
+    private static readonly Colour NoteBackground = Colour.FromRgb(0xFFFFC0);
+
+    /// <summary>
     /// The alignment fields of a BIFF5 <c>XF</c>.
     /// </summary>
     /// <param name="alignment">The two-byte alignment field.</param>
