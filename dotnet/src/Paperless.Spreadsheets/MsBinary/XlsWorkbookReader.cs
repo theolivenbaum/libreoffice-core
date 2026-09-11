@@ -1850,6 +1850,8 @@ internal sealed class XlsWorkbookReader
     private void ReadEmbeddedChart()
     {
         XlsChartBuilder chart = new();
+        XlsDrawingCollector overlay = new(_diagnostics, Blips, _cellFormats);
+        bool inDrawing = false;
         int depth = 0;
 
         while (_stream.MoveNext())
@@ -1864,10 +1866,40 @@ internal sealed class XlsWorkbookReader
                 continue;
             }
 
-            if (depth == 0 && BiffChartRecords.IsChartRecord(id)) chart.Read(id, _stream);
+            if (depth > 0) continue;
+
+            inDrawing = InDrawingBlock(id, inDrawing);
+
+            switch (id)
+            {
+                // The chart's own drawing layer. Collected apart from the sheet's and handed to
+                // the chart object, because these shapes are anchored inside the chart's
+                // rectangle rather than against the sheet's columns — see
+                // XlsDrawingCollector.AttachChartDrawing.
+                case BiffRecords.MsoDrawing or BiffRecords.MsoDrawingSelection:
+                    overlay.AddDrawing(_stream.ReadBytes(_stream.RecordLeft));
+                    break;
+
+                case BiffRecords.Continue when inDrawing:
+                    overlay.AddDrawing(_stream.ReadBytes(_stream.RecordLeft));
+                    break;
+
+                case BiffRecords.Obj:
+                    overlay.ReadObject(_stream);
+                    break;
+
+                case BiffRecords.Txo:
+                    overlay.ReadText(_stream);
+                    break;
+
+                default:
+                    if (BiffChartRecords.IsChartRecord(id)) chart.Read(id, _stream);
+                    break;
+            }
         }
 
         _drawings.AttachChart(chart.Build(_chartData, _externSheets, _sheetIndex, _cellFormats, NumberFormatAt, DateSystem));
+        _drawings.AttachChartDrawing(overlay);
     }
 
     /// <summary>Joins the sheet's <c>NOTE</c> records to the comment objects they name.</summary>

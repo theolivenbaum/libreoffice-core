@@ -155,6 +155,19 @@ public static class EscherPropertyIds
     public const ushort TextInsetBottom = 132;
 
     /// <summary>
+    /// Whether the host, not the file, decides the shape's text margins.
+    /// </summary>
+    /// <remarks>
+    /// A boolean of the text group, so it lives in bit 3 of property 191 and asking for 188
+    /// directly finds nothing — see <c>EscherPropertyTable.Boolean</c>. Excel's own answer is
+    /// 20000 EMU on each of the four sides
+    /// (<c>EXC_OBJ_TEXT_MARGIN</c>, <c>sc/source/filter/inc/xlescher.hxx:140</c>), applied by
+    /// <c>XclImpDrawObjBase::PreProcessSdrObject</c> at
+    /// <c>sc/source/filter/excel/xiescher.cxx:546-553</c>.
+    /// </remarks>
+    public const ushort AutoTextMargin = 188;
+
+    /// <summary>
     /// Whether and how the shape's own text wraps at its margins, an <c>MSO_WRAPMODE</c>.
     /// </summary>
     /// <remarks>
