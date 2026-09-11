@@ -1820,3 +1820,34 @@ dotnet/probes/sheet-wrap-r99/ink-base.txt	2026-09-11	current	26.2.4.2	present	cu
 dotnet/probes/sheet-wrap-r99/ink-head.txt	2026-09-11	current	26.2.4.2	present	current	
 dotnet/probes/sheet-wrap-r99/inkx-base.txt	2026-09-11	current	26.2.4.2	present	current	
 dotnet/probes/sheet-wrap-r99/inkx-head.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/_parts.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/break-probe.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md;dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/tests/Paperless.Presentations.Tests/SlideLineBreakLineHeightTests.cs
+dotnet/probes/slides-r100/bullet-census-base.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/bullet-census-head.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/bullet-census-o34.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/bullet-fit-probe.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md;dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/tests/Paperless.Presentations.Tests/SlideFittedBulletBoxTests.cs
+dotnet/probes/slides-r100/bullet-probe.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/bulletcensus.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/fit-margin.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/gate-summary.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/head.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/head2.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/make-break-probe.py	2026-09-11	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/tests/Paperless.Presentations.Tests/SlideLineBreakLineHeightTests.cs
+dotnet/probes/slides-r100/make-bullet-fit-probe.py	2026-09-11	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/tests/Paperless.Presentations.Tests/SlideFittedBulletBoxTests.cs
+dotnet/probes/slides-r100/make-bullet-probe.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/offpage.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/offpage.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/ppt.list	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/shows.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/size-summary.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/sizes-head.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/sizes-ref-mine.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/sizes.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/sizesweep.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/sweep.sh	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/tests.log	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/slides-r100/tfy-page-count.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/tfz.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/slides-r100/witness-p14.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
