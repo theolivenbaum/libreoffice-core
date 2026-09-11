@@ -1459,6 +1459,24 @@ dotnet/probes/title-font-r92/run-census-ours-page1.txt	2026-09-10	current	26.2.4
 dotnet/probes/title-font-r92/run-census-ref-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/run-census.py	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/variant-table.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/slides-ink-r94/3492-page19-after-vs-ref.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/census-gtext.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/census-srcand.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/esch.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/faa67-after.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/faa67-before.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/fontscale-variants.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/fontscale-variants.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md;dotnet/src/Paperless.Presentations/Layout/SlideAutofit.cs
+dotnet/probes/slides-ink-r94/gtext-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/ink.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/nas11-table.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/ole.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/phuket26-wordart.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/src/Paperless.Vector/Metafiles/MetafileBlits.cs;dotnet/src/Paperless.Presentations/Layout/SlideAutofit.cs;dotnet/tests/Paperless.Vector.Tests/MetafileTransparencyTests.cs
+dotnet/probes/slides-ink-r94/score-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/srcand-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
+dotnet/probes/slides-ink-r94/sweep-ours.sh	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/slides-ink-r94/results.md
 dotnet/probes/words-seat-r94/anchor-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
 dotnet/probes/words-seat-r94/anchor-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
 dotnet/probes/words-seat-r94/anchor-kind.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
