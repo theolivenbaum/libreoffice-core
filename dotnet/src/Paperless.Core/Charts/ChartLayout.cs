@@ -1652,10 +1652,85 @@ public static partial class ChartLayout
 
         if (needed <= Length.Zero) return ChartScale.MaximumAutoIntervalCount;
 
+        int fitting = (int)(available.Emu / needed.Emu);
+        int repeated = IntervalsThatReadDifferently(plot, scale);
+        if (repeated < fitting) fitting = repeated;
+
         return Math.Clamp(
-            (int)(available.Emu / needed.Emu),
+            fitting,
             ChartScale.MinimumAutoIntervalCount,
             ChartScale.MaximumAutoIntervalCount);
+    }
+
+    /// <summary>
+    /// The second half of the cap: how many intervals the axis may have before two neighbouring
+    /// ticks would read the same.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// tdf#48041, in <c>VCartesianAxis::estimateMaximumAutoMainIncrementCount</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1577-1616). Every tick of the pass just
+    /// finished is formatted through the axis' own number format, the longest run of consecutive
+    /// equal strings is counted, and the estimate is lowered to
+    /// <c>m_aAllTickInfos[0].size() / (nMaxSameLabel + 1)</c> whenever that is smaller. It is
+    /// skipped for a date axis and for no other kind.
+    /// </para>
+    /// <para>
+    /// <strong>The comparison starts against an empty string</strong> — <c>OUString
+    /// sPreviousValueLabel;</c> at :1581, and the first tick is compared with it before it is ever
+    /// assigned. So an axis whose <em>first</em> tick formats to nothing scores one repeat although
+    /// no two of its labels are alike, and its cap is halved. That is not an incidental detail: it
+    /// is the whole of the disagreement on <c>048_Expense_trends_budget</c>, whose value axis
+    /// states <c>c:numFmt formatCode="#,##0;;"</c> — two empty sections, so zero and every negative
+    /// draw as nothing — over a 0…500 range. Eleven ticks, one repeat, <c>11 / 2 = 5</c>, and five
+    /// intervals of 0…500 is the 1/2/5 ladder's 100 where ten is its 50.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 with one attribute changed at a time</strong>
+    /// (<c>probes/chart-fit-r97/axis-variants.py</c>), which is what separates this from the
+    /// interval cap <c>probes/chart-axis-r87</c> corrected: the document's own rendering steps by
+    /// 100; with <c>formatCode</c> alone changed to <c>#,##0</c> it steps by <b>50</b>; with the
+    /// sheet's <c>fitToPage</c> and <c>pageSetup/@scale</c> alone removed it still steps by
+    /// <b>100</b>, at an axis 180.29 pt long with 13.42 pt labels. So the print zoom is not in it
+    /// and the length is not in it — <c>151 / 9.04</c> and <c>180 / 13.42</c> are both over ten,
+    /// where the clamp saturates.
+    /// </para>
+    /// </remarks>
+    /// <param name="plot">The chart, for the value axis' number format.</param>
+    /// <param name="scale">The scale of the pass just finished, whose ticks are the ones counted.</param>
+    private static int IntervalsThatReadDifferently(ChartPlot plot, ChartScaleResult scale)
+    {
+        // `m_aAxisProperties.m_nAxisType != css::chart2::AxisType::DATE` (:1578). A date axis'
+        // labels legitimately repeat at a resolution coarser than the tick, and its cap is 500
+        // rather than 10 in the first place.
+        if (plot.DateAxis is not null) return ChartScale.MaximumAutoIntervalCount;
+
+        int ticks = 0;
+        int repeats = 0;
+        int longest = 0;
+
+        // The seed is the empty string and the first tick is compared against it, exactly as
+        // :1581-1596 does. Reading this as "no two labels are alike" would miss the witness.
+        string previous = string.Empty;
+
+        foreach (double tick in scale.MajorTicks())
+        {
+            ticks++;
+            string label = ChartDataLabel.Write(tick, plot.ValueFormat);
+            if (label == previous)
+            {
+                repeats++;
+                if (repeats > longest) longest = repeats;
+            }
+            else
+            {
+                repeats = 0;
+            }
+
+            previous = label;
+        }
+
+        return longest > 0 ? ticks / (longest + 1) : ChartScale.MaximumAutoIntervalCount;
     }
 
     /// <summary>
