@@ -1421,6 +1421,27 @@ dotnet/probes/sheet-fill-r84/orig-words-after.tsv	2026-09-08	current	26.2.4.2	pr
 dotnet/probes/sheet-fill-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/score-bank.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/census-msoclr.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/census-txo.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/clip-pixels.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/dump-escher.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/expected-ink.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/expected-ink.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/gate-check.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/gate-sheets.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/ink-after.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ink-base.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ink-movers.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ink-ranking.tsv	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/movers-clip.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/movers.txt	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/msoclr-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/pixel-diff.py	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/sheet-shapefill-r92/score-ink.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/sweep-ours.py	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/ticap-page3-triptych.png	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/sheet-shapefill-r92/txo-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/title-font-r92/candidate-scores.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/dump-stream.py	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/face-scan-line1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md

@@ -93,6 +93,18 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
 
         if (sheet.Drawings.IsEmpty || columns.Count == 0 || rows.Count == 0) return;
 
+        // The block is a clip as well as a cull -- but the clip is taken per drawing, only where
+        // one actually leaves the block, and as `ClipPathKeepingText` so the covered glyphs stay
+        // in the text layer as 26.2.4.2's do. See `DrawInside` and `LeavesTheBlock`. An earlier,
+        // independently written version of this rule clipped here instead: unconditionally, and
+        // with `ClipPath`, which would have cut those glyphs out of the text layer and moved the
+        // gate's own character count. Both survived a clean auto-merge; this one is the measured
+        // one (`probes/ink-pass-r92`, 74 renderings, summed |ink| 316.40 -> 227.20).
+        DrawInside(sink, columns, rows);
+    }
+
+    private void DrawInside(IDrawingSink sink, List<PlacedColumn> columns, List<PlacedRow> rows)
+    {
         Dictionary<int, PlacedColumn> byColumn = [];
         foreach (PlacedColumn column in columns) byColumn.TryAdd(column.Column, column);
 
@@ -414,7 +426,36 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
     /// and rows rather than as first and last, because neither list is promised to be in order and
     /// a right-to-left sheet places its first column on the right.
     /// </remarks>
+    // Two rounds wrote this rectangle independently and named it `BlockOf` and `Block`; their
+    // bodies were identical, and a clean auto-merge spliced `ReachesTheBlock`'s body into this
+    // one's signature. Collapsed onto the surviving implementation rather than kept twice.
     private static DocRect BlockOf(List<PlacedColumn> columns, List<PlacedRow> rows)
+        => Block(columns, rows);
+
+    /// <summary>
+    /// The page's own cell block: the rectangle the drawing layer is both culled and clipped to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It is a clip and not only a cull, and reading it as a cull alone lets a shape run
+    /// off the edge of the printed block.</strong> `PrePrintDrawingLayer` builds this rectangle
+    /// and hands it to <c>SdrView::BeginDrawLayers</c> as the paint <em>region</em>
+    /// (<c>sc/source/ui/view/output3.cxx</c>:41-102), so every object the drawing layer paints
+    /// afterwards is clipped to it; <c>ScPrintFunc::PrintArea</c> calls the pair once per printed
+    /// area (<c>printfun.cxx</c>:1641, 1651-1713).
+    /// </para>
+    /// <para>
+    /// It shows only once ink is being painted, which is why it surfaced with round 92's BIFF
+    /// fill rather than before it. <c>PC1000.xls</c>' <c>Rectangle 16</c> is 244 pt wide and
+    /// starts 6 pt inside the sheet's last column, so 62 pt of it hang past the block's right
+    /// edge, and on pages 2 onwards all but a 4 pt sliver of it hangs off the top. 26.2.4.2 emits
+    /// the whole rectangle into the content stream and then <c>W* n</c>s it away
+    /// — <c>q 55.389 552.019 681.846 23.981 re W* n</c> is that page's own clip, read out of the
+    /// reference's page 2 — so a reader counting the PDF's <em>path</em> operators sees a shape
+    /// the reference is not showing. Count the pixels.
+    /// </para>
+    /// </remarks>
+    private static DocRect Block(List<PlacedColumn> columns, List<PlacedRow> rows)
     {
         Length left = columns[0].X;
         Length right = columns[0].Right;

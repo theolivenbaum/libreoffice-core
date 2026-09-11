@@ -291,7 +291,7 @@ internal sealed class XlsWorkbookReader
                 RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
             };
             _sheetDecoration = new XlsSheetDecoration();
-            _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+            _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
             _inDrawingBlock = false;
             _rowFormats.Clear();
             _columnFormats.Clear();
@@ -1018,7 +1018,7 @@ internal sealed class XlsWorkbookReader
             RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
         };
         _sheetDecoration = new XlsSheetDecoration();
-        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
         _inDrawingBlock = false;
         XlsChartBuilder chart = new();
 
@@ -1239,7 +1239,7 @@ internal sealed class XlsWorkbookReader
             RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
         };
         _sheetDecoration = new XlsSheetDecoration();
-        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
         _inDrawingBlock = false;
         _rowFormats.Clear();
         _columnFormats.Clear();
@@ -1410,7 +1410,7 @@ internal sealed class XlsWorkbookReader
         };
         _page.UseDefaultPageStyle();
         _sheetDecoration = new XlsSheetDecoration();
-        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
         _inDrawingBlock = false;
         _rowFormats.Clear();
         _columnFormats.Clear();

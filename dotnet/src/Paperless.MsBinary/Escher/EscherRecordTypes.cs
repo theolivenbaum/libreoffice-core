@@ -262,6 +262,28 @@ public static class EscherPropertyIds
     /// </remarks>
     public const ushort PictureTransparent = 263;
 
+    /// <summary>
+    /// The embedded object this shape shows, as an index into the host's object pool.
+    /// </summary>
+    /// <remarks>
+    /// Its presence is what makes a picture frame an <em>OLE</em> object rather than a plain
+    /// picture — <c>SvxMSDffManager::ImportGraphic</c> branches to <c>ImportOLE</c> on
+    /// <c>IsProperty(DFF_Prop_pictureId)</c> (<c>filter/source/msfilter/msdffimp.cxx</c>:4025-4030)
+    /// — and the object it builds there is not the one the Escher attributes were applied to.
+    /// </remarks>
+    public const ushort PictureId = 267;
+
+    /// <summary>
+    /// How the interior is filled — <c>MSO_FILLTYPE</c>, solid when the shape states none.
+    /// </summary>
+    /// <remarks>
+    /// Zero is <c>mso_fillSolid</c>; 1 to 8 are the pattern, texture, picture and gradient forms,
+    /// which still paint; 9 (<c>mso_fillBackground</c>) and anything above paint nothing at all —
+    /// the <c>default:</c> of <c>DffPropertyReader::ApplyFillAttributes</c>' switch
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1330-1400).
+    /// </remarks>
+    public const ushort FillType = 384;
+
     /// <summary>The shape's foreground fill colour.</summary>
     public const ushort FillColour = 385;
 
