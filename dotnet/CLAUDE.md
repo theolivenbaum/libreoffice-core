@@ -2527,6 +2527,143 @@ flat `.ods` shape probe is a trap of its own — a `draw:custom-shape` whose `dr
 names an `ooxml-` type and states no `draw:enhanced-path` is drawn by 26.2.4.2 as **nothing at
 all**, silently, so the fixture for this was authored as `.xlsx` and converted.
 
+### And round 84's two conservative choices meant the BIFF half read almost nothing
+
+**A `.xls` shape's fill and line colour are a palette reference, not a literal, and both defaults
+are real.** Round 84 wrote its own caution into `EscherInk`'s remarks — *presence is the test*,
+because MS-ODRAW's white and black defaults would otherwise "put a white box under the text of
+every shape that mentions neither", and *only the literal `MSO_CLR` form is honoured*, because the
+palette "cannot be seen from this layer". Both are wrong, and together they resolved **14 of the
+106** fill and line colours the corpus's 64 `.xls` state on a worksheet shape; the other 92 are
+scheme references. `TICAPCapability_Final.xls` — a document that **passes the gate** — was 16.87 %
+off on summed unsigned ink for exactly this: its two `Instructions` text boxes state
+`fillColor 0x08000041` and `lineColor 0x08000040`, nothing else at all, and those are palette 65
+and 64, Excel's *window background* and *window text*. The reference draws a white panel with a
+0.42 pt black border and we drew neither. `probes/sheet-shapefill-r92/results.md`.
+
+Three rules replace the two choices, and only one of them is "the shape said so".
+
+- **`EscherColour` is `SvxMSDffManager::MSO_CLR_ToColor`** (`filter/source/msfilter/msdffimp.cxx`:3420):
+  a `0xfe` header masks to the low three bytes; `nUpper & 0x08` makes the low *word* a scheme
+  index and `nUpper & 0x19` without `0x10` makes the top byte one; a bare `nUpper & 4` with no low
+  bits is a third scheme form; everything else is a literal `0x00BBGGRR`. An unresolvable
+  reference falls back **per property** — white for a fill, black for a line (`:3440-3453`). The
+  host's palette arrives as a callback because it is the host's: Excel's is
+  `XclImpPalette::GetColor` over the BIFF8 defaults, and its indices past the table are the ones
+  that matter — 64 black, 65 white, 77/79/81 black, 78 white, 80 the note background.
+  **The system-colour branch is not implemented and should not be**: it is the desktop theme's
+  answer, and **zero** of the corpus's 106 colours state one.
+- **Absence is not "no ink".** `mso_PropSetDefaults` (`filter/source/msfilter/dffpropset.cxx`)
+  gives property 385 the value `0xffffff` and 448 zero, and Calc puts the window background on a
+  filled object with no colour a second time (`xiescher.cxx`:3693-3695).
+  `014_Contextures_chart_sample_991ecfc5.xls`' `Rectangle 6` is the witness: `fLine` true, no
+  `lineColor`, and 26.2.4.2 draws `#000000`.
+- **An unstated boolean is the shape *type's* answer, not a constant.** The same table gives
+  property 447 the value `0x001C` and 511 `0x001E`, so `fFilled` and `fLine` both default *true* —
+  and `ApplyFillAttributes`/`ApplyLineAttributes` (`msdffimp.cxx`:1313-1323, :904-911) then clear
+  the bit again unless the shape stated it **hard** or the type is filled (stroked) by default.
+  `mso_DefaultFillingTable` and `mso_DefaultStrokingTable`
+  (`svx/source/customshapes/EnhancedCustomShapeGeometry.cxx`:6156-6213) are the tables and they
+  reduce to `stated ? statedValue : defaultForType`. A text box and a rectangle are both; a
+  **picture frame is neither**, which is the one entry in the stroking table. A stated boolean
+  wins either way, and the corpus needs both directions: **216** worksheet shapes state property
+  511 as `0x00080000` — `fLine` hard and *false*.
+
+**Three object kinds must take no Escher ink at all, and the OLE test is not the object type.**
+Calc replaces the DFF-built `SdrObject` for a chart, a TBX form control and an OLE object — the
+three that `SetCustomDffObj(true)` marks (`sc/source/filter/excel/xiescher.cxx`:1666, 2066, 2954) —
+and the replacement is not the object `ApplyAttributes` filled. A plain BIFF8 picture and an
+embedded object are *both* `ftCmo` type 8, and `SvxMSDffManager::ImportGraphic` separates them on
+the shape's own **`pictureId` (267)** (`msdffimp.cxx`:4025-4030): with it an `SdrOle2Obj` and no
+attributes, without it an `SdrGrafObj` that keeps them. `TICAPCapability_Final.xls`' `Picture 228`
+hard-states `fFilled` and `fLine` true with a white fill and a black line, carries `pictureId`, and
+26.2.4.2 draws neither.
+
+***The instrument that established every one of those answers rendered nothing.***
+`soffice --convert-to fods` on the `.xls` prints the reference's own graphic style for every shape
+— `draw:fill`, `draw:fill-color`, `draw:stroke`, `svg:stroke-color`, `svg:stroke-width` — in eight
+seconds, and joining it to a dump of the raw `msofbtOPT` by `draw:name` gives an exact expected
+value for one `MSO_CLR` per shape with no rasteriser and no tolerance anywhere in it. It is the
+`.rtf` rounds' *"convert to flat ODF first"* arriving on the sheets track;
+`probes/sheet-shapefill-r92/expected-ink.py` is the join.
+
+**It is BIFF-only, and the `.ods` twin was already ahead of its `.xls` original.** The scheme-index
+question does not exist in the other two readers — DrawingML states a theme colour and ODF a hex
+string — and 26.2.4.2's own `.ods` of `TICAPCapability_Final` states
+`draw:fill-color="#ffffff"` outright, which `OdsShapeInk` has read since round 84: this tree draws
+that twin's panel at `(85.9, 61.1, 515.8, 433.8)` against the reference's
+`(85.9, 61.0, 515.8, 433.8)`, stroked at 0.419 pt against 0.42, while the `.xls` of the same
+workbook drew nothing. **A converted-ODF column can be right where its original is wrong, and
+checking the twin is how you find out which half of a reader is at fault.**
+
+**Reach, measured on ink rather than censused.** Rendering our half of the whole 947-document
+corpus twice — at the round's base and with this fix, under `SOURCE_DATE_EPOCH`, one output
+directory per document — moves **6 renderings, all `.xls`, all on the sheets track**, and leaves
+the other **941 byte-identical**. Summed unsigned ink over the six: `TICAPCapability_Final`
+**20.66 → 7.45**, `SIL_TDB609` 2.73 → 1.07, `SIL_TDB605` 1.99 → 1.00 — and `EHEST` 14.16 → 14.95,
+`PC1000` 2.77 → 5.11, `apron-area` 1.41 → 1.53, which is the section below.
+**No gate verdict moves on this half**, because a fill adds no glyph and no page.
+
+### The drawing layer's paint region is a clip, and only the cull half of it was implemented
+
+**Reading a BIFF shape's fill is what made this visible, and it is worth more than the fill.**
+`ScOutputData::PrePrintDrawingLayer` builds the page's own cell-block rectangle and hands it to
+`SdrView::BeginDrawLayers` as the paint **region** (`sc/source/ui/view/output3.cxx`:41-102);
+`ScPrintFunc::PrintArea` calls the pair once per printed area (`printfun.cxx`:1641, 1651-1713). So
+every object the drawing layer paints is *clipped* to that rectangle as well as culled by it.
+`SheetPageGraphics.ReachesTheBlock` has computed exactly that rectangle since the round that
+closed `Part_375_Operators.xlsx` — with the same citation — and used it only to decide which page
+a drawing belongs on. `SheetPageGraphics.Block` is now both.
+
+**26.2.4.2 emits the whole shape and then clips it away, so a path census reads it as a shape the
+reference draws.** `PC1000.xls`' `Rectangle 16` is 244 pt wide and starts 6 pt inside the sheet's
+last column; the reference's page 2 opens the figure with
+`q 55.389 552.019 681.846 23.981 re W* n` and paints a 244 pt rectangle inside it, of which 4 pt
+show. **Count the pixels.**
+
+**And count the pixels rather than the bytes when measuring it too.** A clip emitted round the
+drawing pass changes the content stream of every page carrying a drawing: over the sheets track it
+changes **164 of 307** renderings' bytes and **83 of those 164 are pixel-identical**.
+`probes/sheet-shapefill-r92/pixel-diff.py` is the instrument, and a hash-based mover list without
+it overstates this change by a factor of two.
+
+Of the 81 that do move: **68 improve on summed unsigned ink, 3 worsen** (by 0.07, 0.12 and 0.48),
+10 are level, the sum goes **331.20 → 238.54** and MAJOR pages **148 → 85**.
+
+**This is the half the gate can see, and it gains 25 verdicts.** PyMuPDF and `pdftotext` both drop
+the text a clip removes, and the reference's counts already have it dropped — so the characters we
+lose are characters we were never entitled to draw. Scored with the gate's own `max(2 %, 15)` rule
+over all 307 sheets documents against the banked 26.2.4.2 reference: **262 → 287 match**, 40 → 15
+`glyphs`, pages unmoved at 3. Four of the 25 land on the reference's count **exactly** —
+`SSRO_Quarterly_Statistical_Bulletin` 2783 → 2532 against 2532, `044_Cash_flow_forecast`
+2313 → 2200 against 2200, `064_Small_business_cash_flow` 1803 → 1635 against 1635,
+`Foreign_SA-CAT-I_and_CAT-II-III` 7842 → 7558 against 7557 — which is as clean a statement as this
+corpus offers that the rule is the reference's own.
+
+**One test asserted the opposite and its premise was the right one.**
+`SheetPictureCropTests.AnUncroppedPictureIsNotClipped` held that *"an unconditional clip would put
+a `q`/`W n`/`Q` into every rendering carrying a picture and change all of them for nothing"*. The
+first half is exactly what this does; the second was never measured, and it is false.
+
+**The passing sheets set re-ranked on ink afterwards is `probes/sheet-shapefill-r92/ink-ranking.tsv`,
+and 41 of the 287 passing documents are at 5 % or worse.** `TICAPCapability_Final` has gone from the
+top of the seating probe's 48-document sample to **32nd of 287**. The next seats are
+`TK-Syllabus-Comparison-Document-v2.xlsx` (304.57 over 1235 pages), `alle einzeln.xlsx` (225.44),
+`Background_Declaration_Template.xls` (136.07 over 25) and `grants-2005.xls` (96.11) — and
+`6880ac7361ca…ST Capability List` is the one in the top ten with **no MAJOR page at all**, so its
+27 % is spread thin rather than concentrated. Read the column beside the MAJOR count and beside the
+page count: a summed percentage over pages is not comparable between a 25-page document and a
+1235-page one.
+
+**What is left, with its seat.** A BIFF text box's `TXO` formatting runs are not read at all —
+`XlsDrawingCollector.ReadText` takes the string and stops, and `TextOf` builds one run per line at
+a hardcoded ten point in the default face. The runs are eight bytes each in the `TXO`'s second
+`CONTINUE`, a character offset and a `FONT` index (`XclImpDrawing::ReadTxo`, `xiescher.cxx`:4242),
+and `XlsCellFormats.FontAt` already turns that index into a face, a size and a weight. Reach:
+**155 text boxes with text in 17 `.xls`, 522 runs, of which 62 boxes in 13 documents state more
+than the opening run**. On TICAP page 3 the reference draws its shape text at 6.30 pt with five
+bold spans and we draw all of it at 5.70 pt regular, which is most of the residual there.
+
 ### A wrapping cell whose text begins outside its own column draws nothing at all
 
 **Only a wrapping cell is clipped to its column, and only a wrapping cell has a paper.**
