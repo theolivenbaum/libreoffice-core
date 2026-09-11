@@ -96,7 +96,7 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
     {
         if (string.IsNullOrWhiteSpace(formula)) return null;
 
-        string text = formula.Trim();
+        string text = DefinedName(formula.Trim()) ?? formula.Trim();
 
         // A union, an intersection or a list of areas. Excel writes them parenthesised and
         // comma-separated; a single area never contains either character.
@@ -257,6 +257,55 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
     /// apostrophes, which is undone here — <c>'O''Brien'!A1</c> is a sheet called
     /// <c>O'Brien</c>.
     /// </remarks>
+    /// <summary>What a workbook-level <c>definedName</c> of this name expands to, or null.</summary>
+    /// <remarks>
+    /// <para>
+    /// The remarks above say a defined name is deliberately not resolved, and for a <c>c:f</c> that
+    /// is still the right answer: LibreOffice's own <c>ExcelChartConverter</c> parses the formula
+    /// with the document's grammar and a name that does not resolve leaves the cache standing,
+    /// which is what returning null here does.
+    /// </para>
+    /// <para>
+    /// <strong>A chartex <c>cx:f</c> has no cache to fall back on and names nothing else.</strong>
+    /// Both corpus witnesses state six hidden <c>_xlchart.v1.n</c> names and reference their chart
+    /// data entirely through them, so declining here would leave the chart with no numbers at all.
+    /// Only the simple shape is taken — a workbook-scope name (no <c>localSheetId</c>) whose value
+    /// is one sheet-qualified area — because the loop below then re-parses it exactly as it would a
+    /// stated reference. A name whose value is a formula, a union or another name resolves to null,
+    /// which is the same outcome as before.
+    /// </para>
+    /// </remarks>
+    private string? DefinedName(string text)
+    {
+        if (text.Length == 0 || text.Contains('!', StringComparison.Ordinal)) return null;
+
+        _names ??= ReadNames();
+        return _names.GetValueOrDefault(text);
+    }
+
+    private Dictionary<string, string>? _names;
+
+    private Dictionary<string, string> ReadNames()
+    {
+        Dictionary<string, string> names = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (XElement element in Xlsx.Children(
+                     Xlsx.Child(file.Workbook, "definedNames"), "definedName"))
+        {
+            // A sheet-scoped name is resolved against the sheet that declares it, which this does
+            // not model; the chartex names are all workbook-scope.
+            if (Xlsx.Attribute(element, "localSheetId") is not null) continue;
+            if (Xlsx.Attribute(element, "name") is not { Length: > 0 } name) continue;
+
+            string value = element.Value.Trim();
+            if (value.Length == 0) continue;
+
+            names.TryAdd(name, value);
+        }
+
+        return names;
+    }
+
     private static (string Sheet, string Reference)? SplitSheet(string text)
     {
         bool quoted = false;

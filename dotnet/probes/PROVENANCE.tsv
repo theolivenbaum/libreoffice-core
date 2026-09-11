@@ -1910,3 +1910,15 @@ dotnet/probes/chart-smooth-r102/confine-before.tsv	2026-09-11	current	26.2.4.2	p
 dotnet/probes/chart-smooth-r102/confine-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
 dotnet/probes/chart-smooth-r102/confine-ooxml.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
 dotnet/probes/chart-smooth-r102/confine-odf.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/chart-rest-r104/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-rest-r104/o26-clipstate.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o26-clipstate.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o26-objects.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o26-objects.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o36-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o36-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o36-confine.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o36-confine.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o38-ofpie.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o38-ofpie.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md
+dotnet/probes/chart-rest-r104/o38-ofpie-028.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-rest-r104/results.md

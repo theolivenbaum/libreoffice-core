@@ -195,8 +195,10 @@ public static class OoxmlXml
         // case was unreachable. `cx1` is genuinely different: `oox` *does* support it, which is why
         // the chartex clause above is a real exception and the slicer one never was.
         //
-        // The frame then draws empty, because no cx:chart reader exists yet. That is a smaller
-        // error than the sentence: both are wrong about the ink, and only one invents text.
+        // The frame is drawn by `DrawingChartex`, so preferring the choice is now right about the
+        // ink as well as about the text. Before that reader existed the frame drew empty, and the
+        // preference was still right for the narrower reason above: both answers were wrong about
+        // the ink and only one invented twenty-six words.
         static bool IsAdvisoryPlaceholderFallback(XElement element, XElement choice)
         {
             if (element.Element(XName.Get("Fallback", OoxmlNamespaces.MarkupCompatibility)) is null)

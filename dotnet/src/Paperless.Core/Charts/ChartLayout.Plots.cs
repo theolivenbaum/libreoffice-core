@@ -579,12 +579,26 @@ public static partial class ChartLayout
     /// twelve o'clock like an ordinary pie draws the connectors across the face of the pie.
     /// </para>
     /// <para>
-    /// <strong>What the corpus cannot check, said plainly.</strong> The installed LibreOffice used
-    /// as the oracle here is 24.2, which predates of-pie support and draws all six points of
-    /// <c>pieOfPieChart.xlsx</c> as one ordinary pie — measured in its own PDF, a single centre at
-    /// (337.0, 571.7) with six wedges and no second plot. So the geometry below is a port of the
-    /// tree's source rather than a match against a rendering, and only the words it contributes —
-    /// the legend and any data labels, which are the same either way — are measured.
+    /// <strong>The oracle is 26.2.4.2 and it does draw one, so the split arithmetic is measured
+    /// now and the radius is measured to be wrong.</strong> The paragraph that stood here said the
+    /// geometry below could not be checked against any rendering, because the binary on the path
+    /// was 24.2, which predates of-pie support. It is not: over 28 one-attribute variants of
+    /// <c>029_Unit_Circle_Chart_Pie_Theme</c> put through 26.2.4.2
+    /// (<c>probes/chart-rest-r104/o38-ofpie.tsv</c>), the reference's own wedge count is
+    /// <em>n + 1</em> for the pie form at every split position and <em>n − split + 1</em> for the
+    /// bar form — which is exactly <c>OfPieDataSrc</c>'s two arms — and the fallback below
+    /// fires at exactly the same place it does: three points draw one plain pie and no connector,
+    /// four draw two connectors and a second plot, in <em>both</em> forms.
+    /// </para>
+    /// <para>
+    /// <strong>What is measured to be wrong is the unit radius, and it is left.</strong> On the
+    /// corpus's one drawn of-pie, <c>028_Unit_Circle_Chart_Optimized_Graph</c>, 26.2.4.2's main
+    /// ring is 181.0 pt across and centred at (202.8, 425.4) where this tree's is 247.5 × 256.4
+    /// centred at (158.5, 372.5) — a unit radius 1.37 times the reference's — while on the eight-
+    /// point variant of <c>029</c> the same ratio is 1.065 and on a plain pie it is 1.017. So the
+    /// reference fits something wider than a unit circle into the plot rectangle and the factor is
+    /// not a constant; <c>probes/chart-rest-r104</c> §4 states the hypothesis and says why it was
+    /// not implemented from it.
     /// </para>
     /// </remarks>
     private static void AddOfPie(
