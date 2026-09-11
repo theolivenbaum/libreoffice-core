@@ -912,8 +912,11 @@ public static partial class SlideTextLayout
                 // gap of 67/2048, so keeping it makes an 18 pt line 20.70 pt where LibreOffice
                 // draws 20.15 — half a point per line, measured on the wrapping cell of
                 // slide-table-grid.pptx, whose four reference baselines are 20.154 pt apart.
+                // To End rather than VisibleEnd: a trailing blank is a portion of the line and
+                // EditEngine measures every portion of it. See LargestSize, which carries the
+                // citation and the witness.
                 (Length ascent, Length metric) =
-                    FaceHeight(runs, styles, box.Line.Start, box.Line.VisibleEnd, body.Device);
+                    FaceHeight(runs, styles, box.Line.Start, box.Line.End, body.Device);
 
                 Length faceHeight = metric > Length.Zero ? metric : box.Height;
                 // Through LineSpacingRule.Apply, whose whole-twip arithmetic this branch wants:
@@ -944,7 +947,7 @@ public static partial class SlideTextLayout
 
             Length em = appended && paragraph.Text.Length > 0
                 ? EndSize(runs, styles)
-                : LargestSize(runs, styles, box.Line.Start, box.Line.VisibleEnd);
+                : LargestSize(runs, styles, box.Line.Start, box.Line.End);
 
             // An autofitted body that is not being scaled measures its lines at the *device's*
             // realisation of the em rather than at the em. See DeviceRealised.
@@ -1200,6 +1203,38 @@ public static partial class SlideTextLayout
     /// <c>RecalcFormatterFontMetrics</c> forces the proportion back to 100% before it reads a
     /// metric, so the ordinal in "5th" leaves its line exactly as tall as the date beside it
     /// (<c>editeng/source/editeng/impedit3.cxx:3121-3126</c>).
+    /// </para>
+    /// <para>
+    /// <strong>The runs a line touches run to its <see cref="TextLine.End"/>, not to its
+    /// <see cref="TextLine.VisibleEnd"/> — a trailing blank is on the line and is measured.</strong>
+    /// EditEngine walks <em>every</em> portion of the line, <c>GetStartPortion()</c> to
+    /// <c>GetEndPortion()</c> inclusive, skipping only a <c>PortionKind::LINEBREAK</c>, and takes the
+    /// largest ascent and the largest descent it finds (<c>editeng/source/editeng/impedit3.cxx</c>:
+    /// 1496-1519); a portion that happens to be blank is not exempt. Trailing blanks are excluded
+    /// from a line's <em>width</em> — that is what <c>VisibleEnd</c> is for, and it is still what
+    /// the line is drawn and aligned by — but nothing excludes them from its <em>height</em>.
+    /// </para>
+    /// <para>
+    /// It is only ever visible when the trailing blank is bigger than the text before it, which a
+    /// real deck does: <c>pres_ioc_phuket.ppt</c> page 26's white box ends its wrapped paragraph
+    /// with a single space at <strong>28 pt</strong> after 19 pt italic text, and 26.2.4.2 draws
+    /// that space — a one-glyph 28.01 pt show at the end of the last line — and sizes the line by
+    /// it. The box states <c>draw:auto-grow-height="true"</c> with <c>fo:min-height="0cm"</c>, so
+    /// the height it is drawn at is the height of the block: 26.2.4.2 gives it
+    /// <strong>3.267 cm</strong> and, measuring that last line at 19 pt instead, we gave it
+    /// <strong>2.884 cm</strong>. The difference is
+    /// <c>fround(988 × 1.2) − fround(670 × 1.2) = 1186 − 804 = 382</c> hundredths of a millimetre
+    /// against the 383 measured off the two content streams, and the reference's own line pitch
+    /// confirms which line moved: from the second baseline to the third it is <strong>31.81 pt</strong>
+    /// where ours is 22.79, and 31.81 pt is 1122 units, which is
+    /// <c>(804 − 670) + 988</c> — the 19 pt line's descent plus the <em>28 pt</em> line's ascent.
+    /// </para>
+    /// <para>
+    /// The whole box closes on it. Its three lines are 24 pt, 19 pt and 28 pt, so the block is
+    /// <c>1016 + 804 + 1186 = 3006</c> plus 0.13 cm of padding at each end — <strong>3266</strong>
+    /// against the 3267 the reference's own flat-ODP export states for the shape — where measuring
+    /// the last line at 19 pt gives <c>1016 + 804 + 804 + 260 = 2884</c>, which is the 81.77 pt we
+    /// drew.
     /// </para>
     /// </remarks>
     private static Length LargestSize(
