@@ -224,6 +224,17 @@ Rendering our first 60 pages against the banked reference:
 
 | | |
 |---|---:|
+> **Correction, round 99.** The two line counts in the table below, and the "534-line gap"
+> drawn from them, are **withdrawn**. They are PyMuPDF `get_text` *line* counts, which measure
+> two PDF writers' text-object habits rather than layout: the reference emits `157` and the cell
+> beside it as two `line`s where we emit one, with every character at identical coordinates. The
+> gap survives round 99's fix unchanged (8544 / 8010) precisely because it was never a layout
+> quantity, and on *spans* the count runs the other way — 10998 reference against 11529 ours.
+> Measured properly against the reference's own resolved `style:row-height`, **82909 of 82924
+> rows already agreed at this round's base** and all fifteen that did not were exactly one line
+> short. The seat this section named, `WrappedHeight`/`ParagraphsOf`, was also wrong: both
+> already count a trailing empty paragraph. See `probes/sheet-wrap-r99`.
+
 | our drawn lines, pages 1–60 | 7987 |
 | the reference's | **8521** |
 | pages where the reference draws more | 35 |
