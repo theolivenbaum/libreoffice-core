@@ -2890,8 +2890,9 @@ Three rules decide it and each is the reference's rather than the specification'
 comparison between a relative reference and a string, shifted from the `sqref`'s own top-left
 corner, which is what `calcext:base-cell-address` states in the reference's own view of the file.
 `cellIs` (123 rules, 18 documents) is read too. The rest — `AND`, `MOD(ROW())`, `ISERROR`,
-`TODAY()`, defined names, `#REF!` — paint nothing, and `containsText` and its five siblings (1040
-rules in 8 documents) are the cheapest thing left in the area.
+`TODAY()`, defined names, `#REF!` — paint nothing. *"`containsText` and its five siblings (1040
+rules in 8 documents) are the cheapest thing left in the area"* was right about the cost and wrong
+about the value: round 96 read them and they move three renderings — see the section below.
 
 **Reach and cost, measured rather than censused.** 55 of the 947 corpus documents state a `cfRule`
 naming a `dxf`; rendering our half of the whole corpus twice moves **21 renderings and leaves 926
@@ -2922,6 +2923,67 @@ order with ours two rows lower than the reference's, and the total page count is
 pages) states **no conditional formatting at all** and holds a `pivotTable` over `A4:I1013`;
 `Background_Declaration_Template.xls` (136.07 over 25) is BIFF, whose conditional formatting is
 `CONDFMT`/`CF` records and a different reader. Both keep their seat.
+
+### And the other seven `cfRule` families are read now — but 1215 rules move three renderings
+
+**Closed in round 96**, `probes/cond-format-r96/`. `containsText`, `endsWith`, `containsBlanks`,
+`notContainsBlanks` and `duplicateValues` are evaluated; `dataBar` and `iconSet` are left with
+their seat (O22) and belong beside the colour scale rather than beside the conditions. Four of the
+reference's arms are **not** what 18.3.1.10 would have you write, and each was confirmed against
+26.2.4.2's own view of a corpus document as well as of an authored fixture:
+
+- **`containsBlanks` is not a mode.** `CondFormatRule::finalizeImport`
+  (`sc/source/filter/oox/condformatbuffer.cxx`:860-866) replaces it with the formula
+  `LEN(TRIM(#B))=0` — `>0` for `notContainsBlanks` — and sets `ScConditionMode::Direct`. So **a
+  cell holding only spaces is blank** and **a number never is**, because `TRIM` stringifies it
+  first. `Application_Compliance_Checklist_5_Apr_2021.xlsx`'s 99 such rules come out of
+  `--convert-to fods` as `formula-is(LEN(TRIM([.M270]))=0)`.
+- **A text rule's `<formula>` is dead markup.** `finalizeImport`:938-947 builds a token array
+  holding only the `text` **attribute**, interned; the `NOT(ISERROR(SEARCH("xxx",A373)))` Excel
+  writes beside it is never compiled. Hence `contains-text("xxx")` in the fods, with no reference
+  in it.
+- **Case is folded for a text cell and not for a numeric one.** `IsValidStr`
+  (`conditio.cxx`:1219-1229) lowercases both sides; `IsValid`'s numeric arm (`:1130-1143`)
+  stringifies with `OUString::number(nArg)` and calls a bare `indexOf`. A numeric cell is searched
+  as its **number**, not as what is drawn.
+- **A multi-range `sqref`'s base cell is the smallest *column*, not the componentwise minimum.**
+  `ScRangeList::GetTopLeftCorner` (`sc/source/core/tool/rangelst.cxx`:1142-1155) is the smallest
+  range start under `ScAddress`'s `(tab, col, row)` ordering (`sc/inc/address.hxx`:396). **Excel
+  writes the formula against the componentwise minimum**, so the two disagree: `$G376="N/A"` on
+  `G443:G444 D491 G446:G490 G377` gets `base-cell-address="…D491"` in 26.2.4.2's own fods, and its
+  sibling block resolves to `formula-is(#ref!="N/A")` because the shift takes the row negative. 15
+  blocks in 3 corpus documents. On the fixture `sheet-cf-multi-range-anchor.xlsx` the two readings
+  paint **opposite** cells and the reference paints the top-left-corner one.
+
+**A fifth: precedence between two blocks is document order, then priority *within* a block** — not
+a global sort on `priority`. A cell's pattern carries an `ScCondFormatIndexes`, a
+`sorted_vector<sal_uInt32>` of format indices (`sc/inc/attrib.hxx`:271) handed out as each
+`<conditionalFormatting>` finalises, and `GetCondResult` walks it in that order;
+`CondFormat::insertRule` keys `maRules` by priority in a `std::map` inside one block.
+
+***And the headline is the reach, not the fix: a rule count is not a reach figure.***
+1215 unread rules over the corpus move **3 of 947 renderings** — sum `|ink|%` 27.62 → 27.02, no
+page count anywhere — and the nine candidates that do not move are each explained rather than
+broken. **358 `containsText` rules on `flightstandards-doc-Cross-reference-table_version02.xlsx`
+search for `xxx` and no cell on the sheet holds it**, the leftovers of a search-highlight;
+`Application_Compliance_Checklist`'s 668 are split between a `veryHidden` sheet and columns L and
+M of a sheet that hides columns 10 to 19; 14 `duplicateValues` rules over 357 positions in three
+documents find **no** value occurring twice; and 66 `notContainsBlanks` hits sit in helper columns
+outside their printed block. So the 27.04, 21.67 and 18.17 ink seats these families were expected
+to take are **not conditional formatting at all** and keep their seats. **Census what a rule
+*paints*, not how many rules there are** — the arithmetic is cheap, it is the same parse, and it
+would have re-scoped this round before a line was written.
+
+Two instrument notes. **`wiley-cancelled-title-list` is exact**: 0.42 → 0.01 on ink, and its
+`#FFC7CE` fill and `#9C0006` font operators go 0/0 → 2/2 against the reference's 2/2. And **count
+text spans, not colour operators, when the question is which cells took a font colour** — the fill
+count is subject to the reference's rectangle coalescing, while `get_text("dict")`'s per-span
+colour is not: on `6880ac7361ca…ST Capability List` the two sides then agree span for span on all
+sixteen of the reference's, and the two we add are §4's tab.
+
+**And an extension-keyed census misses a mislabelled file.** `Special-Procedures_2025-07-10.xls` is
+`Microsoft Excel 2007+` — a zip — with six `containsText` rules, and is one of the three movers. No
+census filtered on `.xlsx`/`.xlsm` can see it.
 
 ### A wrapping cell whose text begins outside its own column draws nothing at all
 

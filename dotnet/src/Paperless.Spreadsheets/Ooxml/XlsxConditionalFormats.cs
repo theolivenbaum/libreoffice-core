@@ -43,10 +43,18 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// The binary is the ground truth and the tree is reference material.
 /// </para>
 /// <para>
-/// Only <c>colorScale</c> is read. <c>expression</c>, <c>cellIs</c>, <c>dataBar</c>,
-/// <c>iconSet</c> and the six text predicates reach 60 further documents between them and need a
-/// formula evaluator, a comparison, or a bar and icon geometry; the census is in
-/// <c>probes/sheets-r58/prediction.md</c>.
+/// Only <c>colorScale</c> is read here. Every rule naming a <c>dxfId</c> —
+/// <c>expression</c>, <c>cellIs</c>, <c>containsText</c>, <c>endsWith</c>,
+/// <c>containsBlanks</c>, <c>notContainsBlanks</c> and <c>duplicateValues</c> — is
+/// <see cref="XlsxConditionalStyles"/>'s. <strong>What is left unread is <c>dataBar</c> and
+/// <c>iconSet</c></strong>, and they belong here rather than there: like a scale they state no
+/// format and compute their answer from the numbers in their own range, and on the reference
+/// side they are <c>ScDataBarFormat</c> and <c>ScIconSetFormat</c> in
+/// <c>sc/source/core/data/colorscale.cxx</c> rather than <c>ScConditionEntry</c>. Both draw
+/// geometry over a cell rather than formatting it. Censused 2026-09-11 over the 243 corpus
+/// <c>.xlsx</c>/<c>.xlsm</c> by parsing each worksheet rather than by matching
+/// <c>type="…"</c> as text: <strong>9 <c>dataBar</c> rules in 6 documents and 2
+/// <c>iconSet</c> rules in 2</strong>.
 /// </para>
 /// </remarks>
 internal static class XlsxConditionalFormats
