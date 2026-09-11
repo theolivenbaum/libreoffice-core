@@ -174,8 +174,8 @@ public sealed class FrameMarginBandTests
             .Y.ShouldBe(Length.FromTwips(expectedTwips));
 
     /// <summary>
-    /// A frame the text wraps around is captured in the body; a wrap-through one is not, and neither
-    /// is captured at all below <c>compatibilityMode</c> 15.
+    /// A <em>text box</em> the text wraps around is captured in the body; a wrap-through one is not,
+    /// a bare shape never is, and neither is captured at all below <c>compatibilityMode</c> 15.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -191,25 +191,44 @@ public sealed class FrameMarginBandTests
     /// and is the page-relative placement clamped to the body's top. This tree answers 83.556, 155.556
     /// and 134.856. <c>dotnet/probes/frame-area-r85/</c>.
     /// </para>
+    /// <para>
+    /// <b>That document's box carries a <c>wps:txbx</c>, and this fixture did not — so it asserted the
+    /// right answer for the wrong object.</b> <c>bConsidered</c> is
+    /// <c>bWrapThrough || !bTextBox</c> for a drawing object
+    /// (<c>anchoredobjectposition.cxx</c>:125-144), so a shape with no text box is exempt from the
+    /// capture whatever its wrap. Measured on 26.2.4.2 over 93 one-attribute fixtures — three object
+    /// kinds × five wraps × six positions, <c>probes/words-close-r95/</c> — the reference draws
+    /// <c>shape-square-vbody-c15</c> at y 20.00 and <c>text-square-vbody-c15</c> at 72.00, and this
+    /// tree reproduces all 91 that carry a scoreable band.
+    /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("wrapSquare", 15, Margin)]
-    [InlineData("wrapNone", 15, 200)]
-    [InlineData("wrapSquare", 12, 200)]
-    [InlineData("wrapNone", 12, 200)]
-    public void OnlyAWrappedBandIsPulledIntoTheBody(string wrap, int compatibility, int expectedTwips)
+    [InlineData(true, "wrapSquare", 15, Margin)]
+    [InlineData(true, "wrapNone", 15, 200)]
+    [InlineData(true, "wrapSquare", 12, 200)]
+    [InlineData(true, "wrapNone", 12, 200)]
+    [InlineData(false, "wrapSquare", 15, 200)]
+    [InlineData(false, "wrapNone", 15, 200)]
+    [InlineData(false, "wrapSquare", 12, 200)]
+    public void OnlyAWrappedTextBoxIsPulledIntoTheBody(
+        bool textBox, string wrap, int compatibility, int expectedTwips)
         => Placed(
                 vertical: """<wp:positionV relativeFrom="topMargin"><wp:posOffset>127000</wp:posOffset></wp:positionV>""",
                 wrap: wrap,
-                compatibility: compatibility)
+                compatibility: compatibility,
+                textBox: textBox)
             .Y.ShouldBe(Length.FromTwips(expectedTwips));
 
     /// <summary>The band's rectangle on page one, from a DrawingML anchor.</summary>
+    // `textBox` writes a `wps:txbx`, which is what makes the shape half of a TextBox pair and
+    // therefore something the page capture can reach at all -- see
+    // OnlyAWrappedTextBoxIsPulledIntoTheBody.
     private static DocRect Placed(
         string? horizontal = null,
         string? vertical = null,
         string wrap = "wrapNone",
-        int compatibility = 0)
+        int compatibility = 0,
+        bool textBox = false)
         => Layout(Package(
             $"""
             <w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0"
@@ -225,7 +244,9 @@ public sealed class FrameMarginBandTests
                   <a:xfrm><a:off x="0" y="0"/><a:ext cx="508000" cy="254000"/></a:xfrm>
                   <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
                   <a:solidFill><a:srgbClr val="FF0000"/></a:solidFill>
-                </wps:spPr><wps:bodyPr/></wps:wsp>
+                </wps:spPr>{(textBox
+                    ? """<wps:txbx><w:txbxContent><w:p/></w:txbxContent></wps:txbx>"""
+                    : string.Empty)}<wps:bodyPr/></wps:wsp>
               </a:graphicData></a:graphic>
             </wp:anchor></w:drawing></w:r>
             """, compatibility));

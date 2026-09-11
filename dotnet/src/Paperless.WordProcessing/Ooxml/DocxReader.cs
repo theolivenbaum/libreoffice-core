@@ -340,14 +340,17 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // `PaginationOptions.CapturesAnchoredObjectsOnPage`.
             CapturesAnchoredObjectsOnPage = false,
 
-            // ...but that flag exempts a *wrap-through* object and nothing else:
-            // `IsDraggingOffPageAllowed` (`sw/source/core/layout/anchoredobject.cxx`:790-801) is
-            // `bDisablePositioning && bIsWrapThrough`, a conjunction. A DOCX text box stating
-            // `wp:wrapSquare` is still pulled back inside its area, and under `compatibilityMode` 15
-            // that area is the *body* rather than the sheet
-            // (`anchoredobjectposition.cxx`:562-573). Applied only to the two margin bands here, for
-            // the reason `PaginationOptions.CapturesMarginBandObjects` measures.
-            CapturesMarginBandObjects = compatibility.CompatibilityMode >= 15,
+            // ...but that flag is only one term of the condition. `bConsidered`
+            // (`anchoredobjectposition.cxx`:125-144) exempts a wrap-through fly and a *shape with no
+            // text box*, and nothing else — so a DOCX picture or text box stating `wp:wrapSquare` is
+            // still pulled back inside its area. See `PaginationOptions.CapturesWrappedObjects`.
+            CapturesWrappedObjects = true,
+
+            // And under `compatibilityMode` 15 that area is the page's *body* rather than the sheet,
+            // wherever the anchor has a body frame to be narrowed to — which a header or footer anchor
+            // has not. `PaginationOptions.NarrowsCaptureToBody` has the five conditions and the two
+            // documents the missing one costs.
+            NarrowsCaptureToBody = compatibility.CompatibilityMode >= 15,
 
             // LibreOffice's PARA_SPACE_MAX means the two spacings *add*; when it is off the larger
             // wins, which is Word's behaviour. Its OOXML exporter writes

@@ -322,21 +322,43 @@ public sealed class RtfStyleFormattingTests
     }
 
     /// <summary>
-    /// <c>Body Text</c> and <c>caption</c> are a different pool parent and are left where they are.
+    /// <c>Body Text</c> and <c>caption</c> take the document's own <c>Normal</c>, not a constant.
     /// </summary>
     /// <remarks>
-    /// The measured divergence beside the rule above, kept as a test so that the next round finds it
-    /// stated rather than has to re-measure it. Both names' pool styles have <c>COLL_STANDARD</c> for
-    /// a parent (<c>poolfmt.cxx</c>:201-204, :229-235), so what 26.2.4.2 gives them is the document's
-    /// own <c>Normal</c> entry — <b>10 pt under <c>\fs20</c> and 14 pt under <c>\fs28</c></b>, while
-    /// this tree answers <c>\pard\plain</c>'s twelve to both. Neither <c>COLL_TEXT</c>'s 0/7 pt nor
-    /// <c>COLL_LABEL</c>'s italic 6/6 survives the reset, so the gap is inheritance from
-    /// <em>Standard</em> and not a pool value; reach is 2 of the 338 converted <c>.rtf</c>.
+    /// Both names' pool styles have <c>COLL_STANDARD</c> for a parent (<c>poolfmt.cxx</c>:201-204,
+    /// :229-235), so what 26.2.4.2 gives them is the document's own <c>Normal</c> entry — measured
+    /// on <c>probes/rtf-bookmark-r88/genpool.py</c>, <b>10 pt under <c>\fs20</c> and 14 pt under
+    /// <c>\fs28</c></b>, while <c>heading 4</c>, <c>Title</c> and <c>Subtitle</c> answer 14 to
+    /// both. That pair of sizes is the whole assertion: one <c>Normal</c> cannot tell a pool
+    /// constant from inheritance, which is what round 87 read the other way.
     /// </remarks>
     [Theory]
-    [InlineData("Body Text")]
-    [InlineData("caption")]
-    public void APoolStyleUnderStandardIsNotModelledYet(string name)
+    [InlineData("Body Text", 20, 10)]
+    [InlineData("Body Text", 28, 14)]
+    [InlineData("caption", 20, 10)]
+    [InlineData("caption", 28, 14)]
+    [InlineData("Caption", 20, 10)]
+    public void APoolStyleUnderStandardTakesTheDocumentsOwnNormal(string name, int normal, int size)
+        => First(@"\pard\plain\s7 MARKER\par",
+                @"{\s0\snext0\f0\fs" + normal + " Normal;}"
+                    + @"{\s7\sbasedon9\snext0 " + name + ";}"
+                    + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")
+            .Size.ShouldBe(Length.FromPoints(size));
+
+    /// <summary>
+    /// A name the map answers nothing for keeps <c>\pard\plain</c>'s twelve points.
+    /// </summary>
+    /// <remarks>
+    /// The control for both pool rules, and it is not hypothetical: <c>Quote</c>,
+    /// <c>List Paragraph</c> and <c>Normal (Web)</c> are in <c>ConvertStyleName</c>'s map with an
+    /// <em>empty</em> Writer name (<c>StyleSheetTable.cxx</c>:1794, :1883-1884), so no existing
+    /// style is reused and the entry gets no pool parent at all.
+    /// </remarks>
+    [Theory]
+    [InlineData("Quote")]
+    [InlineData("List Paragraph")]
+    [InlineData("Normal (Web)")]
+    public void ANameWriterHasNoStyleForKeepsTheResetSize(string name)
         => First(@"\pard\plain\s7 MARKER\par",
                 @"{\s0\snext0\f0\fs20 Normal;}{\s7\sbasedon9\snext0 " + name + ";}"
                     + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")
