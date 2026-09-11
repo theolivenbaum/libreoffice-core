@@ -204,6 +204,7 @@ public sealed class SheetFormatting
     private readonly List<(int First, int Last, int Format)> _columns = [];
     private readonly Dictionary<(int Row, int Column), Colour> _conditional = [];
     private readonly Dictionary<(int Row, int Column), SheetDataBar> _bars = [];
+    private readonly Dictionary<(int Row, int Column), SheetIcon> _icons = [];
     private int _default;
     private bool _hasDefaults;
 
@@ -217,7 +218,7 @@ public sealed class SheetFormatting
     /// </remarks>
     public bool IsEmpty => _palette.Count == 1 && _cells.Count == 0 && _blocks.IsEmpty
                            && _rows.Count == 0 && _columns.Count == 0 && _conditional.Count == 0
-                           && _bars.Count == 0;
+                           && _bars.Count == 0 && _icons.Count == 0;
 
     /// <summary>Interns a format and returns the handle the setters take.</summary>
     /// <param name="format">The format to intern.</param>
@@ -369,21 +370,54 @@ public sealed class SheetFormatting
     public SheetDataBar? BarAt(int row, int column)
         => _bars.Count > 0 && _bars.TryGetValue((row, column), out SheetDataBar bar) ? bar : null;
 
+    /// <summary>Sets the icon an <c>iconSet</c> rule draws over one cell.</summary>
+    /// <remarks>
+    /// A fourth layer, for the reason the third is one: an icon is painted over the cell's own
+    /// background in its bottom-left corner rather than replacing anything, and it must not reach
+    /// <see cref="SheetDecorationArea"/> — one corpus icon rule is stated over <c>I10:BL35</c> and
+    /// another over a whole column, and a conditional format does not extend how far a sheet
+    /// prints.
+    /// <para>
+    /// Set only where the reference would have an <c>ScIconSetInfo</c>. A cell whose bucket is a
+    /// custom <c>NoIcons</c> gets no entry at all rather than an empty one, because such a cell
+    /// keeps its own text however <c>showValue</c> is set
+    /// (<c>sc/source/core/data/colorscale.cxx</c>:1236-1239).
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    /// <param name="icon">The icon the rule resolved to for this cell.</param>
+    public void SetConditionalIcon(int row, int column, SheetIcon icon)
+    {
+        if (row < 0 || column < 0) return;
+        _icons[(row, column)] = icon;
+    }
+
+    /// <summary>The icon drawn over one cell, or null when no rule reaches it.</summary>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    public SheetIcon? IconAt(int row, int column)
+        => _icons.Count > 0 && _icons.TryGetValue((row, column), out SheetIcon icon) ? icon : null;
+
     /// <summary>
     /// Whether a rule takes one cell's own value off the page entirely.
     /// </summary>
     /// <remarks>
-    /// <c>showValue="0"</c>. The reference does not hide the number behind the bar, it does not
-    /// draw it: <c>ScOutputData::DrawStrings</c> clears <c>bDoCell</c> before laying anything out
-    /// (<c>sc/source/ui/view/output2.cxx</c>:1691-1698), and 26.2.4.2's own PDF of
+    /// <c>showValue="0"</c>. The reference does not hide the number behind the bar or the icon, it
+    /// does not draw it: <c>ScOutputData::DrawStrings</c> clears <c>bDoCell</c> before laying
+    /// anything out (<c>sc/source/ui/view/output2.cxx</c>:1691-1698), and 26.2.4.2's own PDF of
     /// <c>tests/corpus/features/sheet-cf-data-bar-only.xlsx</c> holds no text-showing operator at
     /// all. The row's height is unaffected, which is why this is asked at drawing time rather
     /// than folded into the cell's text.
+    /// <para>
+    /// Two families answer it and the two arms are separate lines in the reference
+    /// (<c>:1694-1697</c>), so either alone is enough.
+    /// </para>
     /// </remarks>
     /// <param name="row">The zero-based row.</param>
     /// <param name="column">The zero-based column.</param>
     public bool HidesValue(int row, int column)
-        => BarAt(row, column) is { ShowValue: false };
+        => BarAt(row, column) is { ShowValue: false } || IconAt(row, column) is { ShowValue: false };
 
     /// <summary>Sets the format everything with no other answer takes.</summary>
     /// <param name="format">A handle from <see cref="Intern"/>.</param>

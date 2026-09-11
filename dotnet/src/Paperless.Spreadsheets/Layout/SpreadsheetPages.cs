@@ -403,6 +403,11 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
             // painted inside the same `DrawBackground` pass as the cell's own colour and over it
             // (`sc/source/ui/view/output.cxx`:1000-1035), long before any border or text.
             _decoration.DrawDataBars(columns, rows, sink);
+
+            // And an icon in the same pass and after the bar: `drawCells` calls `drawDataBars`
+            // and then `drawIconSets` on the same rectangle (`output.cxx`:1028-1031), so a cell
+            // carrying both draws the icon over the bar.
+            _decoration.DrawIconSets(columns, rows, sink);
             _decoration.DrawBorders(columns, rows, sink);
 
             foreach (PlacedRow row in rows)

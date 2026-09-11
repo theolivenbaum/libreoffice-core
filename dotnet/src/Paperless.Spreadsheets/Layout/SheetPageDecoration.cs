@@ -300,6 +300,83 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         }
     }
 
+    /// <summary>Paints the icons an <c>iconSet</c> conditional format draws over its cells.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>drawIconSets</c> (<c>sc/source/ui/view/output.cxx</c>:960-989) is four statements, and
+    /// three of them are geometry:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <strong>The icon is as tall as the cell's own font, not a fixed size.</strong> The ten
+    ///     points at <c>:967</c> is a fallback for a null <c>mnHeight</c>, and
+    ///     <c>GetIconSetInfo</c> <em>always</em> sets that field, from the cell's
+    ///     <c>ATTR_FONT_HEIGHT</c> (<c>sc/source/core/data/colorscale.cxx</c>:1222-1224), so the
+    ///     branch at <c>:969-980</c> always wins. Measured on 26.2.4.2's own renderings of the
+    ///     corpus, the per-icon area runs from 19.4 pt² on <c>066_Agile_Gantt_chart</c> to
+    ///     103.9 pt² on <c>069_Blue_modern_balance_sheet</c> — a range of more than five to one,
+    ///     where a constant ten points would be 100 pt² throughout.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <strong>It is square</strong>, because its width is the bitmap's own aspect ratio times
+    ///     that height (<c>:982-984</c>) and every icon-set asset the reference ships is 16 × 16.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <strong>It sits in the bottom-left corner, two device pixels in on both axes</strong> —
+    ///     <c>Point(rRect.Left() + 2 * nOneX, rRect.Bottom() - 2 * nOneY - aHeight)</c> at
+    ///     <c>:988</c> — the same inset as a data bar's, which is why this shares
+    ///     <see cref="BarInset"/> rather than restating it. It is clipped to the cell
+    ///     (<c>:987</c>), so an icon taller than its row is cut rather than spilling.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// The font height is the cell's <em>stated</em> one: <c>GetIconSetInfo</c> reads
+    /// <c>mrDoc.GetPattern(rAddr)</c>, the cell's own attribute pattern, which a conditional
+    /// format's <c>dxf</c> does not reach — Calc applies a condition's font as a style at fill
+    /// time and not to the pattern the icon measures itself against. It scales with the print
+    /// scale because <c>aHeight</c> is a logic length in a mapped-out output device.
+    /// </para>
+    /// </remarks>
+    /// <param name="columns">The columns on the page.</param>
+    /// <param name="rows">The rows on the page.</param>
+    /// <param name="sink">Receives the drawing commands.</param>
+    public void DrawIconSets(
+        IReadOnlyList<PlacedColumn> columns, IReadOnlyList<PlacedRow> rows, IDrawingSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(sink);
+
+        SheetFormatting formatting = sheet.Formatting;
+        if (formatting.IsEmpty) return;
+
+        foreach (PlacedRow row in rows)
+        {
+            foreach (PlacedColumn column in columns)
+            {
+                if (formatting.IconAt(row.Row, column.Column) is not { } icon) continue;
+                if (icon.Glyph == SheetIconGlyph.Unpainted) continue;
+
+                // The stated size times the print scale, and no device-pixel round trip:
+                // `drawIconSets` converts `mnHeight` straight from twips to hundredths of a
+                // millimetre (`:977`) and hands it to `DrawBitmap`, so unlike a *face* it is
+                // never selected at whole pixels. The conversion's own truncation is under a
+                // thousandth of a millimetre and below anything measurable in a PDF.
+                Length side = sheet.Formats.At(row.Row, column.Column).FontSize * _scale;
+                if (side <= Length.Zero) continue;
+
+                DocRect box = new(
+                    column.X + BarInset, row.Bottom - BarInset - side, side, side);
+
+                sink.Save();
+                sink.ClipPath(GraphicsPath.Rectangle(
+                    new DocRect(column.X, row.Y, column.Width, row.Height)));
+                SheetIconArtwork.Draw(sink, box, icon.Glyph);
+                sink.Restore();
+            }
+        }
+    }
+
     /// <summary>The dashed vertical a data bar draws at its zero, when it has one inside the cell.</summary>
     /// <remarks>
     /// <c>LineInfo(LineStyle::Dash, 1)</c> with four dashes of three logic units and three
