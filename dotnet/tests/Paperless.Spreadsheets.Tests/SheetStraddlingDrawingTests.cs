@@ -158,8 +158,9 @@ public sealed class SheetStraddlingDrawingTests
     /// and <c>pdftotext</c> reads it. Over the 947 banked reference renderings, 150 pages in 61
     /// documents carry drawing-layer text lying wholly outside the drawing-layer clip that governs
     /// it, 5865 glyphs in all. Hiding them instead costs <strong>3150 alphanumeric characters over
-    /// 56 of the 74 sheets renderings this clip touches</strong>, and takes eight of them outside
-    /// the gate's own <c>max(2%, 15)</c> glyph band.
+    /// 56 of the 74 sheets renderings this clip touches</strong>, and moves six of them out of the
+    /// gate's own <c>max(2%, 15)</c> glyph band on balance — eight leave it and two enter, and the
+    /// two that enter do so because we draw more glyphs there than the reference does.
     /// </para>
     /// </remarks>
     [Fact]

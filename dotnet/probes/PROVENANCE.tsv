@@ -1585,3 +1585,5 @@ dotnet/probes/clip-seats-r97/clip-overreach.py	2026-09-11	current	26.2.4.2	prese
 dotnet/probes/clip-seats-r97/overreach.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
 dotnet/probes/clip-seats-r97/cliptext-chars.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
 dotnet/probes/clip-seats-r97/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/clip-seats-r97/clip-rects.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
+dotnet/probes/clip-seats-r97/recheck.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/clip-seats-r97/results.md
