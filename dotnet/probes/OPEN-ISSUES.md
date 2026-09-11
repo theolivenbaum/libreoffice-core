@@ -33,7 +33,6 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 
 | # | what | round |
 |---|---|---|
-| O1 | Head of the sheets ink ranking: `TK-Syllabus-Comparison-Document-v2.xlsx` **304.57 summed \|ink\|% over 1235 pages, 142 MAJOR, and it passes the gate**; `alle einzeln` 225.44; `Background_Declaration_Template` 136.07. Plus BIFF `TXO` formatting runs unread — 155 boxes in 17 `.xls`, 62 mixed-format. | `agent/sheetink` |
 
 ## Open — seated, not yet dispatched
 
@@ -48,6 +47,11 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | O9 | **`Body Text` and `caption` track the document's own `Normal`** — inheritance from *Standard*, not a pool value; needs `ConvertStyleName`'s two hundred names to be safe. `APoolStyleUnderStandardIsNotModelledYet` pins the gap. | `probes/rtf-bookmark-r88` |
 | O10 | **Chart category-axis rotation** needs a hyphenator and a pattern set — the trigger is `ParaIsHyphenation`, not width. A feature, not a round; wrong hyphenation turns axes the reference wraps. | `probes/chart-axisrot-r91` |
 | O11 | `048_Expense_trends_budget`: a remaining automatic-interval cap disagreement (ours step 50, reference 100 on 0…500). Fixing it properly means laying out at model size and scaling the finished `ChartDrawing`. | `probes/chart-axis-r87` |
+| O16 | **`TK-Syllabus` residual 205.57 is a row-height drift**, not formatting: 93.5 of it on pages 1-100, same rows in the same order with ours two rows lower, and 1235 pages on both sides. | `probes/sheet-ink-r94` |
+| O17 | **`alle einzeln.xlsx` 225.44** — states no conditional formatting at all; it holds a pivot table. Uncharacterised. | same |
+| O18 | **`Background_Declaration_Template.xls` 136.07** — BIFF `CONDFMT`/`CF`, a different reader from the one just fixed. Overlaps O4. | same |
+| O19 | **BIFF `TXO` formatting runs unread** — `ReadText` takes the string and stops, `TextOf` hardcodes 10 pt regular. 155 boxes in 17 `.xls`, 62 mixed-format. Untouched: nothing in r94 reached the BIFF path. | `probes/sheet-shapefill-r92` |
+| O20 | `containsText` and its five sibling conditional-format rule families — **1040 rules in 8 documents**, and 461 of the 601 `expression` rules are one comparison against a string literal, so no formula evaluator is needed. The cheapest thing left in the area. | `probes/sheet-ink-r94` |
 | O12 | Whether a clipped **shape's own** text should leave the text layer. The 733 pages that refuted the general claim are mostly *cell* text, which the drawing clip never governed. | `probes/clip-textlayer-r93` |
 | O13 | **Escher WordArt is not drawn as Fontwork.** `pres_ioc_phuket.ppt` p26: the reference clips a gradient to the glyph outlines, we paint the rectangle, so the title reads as a blank yellow bar. No MS-binary reader reaches `Paperless.Ooxml/DrawingML/Fontwork*`. | `probes/slides-ink-r94`; **reach 2 shapes in 2 of 181** |
 | O14 | The dark blue banner on that same page is **103.38 pt** tall in the reference and 64.88 in ours. Measured, uncharacterised, and separate from O13. | same |
@@ -65,6 +69,7 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | N6 | `c:layoutTarget val="inner"`; an axis `rot` of exactly ±90° | **0** corpus documents each |
 | N7 | `NAS-Infrastructure-Roadmaps-Weather.pptx` as an ink defect — **refuted**. All 90 text records on its largest page sit at identical positions; the 3.52 % is a 0.13 % anisotropy seen through a 512 px instrument. | `probes/slides-ink-r94` |
 | N8 | WMF raster op `0x7` (self-mask *and* invert the rectangle) — needs the destination back, and no corpus document reaches it | `probes/slides-ink-r94` |
+| N9 | An `.xlsx` whose `indexedColors` are written `ffRRGGBB`, where oox reads the top byte as transparency (`decodeIntegerHex_impl`) — modelling it faithfully took the one affected document from 20.15 to 68.17, so it is left | **1** corpus document; `probes/sheet-ink-r94` |
 
 ---
 
