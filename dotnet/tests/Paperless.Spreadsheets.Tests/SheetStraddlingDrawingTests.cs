@@ -1,5 +1,7 @@
 using Paperless.Core.Documents;
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
+using Paperless.Core.Units;
 using Paperless.Spreadsheets.Layout;
 using Paperless.TestKit;
 using Shouldly;
@@ -134,5 +136,78 @@ public sealed class SheetStraddlingDrawingTests
     public void ADrawingInsideItsBlockIsNotClipped()
     {
         Place("sheet-chart-face-stated.xlsx", 0).Clips.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The block clip cuts the shape's ink and leaves the shape's own glyphs in the text layer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the half of the rule <see cref="PlacedDrawingSink"/> cannot see, because that sink
+    /// does not override <see cref="IDrawingSink.ClipPathKeepingText"/> and so records both kinds
+    /// alike. Two rounds wrote this clip independently and git merged both cleanly, one of them
+    /// with the text-hiding <see cref="IDrawingSink.ClipPath"/>; nothing in the suite would have
+    /// told them apart.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 rather than chosen.</strong> On an authored probe
+    /// (<c>probes/clip-seats-r97/make-shape-text-probe.py</c>) whose rectangle carries a
+    /// right-aligned word landing 52 pt past the block's right edge and still on the paper, the
+    /// reference cuts the rectangle's fill at the block and writes the word anyway —
+    /// <c>568.545 759.089 Td … Tj</c> inside the page's own <c>50.4 58.28 466.214 729.609 re W* n</c>,
+    /// and <c>pdftotext</c> reads it. Over the 947 banked reference renderings, 150 pages in 61
+    /// documents carry drawing-layer text lying wholly outside the drawing-layer clip that governs
+    /// it, 5865 glyphs in all. Hiding them instead costs <strong>3150 alphanumeric characters over
+    /// 56 of the 74 sheets renderings this clip touches</strong>, and moves six of them out of the
+    /// gate's own <c>max(2%, 15)</c> glyph band on balance — eight leave it and two enter, and the
+    /// two that enter do so because we draw more glyphs there than the reference does.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheBlockClipKeepsTheShapesOwnGlyphs()
+    {
+        using IPaginatedDocument document = (IPaginatedDocument)PaperlessDocument.Open(
+            Corpus.Require("sheet-drawing-across-break.xlsx"));
+
+        ClipKindSink sink = new();
+        foreach (SheetPage page in ((SpreadsheetPages)document.Layout()).Pages) page.Draw(sink);
+
+        sink.Keeping.ShouldBe(2, customMessage: "one clip on each of the two pages");
+        sink.Hiding.ShouldBe(0, customMessage: "and neither of them removes the shape's words");
+    }
+
+    /// <summary>Counts the two kinds of clip apart, which no shared sink does.</summary>
+    private sealed class ClipKindSink : IDrawingSink
+    {
+        public int Hiding { get; private set; }
+
+        public int Keeping { get; private set; }
+
+        public void ClipPath(GraphicsPath path, FillRule rule = FillRule.NonZero) => Hiding++;
+
+        public void ClipPathKeepingText(GraphicsPath path, FillRule rule = FillRule.NonZero)
+            => Keeping++;
+
+        public void BeginPage(DocSize size) { }
+
+        public void EndPage() { }
+
+        public void Save() { }
+
+        public void Restore() { }
+
+        public void Transform(AffineTransform transform) { }
+
+        public void FillPath(GraphicsPath path, Paint paint, FillRule rule = FillRule.NonZero) { }
+
+        public void StrokePath(GraphicsPath path, Stroke stroke) { }
+
+        public void DrawGlyphRun(GlyphRun run, Paint paint) { }
+
+        public void DrawImage(RasterImage image, DocRect destination, double opacity = 1.0) { }
+
+        public void BeginTransparencyGroup(double opacity) { }
+
+        public void EndTransparencyGroup() { }
     }
 }

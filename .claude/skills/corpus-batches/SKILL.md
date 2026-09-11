@@ -1295,3 +1295,63 @@ done
 And do not let a single unreproduced failure pass silently as "flaky". Say it happened, say it
 did not reproduce, and say you could not name it — a project this dependent on measured counts
 cannot afford a habit of explaining away the ones that disagree.
+
+## A waiter that greps for the job it is waiting on will never exit
+
+`until ! pgrep -f 'confine.sh' >/dev/null; do sleep 20; done` looks obviously correct and
+cannot terminate. `pgrep -f` matches against the **full command line of every process**,
+including the waiting shell's own — and that command line contains the string `confine.sh`.
+So the waiter matches itself, forever, whether or not the sweep is running.
+
+Ten of these accumulated in one session before anyone noticed, because the failure is silent:
+the waiter simply never reports, which looks exactly like a sweep that is still going. They
+were found only when something else asked why background work had been pending for an hour.
+
+Two ways out, either is fine:
+
+```sh
+# 1. Wait on a marker the job itself writes, not on the job's name.
+until [ -f "$OUT/DONE" ]; do sleep 20; done
+
+# 2. If you must match a name, exclude your own process.
+until ! pgrep -f 'confine[.]sh' | grep -qv "^$$\$"; do sleep 20; done
+```
+
+The bracket trick — `confine[.]sh` — is the habitual `ps | grep` dodge and it does **not**
+help here, because the waiter's command line contains the bracketed pattern too. Only the
+marker file or an explicit self-exclusion works.
+
+The general form is the one this skill keeps meeting: **before believing a measurement, check
+it is not a fact about the instrument.** A waiter that never fires and a sweep that never
+finishes look identical from outside.
+
+## A truncated test run announces itself as a pass
+
+Worse than the lost-detail problem above, and seen twice in one session: `dotnet test` printed
+
+```
+Passed!  - Failed: 0, Passed:  870, … - Paperless.WordProcessing.Tests.dll
+```
+
+and later, from the same tree, `Passed! - Failed: 0, Passed: 1885`. `--list-tests` says 1885. The
+870 run did not fail — **it stopped early and reported the tests it had got through as a clean
+pass.** Nothing in the output says so. A round that runs the suite once, sees `Failed: 0`, and
+moves on has verified nothing.
+
+The same fault has a second face: a suite that never ran at all. One round's `tests.log` stopped
+at its `== Fidelity` line on an `NU1900` restore error, and its write-up reported
+"542 passed / 10 failed — the briefed baseline exactly". The number was correct. It had been
+*asserted*, because the expected value was known in advance. A baseline you already know is a
+baseline you can accidentally write down without measuring.
+
+So:
+
+- **Check the total, not just the failure count.** Know what N should be for each project and
+  compare; `Failed: 0` out of the wrong N is not a pass.
+- **Check the run reached the last project.** A suite that ends before Fidelity has told you
+  nothing about Fidelity.
+- **Never write down an expected number you did not read out of this run's output.** If the log
+  does not contain it, say the run did not complete.
+
+The general form, again: *before believing a measurement, check it is not a fact about the
+instrument.* Here the instrument reports success for work it never did.

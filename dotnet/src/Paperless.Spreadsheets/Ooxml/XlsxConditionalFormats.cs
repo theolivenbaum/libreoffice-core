@@ -43,18 +43,33 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// The binary is the ground truth and the tree is reference material.
 /// </para>
 /// <para>
-/// Only <c>colorScale</c> is read here. Every rule naming a <c>dxfId</c> —
-/// <c>expression</c>, <c>cellIs</c>, <c>containsText</c>, <c>endsWith</c>,
-/// <c>containsBlanks</c>, <c>notContainsBlanks</c> and <c>duplicateValues</c> — is
-/// <see cref="XlsxConditionalStyles"/>'s. <strong>What is left unread is <c>dataBar</c> and
-/// <c>iconSet</c></strong>, and they belong here rather than there: like a scale they state no
-/// format and compute their answer from the numbers in their own range, and on the reference
-/// side they are <c>ScDataBarFormat</c> and <c>ScIconSetFormat</c> in
-/// <c>sc/source/core/data/colorscale.cxx</c> rather than <c>ScConditionEntry</c>. Both draw
-/// geometry over a cell rather than formatting it. Censused 2026-09-11 over the 243 corpus
-/// <c>.xlsx</c>/<c>.xlsm</c> by parsing each worksheet rather than by matching
-/// <c>type="…"</c> as text: <strong>9 <c>dataBar</c> rules in 6 documents and 2
-/// <c>iconSet</c> rules in 2</strong>.
+/// <c>colorScale</c> is read here and <c>dataBar</c> beside it, in
+/// <see cref="XlsxDataBars"/>, which this calls with the same walk of the sheet's numbers.
+/// Every rule naming a <c>dxfId</c> — <c>expression</c>, <c>cellIs</c>, <c>containsText</c>,
+/// <c>endsWith</c>, <c>containsBlanks</c>, <c>notContainsBlanks</c> and
+/// <c>duplicateValues</c> — is <see cref="XlsxConditionalStyles"/>'s. The division is the
+/// reference's: these two are <c>ScColorScaleFormat</c> and <c>ScDataBarFormat</c> in
+/// <c>sc/source/core/data/colorscale.cxx</c>, they state no format, and they compute their
+/// answer from the numbers in their own range.
+/// </para>
+/// <para>
+/// <strong>What is left unread is <c>iconSet</c>, and it is left because its glyph is a
+/// LibreOffice bitmap.</strong> <c>drawIconSets</c> (<c>sc/source/ui/view/output.cxx</c>:960-989)
+/// paints <c>ScIconSetFormat::getBitmap</c>'s image into the cell's bottom-left corner, and that
+/// image is one of the application's own icon-theme assets rather than anything derivable from
+/// the file. It is drawn at <strong>the cell's own font height</strong> and not at a fixed size:
+/// the ten points at <c>:967</c> is a fallback for a null <c>mnHeight</c>, and
+/// <c>GetIconSetInfo</c> always sets that field from <c>ATTR_FONT_HEIGHT</c>
+/// (<c>colorscale.cxx</c>:1222-1224), so the branch at <c>:969-980</c> always wins — measured, the
+/// corpus's icons run 19.4 pt² to 103.9 pt² each. Every other part of the family is readable and
+/// is written down in <c>probes/cond-format-r97/results.md</c>: which bucket a value falls into
+/// (<c>GetIconSetInfo</c>, <c>colorscale.cxx</c>:1186-1253 — the *last* entry whose threshold the
+/// value satisfies wins, and a <c>NoIcons</c> custom entry answers <c>nullptr</c>, so such a cell
+/// keeps its own text however <c>showValue</c> is set). Censused 2026-09-11 over every corpus
+/// document that opens as an OPC spreadsheet: <strong>20 rules in 10 documents</strong> — 2 in the
+/// main namespace and 18 stated only in the <c>x14</c> extension list, in two disjoint sets of
+/// documents — and 26.2.4.2's own renderings of those ten draw <strong>60 icons over
+/// 1549 pt²</strong> in seven of them.
 /// </para>
 /// </remarks>
 internal static class XlsxConditionalFormats
@@ -80,10 +95,16 @@ internal static class XlsxConditionalFormats
         if (worksheet is null) return;
 
         List<Rule> rules = ReadRules(worksheet, styles, theme);
-        if (rules.Count == 0) return;
+        bool bars = XlsxDataBars.AnyStated(worksheet);
+        if (rules.Count == 0 && !bars) return;
 
+        // One walk of the sheet's numbers for both families: a scale and a bar resolve their
+        // stops over the same numbers in their own range, and the walk is the expensive half.
         Dictionary<(int Row, int Column), double> numbers = ReadNumbers(worksheet);
         if (numbers.Count == 0) return;
+
+        if (bars) XlsxDataBars.Apply(formatting, worksheet, styles, theme, numbers);
+        if (rules.Count == 0) return;
 
         // Highest priority first, and a lower `priority` attribute is the higher priority. It is
         // priority rather than document order that decides, measured with a discriminating pair:
@@ -217,7 +238,7 @@ internal static class XlsxConditionalFormats
     /// even count is the mean of the middle pair. Twelve values 93…170 give 131.5, which is what
     /// puts <c>003_advanced_excel_pie</c>'s seventh cell just past the yellow stop.
     /// </remarks>
-    private static double Percentile(List<double> sorted, double fraction)
+    internal static double Percentile(List<double> sorted, double fraction)
     {
         fraction = Math.Min(1.0, fraction);
         if (fraction < 0) return sorted[0];
@@ -320,7 +341,7 @@ internal static class XlsxConditionalFormats
     /// A single cell is a range of one, and a reference may be absolute — <c>$C$5</c> — which
     /// means nothing here because nothing is being copied.
     /// </remarks>
-    private static List<SheetRange> ParseSqref(string? sqref)
+    internal static List<SheetRange> ParseSqref(string? sqref)
     {
         List<SheetRange> ranges = [];
         if (string.IsNullOrWhiteSpace(sqref)) return ranges;
@@ -349,7 +370,7 @@ internal static class XlsxConditionalFormats
         return ranges;
     }
 
-    private static double ParseValue(string? value)
+    internal static double ParseValue(string? value)
         => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
             ? parsed
             : 0;

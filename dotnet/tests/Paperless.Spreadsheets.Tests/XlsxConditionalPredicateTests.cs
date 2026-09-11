@@ -62,6 +62,9 @@ public sealed class XlsxConditionalPredicateTests
     /// <summary>The second <c>dxf</c>'s font colour, where a fixture states two.</summary>
     private const string Blue = "#0000FF";
 
+    /// <summary>And its fill.</summary>
+    private const string BlueFill = "#CCE5FF";
+
     [Fact]
     public void ContainsTextIsCaseInsensitiveAndReachesInsideTheString()
     {
@@ -144,6 +147,35 @@ public sealed class XlsxConditionalPredicateTests
 
         painted.Fill(4, column: 0).ShouldBe(RedFill);
         painted.Fill(2, column: 1).ShouldBeNull();
+    }
+
+    [Fact]
+    public void AConditionComparesTheStoredStringAndNotTheDrawnOne()
+    {
+        // `sheet-cf-stored-vs-drawn.xlsx` puts a leading `_x0009_` on A1, A5 and A6 and on C1. The
+        // tab is a control character the drawing layer elides, so 26.2.4.2 draws A1 as `alpha` and
+        // A5/A6 as `bravo` — the same glyphs as their untabbed neighbours — while comparing them
+        // as different strings: its PDF paints A2 and A3 (`alpha`) and A5/A6 (`\talpha`... rather
+        // `\tbravo`) and leaves A1 and A4 plain, so the two tabbed `bravo`s are duplicates of each
+        // other and of nothing else. `RichStringPortion::setText` decodes the `_xHHHH_` escapes
+        // and stops (`sc/source/filter/oox/richstring.cxx`:60-63), so the control character is
+        // still in the cell when `FillCache` keys on it.
+        Painted painted = Read("sheet-cf-stored-vs-drawn.xlsx");
+
+        painted.Fill(0).ShouldBeNull();
+        painted.Fill(1).ShouldBe(RedFill);
+        painted.Fill(2).ShouldBe(RedFill);
+        painted.Fill(3).ShouldBeNull();
+        painted.Fill(4).ShouldBe(RedFill);
+        painted.Fill(5).ShouldBe(RedFill);
+
+        // And the same string reaches the blank rule, whose replacement formula is
+        // `LEN(TRIM(#B))=0`: `TRIM` takes spaces and not tabs, so the reference gives C1 — a lone
+        // tab — the *not*-blank rule's blue and C2 — three spaces — the blank rule's red. A reader
+        // comparing the drawn text sees C1 as empty and gets it exactly the wrong way round.
+        painted.Fill(0, column: 2).ShouldBe(BlueFill);
+        painted.Fill(1, column: 2).ShouldBe(RedFill);
+        painted.Fill(2, column: 2).ShouldBe(BlueFill);
     }
 
     /// <summary>What one fixture's rules paint, by position.</summary>

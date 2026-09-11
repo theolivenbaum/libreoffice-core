@@ -69,7 +69,9 @@ A hundred twips is a height no content could ask for. This tree already models i
 this citation in place of the fitted *"recomputing without this cost eight `.xls` their page
 count"* that stood there, which was the right answer for the wrong reason.
 
-**Reading the record anyway moves nothing, and that is measured.** The reader was written,
+> **Correction, round 97.** The paragraph below is withdrawn. The reader it describes parses `CONDFMT` — a count and a `SqRef` of ranges — and never reads the `CF` records that hold the rules, so 64 of 64 byte-identical PDFs was a property of the instrument rather than a fact about the corpus. Asked of the reference instead, `--convert-to fods` at 26.2.4.2 resolves **29 conditional formats and 43 conditions across these four workbooks, 43 of 43 naming a style that carries a fill, a font colour or bold**. The seat is live again as O25; see `probes/biff-condfmt-r97`. The row-height half of this section — the `#if 0` around `AdjustRowHeight()` — is unaffected and stands.
+
+~~**Reading the record anyway moves nothing, and that is measured.**~~ The reader was written,
 verified against the reference's export, and then reverted: rendering all 64 `.xls` at the round's
 base and with `CONDFMT` read, under `SOURCE_DATE_EPOCH`, one output directory per document, gives
 **64 of 64 byte-identical PDFs**. Dead code with a proven reach of zero is not worth carrying, so

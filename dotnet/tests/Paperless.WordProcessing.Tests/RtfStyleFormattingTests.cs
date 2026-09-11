@@ -338,12 +338,140 @@ public sealed class RtfStyleFormattingTests
     [InlineData("caption", 20, 10)]
     [InlineData("caption", 28, 14)]
     [InlineData("Caption", 20, 10)]
+    [InlineData("header", 20, 10)]
+    [InlineData("header", 28, 14)]
+    [InlineData("Header", 28, 14)]
+    [InlineData("footer", 20, 10)]
+    [InlineData("footer", 28, 14)]
+    [InlineData("Footer", 28, 14)]
+    [InlineData("toc 1", 20, 10)]
+    [InlineData("toc 1", 28, 14)]
+    [InlineData("toc 3", 28, 14)]
+    [InlineData("TOC 1", 28, 14)]
+    [InlineData("Index 1", 28, 14)]
+    [InlineData("Heading", 20, 10)]
+    [InlineData("Heading", 28, 14)]
+    [InlineData("Comment", 28, 14)]
+    [InlineData("Signature", 28, 14)]
     public void APoolStyleUnderStandardTakesTheDocumentsOwnNormal(string name, int normal, int size)
         => First(@"\pard\plain\s7 MARKER\par",
                 @"{\s0\snext0\f0\fs" + normal + " Normal;}"
                     + @"{\s7\sbasedon9\snext0 " + name + ";}"
                     + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")
             .Size.ShouldBe(Length.FromPoints(size));
+
+    /// <summary>
+    /// A bare <c>Heading</c> answers <em>Standard</em> and not the heading constants.
+    /// </summary>
+    /// <remarks>
+    /// The trap the name sets: <c>Heading</c> <em>is</em> <c>COLL_HEADLINE_BASE</c>, so the very
+    /// style that gives <c>heading 1</c>…<c>heading 9</c> their 14 pt, 12/6 and keep-with-next is
+    /// the one <c>SetPropertiesToDefault</c> resets when a document declares a style of that name
+    /// (<c>StyleSheetTable.cxx</c>:1111). It is also not in <c>ConvertStyleName</c>'s map at all —
+    /// what reaches Writer's style is <c>hasByName</c> on the name as written. Measured at
+    /// 26.2.4.2: no space above, no space below, and the document's own <c>Normal</c> size —
+    /// <c>probes/rtf-style-r97/genpool2.py</c>, six probes.
+    /// </remarks>
+    [Fact]
+    public void ABareHeadingIsStandardRatherThanTheHeadingPool()
+    {
+        ParagraphFormat format = Formats(
+            @"\pard\plain\s7 HEAD\par",
+            @"{\s0\snext0\f0\fs20 Normal;}{\s7\sbasedon9\snext0 Heading;}"
+                + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")[0];
+
+        format.SpaceBefore.ShouldBe(Length.Zero);
+        format.SpaceAfter.ShouldBe(Length.Zero);
+        format.KeepWithNext.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The five <c>COLL_LABEL_*</c> names take Writer's <em>Caption</em>: italic, 12 pt, 6/6.
+    /// </summary>
+    /// <remarks>
+    /// <c>Figure</c>, <c>Illustration</c>, <c>Table</c>, <c>Drawing</c> and <c>Text</c> all have
+    /// <c>COLL_LABEL</c> for a pool parent (<c>poolfmt.cxx</c>:248-252), and unlike the style the
+    /// entry matched, <em>that</em> style is not reset — which is what makes this a different rule
+    /// from <see cref="APoolStyleUnderStandardTakesTheDocumentsOwnNormal"/> rather than the same
+    /// one. The size is the 240 twips <c>SwDocShell::InitNew</c> writes over the block's own
+    /// <c>PT_10</c> (<c>docshini.cxx</c>:224-289), which is why it does not answer 10.
+    /// <b>The pair of <c>Normal</c> sizes is the assertion</b>: 12 pt under both is what says the
+    /// intermediate shadows the reference underneath it. <c>probes/rtf-style-r97/genpool3.py</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData("Figure", 20)]
+    [InlineData("Figure", 28)]
+    [InlineData("Illustration", 20)]
+    [InlineData("Table", 28)]
+    [InlineData("Drawing", 28)]
+    [InlineData("Text", 20)]
+    [InlineData("Text", 28)]
+    public void TheLabelFamilyTakesWritersCaption(string name, int normal)
+    {
+        string styles = @"{\s0\snext0\f0\fs" + normal + " Normal;}"
+            + @"{\s7\sbasedon9\snext0 " + name + ";}"
+            + @"{\s9\sbasedon0\snext9\fs18\b Notes;}";
+
+        First(@"\pard\plain\s7 MARKER\par", styles).Size.ShouldBe(Length.FromPoints(12));
+
+        ParagraphFormat format = Formats(@"\pard\plain\s7 HEAD\par", styles)[0];
+        format.SpaceBefore.ShouldBe(Length.FromPoints(6));
+        format.SpaceAfter.ShouldBe(Length.FromPoints(6));
+        Italic(@"\pard\plain\s7 HEAD\par", styles).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// A document that declares a <c>caption</c> of its own replaces the whole of that pool style.
+    /// </summary>
+    /// <remarks>
+    /// <c>ApplyStyleSheets</c> resets the matched style and writes the entry's own properties back
+    /// over it (<c>StyleSheetTable.cxx</c>:1101-1121), so <em>Caption</em> stops being a constant
+    /// and becomes a second reference — and the italic, the 12 pt and the 6/6 all go. It is not a
+    /// corner: <b>both</b> corpus documents that apply a <c>COLL_LABEL_*</c> name declare a
+    /// <c>caption</c> entry, so this arm is the one the corpus actually takes. Measured at
+    /// 26.2.4.2 on all five names × two <c>Normal</c> sizes,
+    /// <c>probes/rtf-style-r97/genpool3.py</c>: 10 pt, bold, upright, no added spacing.
+    /// </remarks>
+    [Theory]
+    [InlineData("Figure")]
+    [InlineData("Text")]
+    public void ADeclaredCaptionReplacesTheCaptionPool(string name)
+    {
+        string styles = @"{\s0\snext0\f0\fs28 Normal;}"
+            + @"{\s7\sbasedon9\snext0 " + name + ";}"
+            + @"{\s9\sbasedon0\snext9\fs18\b Notes;}"
+            + @"{\s8\sbasedon0\snext0\f0\fs20\b caption;}";
+
+        Formatting formatting = First(@"\pard\plain\s7 MARKER\par", styles);
+        formatting.Size.ShouldBe(Length.FromPoints(10));
+        formatting.Weight.ShouldBe(700);
+        Italic(@"\pard\plain\s7 HEAD\par", styles).ShouldBeFalse();
+
+        ParagraphFormat format = Formats(@"\pard\plain\s7 HEAD\par", styles)[0];
+        format.SpaceBefore.ShouldBe(Length.Zero);
+        format.SpaceAfter.ShouldBe(Length.Zero);
+    }
+
+    /// <summary>
+    /// An intermediate that is <em>not</em> <em>Caption</em> or <em>Heading</em> is not modelled.
+    /// </summary>
+    /// <remarks>
+    /// <c>List Indent</c> is <c>COLL_CONFRONTATION</c>, whose pool parent is <c>COLL_TEXT</c> —
+    /// <em>Text body</em>, which states 7 pt below and 115 % line spacing
+    /// (<c>DocumentStylePoolManager.cxx</c>:694-700) and which the import does not reset either.
+    /// 26.2.4.2 answers the document's own <c>Normal</c> size with about 8.7 pt more below;
+    /// this tree answers <c>\pard\plain</c>'s twelve points. It is left open because the type
+    /// here carries no proportional line spacing and because the corpus reach is nil: <b>0 of the
+    /// 338 converted <c>.rtf</c></b> apply any <c>COLL_TEXT</c>-parented name
+    /// (<c>probes/rtf-style-r97/hasbyname-census.py</c>). Four of the 116 probes in that round
+    /// are these, and they are reported as differing rather than as agreement.
+    /// </remarks>
+    [Fact]
+    public void AnIntermediateBelowTextBodyIsNotModelledYet()
+        => First(@"\pard\plain\s7 MARKER\par",
+                @"{\s0\snext0\f0\fs20 Normal;}{\s7\sbasedon9\snext0 List Indent;}"
+                    + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")
+            .Size.ShouldBe(Length.FromPoints(12));
 
     /// <summary>
     /// A name the map answers nothing for keeps <c>\pard\plain</c>'s twelve points.
@@ -358,6 +486,8 @@ public sealed class RtfStyleFormattingTests
     [InlineData("Quote")]
     [InlineData("List Paragraph")]
     [InlineData("Normal (Web)")]
+    [InlineData("Marginalia")]
+    [InlineData("Text body indent")]
     public void ANameWriterHasNoStyleForKeepsTheResetSize(string name)
         => First(@"\pard\plain\s7 MARKER\par",
                 @"{\s0\snext0\f0\fs20 Normal;}{\s7\sbasedon9\snext0 " + name + ";}"
@@ -406,6 +536,17 @@ public sealed class RtfStyleFormattingTests
                     : new Formatting(
                         paragraph.Font?.RequestedFamily, paragraph.EmSize, paragraph.Font?.Weight ?? 400)),
         ];
+    }
+
+    /// <summary>Whether the first body paragraph's text is set in an italic face.</summary>
+    private static bool Italic(string body, string styles)
+    {
+        using DocumentSource source = DocumentSource.FromStream(
+            new MemoryStream(Encoding.ASCII.GetBytes(Wrap(body, styles))), "styles.rtf");
+        using IDocument document = new WordProcessingReader().Read(source);
+        WordProcessingPages pages = (WordProcessingPages)((IPaginatedDocument)document).Layout();
+        PageParagraph paragraph = pages.Paragraphs.First(p => p.Text.Length > 0);
+        return (paragraph.HasRuns ? paragraph.Runs[0].Font : paragraph.Font)?.IsItalic ?? false;
     }
 
     /// <summary>One body in a document with three faces and an optional stylesheet.</summary>

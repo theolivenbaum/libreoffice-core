@@ -470,8 +470,34 @@ public static class PptTextReader
 
         if (markers is not null) text = Substitute(text, markers, paragraphs, characters, links);
 
-        return new PptTextRun(kind, text, paragraphs, characters, ruler, extended, links);
+        return new PptTextRun(kind, Broken(kind, text), paragraphs, characters, ruler, extended, links);
     }
+
+    /// <summary>
+    /// A slide title's returns, which are line breaks and not paragraph ends.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>PageTitle</c> text object has exactly one paragraph however many returns it
+    /// holds.</strong> <c>PPTStyleTextPropReader::Init</c> rewrites every <c>0x0d</c> to
+    /// <c>0x0b</c> — a vertical tab, EditEngine's soft break — when the text header names
+    /// instance 0, and records a <c>PPT_SPEC_NEWLINE</c> marker for every other instance
+    /// (<c>filter/source/msfilter/svdfppt.cxx</c>:5241-5246 for the Unicode record and
+    /// :5261-5266 for the byte one). Only the markers split paragraphs, so a two-line title
+    /// arrives as one paragraph with a break in it rather than as two paragraphs — which is a
+    /// paragraph space, a second bullet and a second first-line indent's worth of difference.
+    /// </para>
+    /// <para>
+    /// <c>TSS_Type::PageTitle</c> is 0 and <c>TSS_Type::Title</c> — the title of a title slide,
+    /// <see cref="PptTextKind.CentreTitle"/> — is 6 (<c>include/filter/msfilter/svdfppt.hxx</c>
+    /// :157-169); the rewrite is on the first only, and following the name rather than the number
+    /// would apply it to the wrong one.
+    /// </para>
+    /// </remarks>
+    private static string Broken(PptTextKind kind, string text)
+        => kind == PptTextKind.Title && text.Contains(ParagraphSeparator, StringComparison.Ordinal)
+            ? text.Replace(ParagraphSeparator, LineBreak)
+            : text;
 
     /// <summary>
     /// Which hyperlink an <c>InteractiveInfo</c> names, or null when it names none.
