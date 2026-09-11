@@ -190,16 +190,26 @@ internal sealed class XlsDrawingCollector(
     }
 
     /// <summary>
-    /// Reads one <c>TXO</c> record and attaches its string to the object just read.
+    /// Reads one <c>TXO</c> record and attaches its string and formatting runs to the object
+    /// just read.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The string is not in the <c>TXO</c> at all: the record states its length and the
     /// characters arrive in the <c>CONTINUE</c> that follows, with the formatting runs in a
-    /// second one (<c>XclImpDrawing::ReadTxo</c>, <c>xiescher.cxx:4242</c>). This reader joins
-    /// continuations into the record it is reading, so the header, the flags byte that opens the
-    /// character data and the characters are read straight through — which is right, because the
-    /// flags byte at a continuation boundary is exactly what
-    /// <see cref="BiffRecordReader.ReadUnicodeString(int)"/> already expects to find there.
+    /// second one (<c>XclImpDrawing::ReadTxo</c>, <c>xiescher.cxx</c>:4242-4271). This reader
+    /// joins continuations into the record it is reading, so the header, the flags byte that
+    /// opens the character data and the characters are read straight through — which is right,
+    /// because the flags byte at a continuation boundary is exactly what
+    /// <see cref="BiffRecordReader.ReadUnicodeString(int)"/> already expects to find there, and
+    /// the run array that follows the last character carries no header of its own.
+    /// </para>
+    /// <para>
+    /// A run is eight bytes — a character index, a <c>FONT</c> index, four reserved
+    /// (<c>XclImpString::ReadObjFormats</c>, <c>sc/source/filter/excel/xistring.cxx</c>) — and
+    /// <c>AppendFormat</c> keeps the <em>last</em> font stated at a repeated index, under a
+    /// comment recording that real files repeat one.
+    /// </para>
     /// </remarks>
     /// <param name="stream">Positioned at the record's first byte.</param>
     public void ReadText(BiffRecordReader stream)
@@ -210,7 +220,7 @@ internal sealed class XlsDrawingCollector(
         ushort flags = stream.ReadUInt16();
         stream.Skip(8);
         int length = stream.ReadUInt16();
-        stream.Skip(2);
+        int formatSize = stream.ReadUInt16();
         stream.Skip(4);
 
         string text = length > 0 && stream.RecordLeft > 0
@@ -222,12 +232,45 @@ internal sealed class XlsDrawingCollector(
         _objects[^1] = _objects[^1] with
         {
             Text = text,
+            Runs = ReadRuns(stream, formatSize),
 
             // Bits 1-3 and 4-6 of the flags word: XclObjTextData::GetHorAlign and GetVerAlign
             // (sc/source/filter/inc/xlescher.hxx:401-402).
             Horizontal = (flags >> 1) & 0x07,
             Vertical = (flags >> 4) & 0x07,
         };
+    }
+
+    /// <summary>The formatting-run array that follows a <c>TXO</c>'s characters.</summary>
+    /// <param name="stream">Positioned just past the last character.</param>
+    /// <param name="formatSize">The byte count the record declared, eight per run.</param>
+    private static List<TextRun>? ReadRuns(BiffRecordReader stream, int formatSize)
+    {
+        int count = formatSize / 8;
+        if (count <= 0) return null;
+
+        List<TextRun> runs = [];
+        for (int at = 0; at < count && stream.RecordLeft >= 8; at++)
+        {
+            int character = stream.ReadUInt16();
+            int font = stream.ReadUInt16();
+            stream.Skip(4);
+
+            // `XclImpString::AppendFormat`: a repeated character index replaces the font rather
+            // than adding a second run, and an index that goes backwards is dropped.
+            if (runs.Count > 0 && runs[^1].Character >= character)
+            {
+                if (runs[^1].Character == character) runs[^1] = new TextRun(character, font);
+                continue;
+            }
+
+            runs.Add(new TextRun(character, font));
+        }
+
+        // The terminator is kept rather than trimmed. `Paragraphs` changes the current style at
+        // every run index it passes, so an entry naming the character after the string simply
+        // never fires — and dropping it would mean deciding, here, which entry is one.
+        return runs.Count > 0 ? runs : null;
     }
 
     /// <summary>
@@ -346,7 +389,7 @@ internal sealed class XlsDrawingCollector(
 
             drawings.Add(placed with
             {
-                Text = entry.Text is { Length: > 0 } ? TextOf(entry) : null,
+                Text = entry.Text is { Length: > 0 } ? TextOf(entry, palette) : null,
                 Image = picture.Raster,
                 Vector = picture.Vector,
 
@@ -497,26 +540,46 @@ internal sealed class XlsDrawingCollector(
         return name is { Length: > 0 } ? name : null;
     }
 
-    private static SheetShapeText TextOf(ObjectEntry entry)
+    /// <summary>
+    /// One text box's paragraphs, with the faces its <c>TXO</c> formatting runs name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A run's character index is into the whole string, newlines included — which is how
+    /// <c>lclCreateTextObject</c> walks it (<c>sc/source/filter/excel/xihelper.cxx</c>): one
+    /// counter over every character, advancing the paragraph on a <c>\n</c> and the offset
+    /// otherwise. So the paragraphs are cut and the runs distributed in one pass rather than the
+    /// string being split first, because splitting loses the separators the offsets count.
+    /// </para>
+    /// <para>
+    /// <strong>Text before the first run takes no font at all.</strong> That loop starts with an
+    /// empty item set and sends it as soon as it reaches the first run's index, so whatever
+    /// precedes it keeps the edit engine's own default rather than the object's or the first
+    /// run's — which is what <see cref="DefaultTextSize"/> stands for here. In practice every
+    /// corpus <c>TXO</c> opens its run array at character zero.
+    /// </para>
+    /// <para>
+    /// <strong>A <c>TXO</c> with no run array is not rich and is not styled either.</strong>
+    /// <c>XclImpTextObj::DoPreProcessSdrObj</c> (<c>xiescher.cxx</c>:1504-1530) branches on
+    /// <c>XclImpString::IsRich()</c>, which is <c>!maFormats.empty()</c>
+    /// (<c>sc/source/filter/inc/xistring.hxx</c>:56), and takes <c>NbcSetText</c> for the plain
+    /// case — no font is applied there at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="entry">The object, its <c>TXO</c> already read.</param>
+    /// <param name="fonts">The workbook's <c>FONT</c> table, or null when it has none.</param>
+    private static SheetShapeText TextOf(ObjectEntry entry, XlsCellFormats? fonts)
     {
+        SheetShapeAlignment alignment = entry.Horizontal switch
+        {
+            HorizontalCentre => SheetShapeAlignment.Centre,
+            HorizontalRight => SheetShapeAlignment.Right,
+            _ => SheetShapeAlignment.Left,
+        };
+
         SheetShapeText body = new()
         {
-            Paragraphs =
-            [
-                .. (entry.Text ?? string.Empty)
-                    .Replace("\r\n", "\n", StringComparison.Ordinal)
-                    .Split(['\n', '\r'])
-                    .Select(line => new SheetShapeParagraph
-                    {
-                        Runs = [new SheetShapeRun(line, DefaultTextSize)],
-                        Alignment = entry.Horizontal switch
-                        {
-                            HorizontalCentre => SheetShapeAlignment.Centre,
-                            HorizontalRight => SheetShapeAlignment.Right,
-                            _ => SheetShapeAlignment.Left,
-                        },
-                    }),
-            ],
+            Paragraphs = [.. Paragraphs(entry, fonts, alignment)],
             Anchor = entry.Vertical switch
             {
                 VerticalCentre => SheetShapeAnchor.Middle,
@@ -536,6 +599,92 @@ internal sealed class XlsDrawingCollector(
             BottomInset = Length.Zero,
         };
     }
+
+    /// <summary>Cuts one text box's string into paragraphs and its runs into spans.</summary>
+    private static List<SheetShapeParagraph> Paragraphs(
+        ObjectEntry entry, XlsCellFormats? fonts, SheetShapeAlignment alignment)
+    {
+        string text = entry.Text ?? string.Empty;
+        IReadOnlyList<TextRun> runs = entry.Runs ?? [];
+
+        List<SheetShapeParagraph> paragraphs = [];
+        List<SheetShapeRun> spans = [];
+        System.Text.StringBuilder span = new();
+
+        int next = 0;
+        SheetShapeRun style = Style(null, fonts);
+
+        void CloseSpan()
+        {
+            if (span.Length == 0) return;
+            spans.Add(style with { Text = span.ToString() });
+            span.Clear();
+        }
+
+        void CloseParagraph()
+        {
+            CloseSpan();
+            paragraphs.Add(new SheetShapeParagraph
+            {
+                Runs = spans.Count > 0 ? [.. spans] : [style with { Text = string.Empty }],
+                Alignment = alignment,
+            });
+            spans = [];
+        }
+
+        for (int at = 0; at < text.Length; at++)
+        {
+            while (next < runs.Count && runs[next].Character <= at)
+            {
+                SheetShapeRun changed = Style(runs[next].FontIndex, fonts);
+                next++;
+                if (changed == style) continue;
+                CloseSpan();
+                style = changed;
+            }
+
+            char c = text[at];
+            if (c is '\n' or '\r')
+            {
+                CloseParagraph();
+                if (c == '\r' && at + 1 < text.Length && text[at + 1] == '\n') at++;
+                continue;
+            }
+
+            span.Append(c);
+        }
+
+        CloseParagraph();
+        return paragraphs;
+    }
+
+    /// <summary>
+    /// What one <c>FONT</c> index is worth to a shape run, or the edit engine's default for none.
+    /// </summary>
+    /// <remarks>
+    /// A <c>FONT</c> whose height is zero is treated as stating none: the record's own field is
+    /// unsigned twips and a zero there would draw nothing at all, while the caller's fallback is
+    /// what the object would have taken anyway.
+    /// </remarks>
+    private static SheetShapeRun Style(int? index, XlsCellFormats? fonts)
+    {
+        if (index is not { } at || fonts?.FontAt(at) is not { } font)
+            return new SheetShapeRun(string.Empty, DefaultTextSize);
+
+        return new SheetShapeRun(
+            string.Empty,
+            font.Height > Length.Zero ? font.Height : DefaultTextSize,
+            font.Name is { Length: > 0 } name ? name : null,
+            font.Weight >= BoldWeight);
+    }
+
+    /// <summary>The weight at which a BIFF <c>FONT</c> counts as bold.</summary>
+    /// <remarks>
+    /// <c>EXC_FONTWGHT_BOLD</c> is 700 and <c>EXC_FONTWGHT_NORMAL</c> 400
+    /// (<c>sc/source/filter/inc/xlstyle.hxx</c>); the record's field is the OS/2 scale, so the
+    /// test is a threshold rather than an equality.
+    /// </remarks>
+    private const int BoldWeight = 700;
 
     private static SheetDrawing SheetAnchor(Anchor anchor, SheetGrid grid)
         => new()
@@ -609,7 +758,15 @@ internal sealed class XlsDrawingCollector(
         int Horizontal = 0,
         int Vertical = 0,
         bool IsPrintable = true,
-        ChartPlot? Chart = null);
+        ChartPlot? Chart = null,
+        IReadOnlyList<TextRun>? Runs = null);
+
+    /// <summary>
+    /// One entry of a <c>TXO</c>'s formatting-run array: where a face changes, and to which.
+    /// </summary>
+    /// <param name="Character">The zero-based character index the run starts at.</param>
+    /// <param name="FontIndex">The <c>FONT</c> index it changes to, the hole at four included.</param>
+    private readonly record struct TextRun(int Character, int FontIndex);
 
     /// <summary>The <c>ftCmo</c> subrecord identifier, <c>EXC_ID_OBJCMO</c>.</summary>
     private const ushort ObjectCommon = 0x0015;
