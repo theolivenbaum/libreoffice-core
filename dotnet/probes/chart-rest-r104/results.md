@@ -38,8 +38,9 @@ Four of the brief's claims are corrected in place below.
   ink beyond the block edge on page 1 is a **cell** background, which no drawing clip touches.
   §1.4.
 * **"The most likely correct outcome is that this closes as an EMF-picture question."** It does
-  not. **2 of the 39 over-clipping documents hold any vector media at all**, and they carry 61 %
-  of the pixels; the other 37 hold none. §1.5.
+  not. **2 of the 39 over-clipping documents hold any vector media at all** — they carry 17,269 of
+  the 31,384 pixels, 55 % of the total and 61 % of what is left once the boundary artefacts are
+  removed — and the other 37 hold none. §1.5.
 * **"The reference resolves both witnesses to a full `ClusteredColumnChartType` diagram — 4
   series, 4 data points"** (O36, from `chart-types-r101` §6). Four series, of which **two** carry
   an **eleven**-cell value range and two carry none, over **eleven** categories. And what
