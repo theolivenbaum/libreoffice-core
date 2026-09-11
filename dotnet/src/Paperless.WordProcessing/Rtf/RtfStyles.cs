@@ -103,7 +103,7 @@ public sealed record RtfStyleFormatting
     /// It carries one thing only: the space below that Writer's own <em>Heading</em> pool style
     /// gives a style whose <c>\sbasedon</c> did not resolve. That is not an RTF sprm at all, so
     /// nothing in <c>cloneAndDeduplicateSprm</c>'s table can overwrite it. See
-    /// <see cref="RtfStyles.PoolFormattingOf"/>.
+    /// <see cref="RtfStyles.PoolParentOf"/>.
     /// </remarks>
     public int? SpaceAfterTwips { get; init; }
 
@@ -158,6 +158,29 @@ public readonly record struct RtfStyle(
     int? OutlineLevel,
     bool IsCharacterStyle,
     RtfStyleFormatting Formatting);
+
+/// <summary>
+/// What Writer's style pool gives an RTF style whose <c>\sbasedon</c> did not resolve.
+/// </summary>
+/// <remarks>
+/// The two answers are not the same kind of thing, which is why this is an enumeration rather than
+/// a nullable formatting. <see cref="Heading"/> is a constant — <c>COLL_HEADLINE_BASE</c>'s own
+/// 14 pt, 12/6 and keep-with-next. <see cref="Standard"/> is a *reference*: what the paragraph
+/// inherits is whatever the document's own <c>Normal</c> entry says, which is why a probe that
+/// measures one <c>Normal</c> size cannot tell the two apart. See
+/// <see cref="RtfStyles.PoolParentOf"/>.
+/// </remarks>
+internal enum RtfPoolParent
+{
+    /// <summary>The name is not one Writer already has a style for.</summary>
+    None,
+
+    /// <summary>Writer's <em>Heading</em>: the nine headings, <c>Title</c> and <c>Subtitle</c>.</summary>
+    Heading,
+
+    /// <summary>Writer's <em>Standard</em>, which is the document's own <c>Normal</c> entry.</summary>
+    Standard,
+}
 
 /// <summary>
 /// The styles an RTF document declares, and the formatting they carry.
@@ -253,17 +276,36 @@ public sealed class RtfStyles
     /// <c>heading 4</c>'s size, space above and space below to the hundredth of a point.
     /// </para>
     /// <para>
-    /// <c>Body Text</c> and <c>caption</c> are the second family and are deliberately <em>not</em>
-    /// here. Their pool styles' parent is <c>COLL_STANDARD</c> (<c>poolfmt.cxx</c>:201-204,
-    /// :229-235), so what they inherit is the document's own <c>Normal</c> entry rather than a
-    /// constant: the same probe with <c>{\s0 … \fs20 Normal;}</c> draws them at 10 pt and with
-    /// <c>\fs28</c> at 14, while <c>heading 4</c>, <c>Title</c> and <c>Subtitle</c> answer 14 to
-    /// both. Neither <c>COLL_TEXT</c>'s 0/7 pt nor <c>COLL_LABEL</c>'s italic 6/6 survives the
-    /// reset. That is a rule about <em>Standard</em> and not about the pool, it needs the whole of
-    /// <c>ConvertStyleName</c>'s two hundred names to be safe, and its reach is <b>2 of the 338
-    /// converted <c>.rtf</c></b> — so it is measured and left. The third family is every name the
-    /// map answers nothing for, <c>Quote</c> and <c>List Paragraph</c> among them, which keeps
-    /// <c>\pard\plain</c>'s twelve points and is the control this rule must not move.
+    /// <c>Body Text</c> and <c>caption</c> are the second family and answer
+    /// <see cref="RtfPoolParent.Standard"/>. Their pool styles' parent is <c>COLL_STANDARD</c>
+    /// (<c>poolfmt.cxx</c>:201-204, :229-235), so what they inherit is the document's own
+    /// <c>Normal</c> entry rather than a constant: the same probe with
+    /// <c>{\s0 … \fs20 Normal;}</c> draws them at 10 pt and with <c>\fs28</c> at 14, while
+    /// <c>heading 4</c>, <c>Title</c> and <c>Subtitle</c> answer 14 to both. Neither
+    /// <c>COLL_TEXT</c>'s 0/7 pt nor <c>COLL_LABEL</c>'s italic 6/6 survives the reset, so the
+    /// pool entry a reader would be tempted to copy is the wrong half of it — what carries is the
+    /// <em>parent</em>, and modelling it is following the chain into style 0 rather than folding
+    /// a constant in. <c>Caption</c> is the map's other spelling of the same style
+    /// (<c>StyleSheetTable.cxx</c>:1715-1716).
+    /// </para>
+    /// <para>
+    /// <b>Only those three names, and the boundary is measured rather than cautious.</b>
+    /// <c>probes/words-close-r95/standard-census.py</c> lists every paragraph style the 338
+    /// converted <c>.rtf</c> apply without a resolvable <c>\sbasedon</c> — 84 distinct names —
+    /// and the ones whose converted name reaches a Writer style with <c>COLL_STANDARD</c>
+    /// <em>somewhere</em> above it are <c>Body Text</c> (2 documents), <c>header</c> and
+    /// <c>footer</c> (5 each), <c>toc 1</c>…<c>toc 3</c> (2, 1, 1), a bare <c>Heading</c> (1) and
+    /// <c>Figure</c> (1); <c>caption</c> and <c>Caption</c> are <b>0 of 338</b>. The six that are
+    /// left out are left out because their pool parent is <em>not</em> <c>COLL_STANDARD</c>
+    /// directly — <c>Footer</c>'s is <c>COLL_HEADERFOOTER</c> and <c>Contents 1</c>'s is
+    /// <c>COLL_REGISTER_BASE</c> (<c>poolfmt.cxx</c>:206-256), both of which are pool styles with
+    /// properties of their own that the import does <em>not</em> reset, so each needs its own
+    /// measurement rather than this branch.
+    /// </para>
+    /// <para>
+    /// The third family is every name the map answers nothing for, <c>Quote</c>,
+    /// <c>Normal (Web)</c> and <c>List Paragraph</c> among them (<c>:1794</c>, <c>:1883-1884</c>),
+    /// which keeps <c>\pard\plain</c>'s twelve points and is the control this rule must not move.
     /// </para>
     /// <para>
     /// Every heading maps to a pool style whose parent is <em>Heading</em>, and
@@ -278,27 +320,59 @@ public sealed class RtfStyles
     /// <c>probes/rtf-holdover-r87/</c>.
     /// </para>
     /// </remarks>
-    internal static RtfStyleFormatting? PoolFormattingOf(string name)
+    /// <returns>Which pool style the name inherits from, or <see cref="RtfPoolParent.None"/>.</returns>
+    internal static RtfPoolParent PoolParentOf(string name)
     {
         // Word strips whitespace around style names before the name is looked up
         // (rtfdocumentimpl.cxx:1594), and ConvertStyleName's map is case-sensitive with an entry
         // for each of the two spellings a file actually uses.
         string trimmed = name.Trim();
 
+        // `Body Text` is `Text body`, `COLL_TEXT`, and both spellings of `caption` are `Caption`,
+        // `COLL_LABEL` (`StyleSheetTable.cxx`:1715-1716, :1761) -- and both have `COLL_STANDARD`
+        // for a pool parent, so what they inherit is the document's own `Normal`.
+        if (string.Equals(trimmed, "Body Text", StringComparison.Ordinal)
+            || string.Equals(trimmed, "caption", StringComparison.Ordinal)
+            || string.Equals(trimmed, "Caption", StringComparison.Ordinal))
+        {
+            return RtfPoolParent.Standard;
+        }
+
         // `Title` and `Subtitle` have one spelling each in the map; the nine headings have two.
         if (string.Equals(trimmed, "Title", StringComparison.Ordinal)
             || string.Equals(trimmed, "Subtitle", StringComparison.Ordinal))
         {
-            return HeadingPool;
+            return RtfPoolParent.Heading;
         }
 
-        if (trimmed.Length != 9) return null;
-        if (trimmed[0] is not ('h' or 'H')) return null;
-        if (!trimmed.AsSpan(1, 7).SequenceEqual("eading ")) return null;
-        if (trimmed[8] is < '1' or > '9') return null;
+        if (trimmed.Length != 9) return RtfPoolParent.None;
+        if (trimmed[0] is not ('h' or 'H')) return RtfPoolParent.None;
+        if (!trimmed.AsSpan(1, 7).SequenceEqual("eading ")) return RtfPoolParent.None;
+        if (trimmed[8] is < '1' or > '9') return RtfPoolParent.None;
 
-        return HeadingPool;
+        return RtfPoolParent.Heading;
     }
+
+    /// <summary>
+    /// What a style whose <c>\sbasedon</c> did not resolve inherits from its pool parent.
+    /// </summary>
+    /// <param name="name">The style's own name, as the stylesheet entry states it.</param>
+    /// <param name="id">Its own <c>\s</c> id, so that <c>Normal</c> cannot inherit from itself.</param>
+    private RtfStyleFormatting PoolInheritance(string name, int id) => PoolParentOf(name) switch
+    {
+        RtfPoolParent.Heading => HeadingPool,
+        RtfPoolParent.Standard when id != DefaultStyleId => FormattingOf(DefaultStyleId),
+        _ => RtfStyleFormatting.Empty,
+    };
+
+    /// <summary>
+    /// The <c>\s</c> id of the document's own default paragraph style, which RTF fixes at zero.
+    /// </summary>
+    /// <remarks>
+    /// <c>rtfdispatchflag.cxx</c>:600-614 — <em>"By default the style with index 0 is applied"</em>
+    /// — so <c>Standard</c> is this entry and not a constant.
+    /// </remarks>
+    private const int DefaultStyleId = 0;
 
     /// <summary>Writer's <em>Heading</em> pool style, as an RTF style's inherited half.</summary>
     private static readonly RtfStyleFormatting HeadingPool = new()
@@ -341,8 +415,21 @@ public sealed class RtfStyles
             current = style.BasedOn;
 
             // The style at the top of the chain named no parent this sheet could resolve, so
-            // Writer's own style of that name keeps the pool parent it came with.
-            if (style.BasedOn is null && PoolFormattingOf(style.Name) is { } pool) chain.Add(pool);
+            // Writer's own style of that name keeps the pool parent it came with. `Heading` is a
+            // constant; `Standard` is the *document's* own `Normal`, which is style 0 -- and the
+            // walk continues into it rather than folding a constant in, which is what makes
+            // `\fs20 Normal` and `\fs28 Normal` give different answers.
+            switch (style.BasedOn is null ? PoolParentOf(style.Name) : RtfPoolParent.None)
+            {
+                case RtfPoolParent.Heading:
+                    chain.Add(HeadingPool);
+                    break;
+                case RtfPoolParent.Standard:
+                    current = DefaultStyleId;
+                    break;
+                default:
+                    break;
+            }
         }
 
         // Nearest ancestor last, so each generation lays its own statements over its parent's.
@@ -378,7 +465,7 @@ public sealed class RtfStyles
         RtfStyleFormatting own = known ? style.Formatting : RtfStyleFormatting.Empty;
         RtfStyleFormatting inherited = known && style.BasedOn is { } parent && parent != id
             ? FormattingOf(parent)
-            : known ? PoolFormattingOf(style.Name) ?? RtfStyleFormatting.Empty
+            : known ? PoolInheritance(style.Name, id)
             : RtfStyleFormatting.Empty;
         RtfStyleFormatting chain = FormattingOf(id);
 

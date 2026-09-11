@@ -744,12 +744,21 @@ Order chosen so each is verifiable before the next gets harder.
       styles answer *Heading*'s 14 pt and 12/6 rather than the 28 pt bold centring and 18 pt their own
       pool entries state; `COLL_LABEL` and `COLL_TEXT` have `COLL_STANDARD` for a parent, so `caption`
       and `Body Text` inherit the document's own `Normal` entry — 10 pt under `\fs20` and 14 under
-      `\fs28`, measured both ways. The *Standard* half is left and pinned by
-      `APoolStyleUnderStandardIsNotModelledYet`. **Reach for the implemented half is nil** — excluding
+      `\fs28`, measured both ways. **Reach for the implemented half is nil** — excluding
       the stylesheet from the "used" set, which round 87's census did not, `Title` and `Subtitle` are
       declared and never applied in the two documents that hold them, `Body Text` is 2 of 338 and
       `caption` 0; the nine headings' own reach is 17 → **12** under the same correction.
       `probes/rtf-bookmark-r88/results.md` §4.
+      **The *Standard* half landed in round 95, and it is a reference rather than a constant**:
+      `PoolFormattingOf` could only answer a formatting, so it is now `PoolParentOf` answering
+      `{None, Heading, Standard}` and the `\sbasedon` walk continues into style 0, which RTF fixes as
+      the default style (`rtfdispatchflag.cxx`:600-614). Its reach is **nil and the reason is a second
+      rule** — both of the two documents that apply `Body Text` state an `\fs` on the entry itself, and
+      a style's own `\fs` reaches no paragraph, so 12 pt is right on both. Eight probes at the
+      reference, 8 of 8. The six names that reach *Standard* through an intermediate pool style —
+      `header`, `footer`, `toc 1`-`toc 3`, a bare `Heading`, `Figure` — are **left**, because those
+      intermediates have properties of their own that the import does not reset.
+      `probes/words-close-r95/results.md` §2.
 - [x] **`REF` expands from the bookmark, and the RTF import hands the bookmarks the wrong names.** RTF
       sends a bookmark half's *name* before its *id* (`lcl_getBookmarkProperties`,
       `rtfdocumentimpl.cxx`:224-236, whose comment says the name "should be sent first"; the halves at
@@ -2342,35 +2351,40 @@ is read and verified, so what remains is the filling of pages rather than the me
   `oox/source/vml/vmlshape.cxx`:616-700 — and this tree agreed with 26.2.4.2 on **10 of 34** fixtures
   before and on **34 of 34** after. `probes/frame-area-r85/`.
 
-  **What is left is the capture, not the origins.** The reference clamps *every* non-wrap-through
-  content-anchored frame into its page — `IsDraggingOffPageAllowed`
-  (`sw/source/core/layout/anchoredobject.cxx`:790-801) is `bDisablePositioning && bIsWrapThrough`, a
-  conjunction this tree read as the flag alone — and under `compatibilityMode` 15 into the page's
-  *body* (`anchoredobjectposition.cxx`:562-573). Applied that widely it moves 10 of the 338 words
-  renderings and is net worse: `b053-19` goes 11.254 to 19.508 of page ink against 26.2.4.2 and
-  `023_Unit_Circle_Chart_Circular_Percentage` 10.820 to 16.524, while the three documents it exists
-  for improve.
+  **The capture is closed, and it took three facts rather than one.** `mbDoNotCaptureAnchoredObj`
+  is `bConsidered && !mbFollowTextFlow && DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE`, and `bConsidered` is
+  `bWrapThrough && !bTextBox` for a fly but `bWrapThrough || !bTextBox` for a draw object
+  (`anchoredobjectposition.cxx`:125-144) — so a picture and a shape carrying a text box are captured
+  unless they wrap through and **a shape with no text box never is**, which "wrap-through and
+  nothing else" got wrong. The area narrows from the sheet to the page **body** under
+  `compatibilityMode` 15 at every vertical relation but `PAGE_FRAME` and `PAGE_PRINT_AREA`
+  (:552-573) — and **only where `mpAnchorFrame->FindBodyFrame()` finds a body frame whose upper is
+  that page** (:568-573), which a header, a footer and a footnote anchor have not. That last is the
+  half two rounds were missing, and it is the whole of why the wide rule was net worse:
+  `b053-19` and `Case-Study-Heathrow-Airport` each carry one `wrapTight` picture in
+  `word/header1.xml`, and clamping those into the body cost 8.25 and 1.09 of mean page ink.
 
-  **`bCheckBottom = !DoesObjFollowsTextFlow()` was named here as the likely missing half and is now
+  Measured on 26.2.4.2 over 93 one-attribute fixtures — three object kinds × five wraps × six
+  positions — the tree goes from **79 to 91 of 93** (two unscoreable, a `pic:pic` in a header part
+  that names no relationship, drawn by neither side). Corpus reach is **4 of 947 renderings and 0
+  of 676 converted words**, no page and no glyph moving on any of the four.
+  `probes/words-close-r95/`.
+
+  **`bCheckBottom = !DoesObjFollowsTextFlow()` was named here as the likely missing half and is
   refuted.** The bottom correction is skipped only for an object that follows the text flow
   (`tocntntanchoredobjectposition.cxx`:457); `IsFollowingTextFlow`'s pool default is **false**
   (`sw/source/core/bastyp/init.cxx`:437), no writerfilter path changes that default, and its three
   per-object writes are each gated on the anchor being inside a table (`GraphicImport.cxx`:1316-1318,
-  :1859-1861, `OOXMLFastContextHandler.cxx`:1879-1883). So the bottom check is *on* for every object
-  not in a table, which is what the wide rule already does. Censused: **552 of 6055** absolutely
-  positioned objects in 40 of the 272 DOCX are inside a `w:tbl`, and **none of them is in any of the
-  ten documents the wide rule moved**. `probes/words-seat-r94/`.
+  :1859-1861, `OOXMLFastContextHandler.cxx`:1879-1883). **552 of 6055** positioned objects in 40 of
+  the 272 DOCX are inside a `w:tbl`, and none is in any of the ten documents the wide rule moved.
+  `mbFollowTextFlow` is still not modelled for that reason, and because inside a table the object is
+  captured in its **cell** (:576-591) — an area this tree does not have. `probes/words-seat-r94/`.
 
-  **Two halves are left in its place.** (1) `mbDoNotCaptureAnchoredObj` is
-  `bConsidered && !mbFollowTextFlow && DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE`, and `bConsidered` is
-  `bWrapThrough && !bTextBox` for a fly but `bWrapThrough || !bTextBox` for a draw object
-  (`anchoredobjectposition.cxx`:125-144) — so a *shape with no text box* is never captured whatever
-  its wrap, and "wrap-through and nothing else" is not the whole escape. (2) The wide rule clamped to
-  the **sheet** at every origin where the C++ clamps to the page **body** at every origin but
-  `PAGE_FRAME` and `PAGE_PRINT_AREA` (:562-573); that is the one that can still move the eight, and
-  on the three `Unit_Circle` documents it has to be separated from `ChartLayout`'s own fit before it
-  can be scored. Until then the capture is applied to the two margin bands alone, which regresses
-  nothing because no frame reached those origins before.
+  **What is left is not the capture.** Two of the three `Unit_Circle` documents are worse against
+  26.2.4.2 with the frame in the right place, and the frame provably *is* in the right place: each
+  chart is 682 pt wide on a 595 pt page, so `ImplAdjustHoriRelPos` saturates at x = 0 and three
+  different stated offsets give one rendering on both sides. The 32 pt their data labels sit right
+  of the reference's is `ChartLayout`'s own fit. `probes/words-close-r95/results.md` §1.5.
 
 - **`wp14:sizeRelH` and `wp14:sizeRelV` are unread, and the reach is three documents.** 1873
   `sizeRel*` elements in 146 of the 272 corpus DOCX, of which exactly **three carry a non-zero

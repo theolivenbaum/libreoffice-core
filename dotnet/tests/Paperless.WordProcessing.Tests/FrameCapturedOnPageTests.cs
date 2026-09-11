@@ -184,6 +184,117 @@ public sealed class FrameCapturedOnPageTests
             .X.ShouldBe(Length.FromPoints(272));
     }
 
+    /// <summary>
+    /// Under a format that sets <c>DoNotCaptureDrawObjsOnPage</c>, what escapes is decided by the
+    /// object's <em>kind</em> as well as by its wrap.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>bConsidered</c> is <c>bWrapThrough &amp;&amp; !bTextBox</c> for a fly and
+    /// <c>bWrapThrough || !bTextBox</c> for a draw object (<c>anchoredobjectposition.cxx</c>:130-141,
+    /// whose own comment states the asymmetry), so under DOCX's flag a picture and a shape carrying a
+    /// text box are captured unless they wrap through and <b>a shape with no text box never is</b>.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over 93 one-attribute fixtures — three object kinds × five wraps × six
+    /// positions, <c>probes/words-close-r95/make-capture.py</c>. A 100 pt band stated 40 pt from the
+    /// right edge of a 595.3 pt page is drawn at x <b>495.25</b> as a picture or a text box under
+    /// <c>wrapSquare</c> and at <b>555.25</b> as a bare shape or under <c>wrapNone</c>; the same band
+    /// 20 pt above the bottom edge is at y 801.75 and 822.00. 91 of the 93 carry a scoreable band and
+    /// this tree reproduces all 91.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(FrameObjectKind.Fly, TextWrap.Both, 126)]
+    [InlineData(FrameObjectKind.TextBoxShape, TextWrap.Both, 126)]
+    [InlineData(FrameObjectKind.Shape, TextWrap.Both, 272)]
+    [InlineData(FrameObjectKind.Fly, TextWrap.Through, 272)]
+    [InlineData(FrameObjectKind.TextBoxShape, TextWrap.Through, 272)]
+    [InlineData(FrameObjectKind.Shape, TextWrap.Through, 272)]
+    public void ADocxShapeWithNoTextBoxIsNeverCaptured(
+        FrameObjectKind kind, TextWrap wrap, int expected)
+    {
+        PageFrame frame = Frame(FrameAnchor.Paragraph, height: 36) with
+        {
+            HorizontalOffset = Length.FromPoints(200),
+            ObjectKind = kind,
+            Wrap = wrap,
+        };
+
+        FrameLayout.Place(
+                frame, Page, Page.TextArea, Length.FromPoints(100),
+                capturesOnPage: false, capturesWrappedObjects: true)
+            .X.ShouldBe(Length.FromPoints(expected));
+    }
+
+    /// <summary>
+    /// The area narrows to the body only for an anchor that has one — not for a running head's.
+    /// </summary>
+    /// <remarks>
+    /// <c>ImplAdjustVertRelPos</c>:568-573 walks <c>mpAnchorFrame-&gt;FindBodyFrame()</c> up to a page
+    /// body frame whose upper is this page, and a header, a footer and a footnote anchor have none.
+    /// Measured on the same fixtures: a <c>wrapSquare</c> shape carrying a text box, anchored at its
+    /// own paragraph 36 pt down inside the running head of a page with 72 pt margins, is drawn by
+    /// 26.2.4.2 at y <b>36.00</b> and not at the body's 72 — where the same object anchored in the
+    /// body is drawn at 72.00. It is what keeps this off <c>b053-19</c>'s and
+    /// <c>Case-Study-Heathrow-Airport</c>'s header pictures, which the wide rule of
+    /// <c>probes/frame-area-r85</c> cost 8.25 and 1.09 of mean page ink.
+    /// </remarks>
+    [Theory]
+    [InlineData(FrameAnchorPlace.Body, 72)]
+    [InlineData(FrameAnchorPlace.Furniture, 20)]
+    [InlineData(FrameAnchorPlace.Elsewhere, 20)]
+    public void OnlyAnAnchorInTheBodyNarrowsTheCaptureToIt(FrameAnchorPlace place, int expected)
+    {
+        PageFrame frame = Frame(FrameAnchor.Paragraph, height: 36) with
+        {
+            ObjectKind = FrameObjectKind.TextBoxShape,
+            Wrap = TextWrap.Both,
+            VerticalOrigin = FrameVerticalOrigin.Paragraph,
+            VerticalOffset = Length.FromPoints(-80),
+        };
+
+        FrameLayout.Place(
+                frame, Page, Page.TextArea, Length.FromPoints(100),
+                capturesOnPage: false, capturesWrappedObjects: true, narrowsCaptureToBody: true,
+                anchorPlace: place)
+            .Y.ShouldBe(Length.FromPoints(expected));
+    }
+
+    /// <summary>
+    /// A vertical origin of <c>PAGE_FRAME</c> or <c>PAGE_PRINT_AREA</c> keeps the sheet as its area.
+    /// </summary>
+    /// <remarks>
+    /// The two relations <c>ImplAdjustVertRelPos</c>:564-565 excludes by name. The two margin
+    /// <em>bands</em> are <c>PAGE_PRINT_AREA_TOP</c> and <c>_BOTTOM</c>, which are different
+    /// enumerators and are narrowed — which is why the three genogram templates move and a frame
+    /// stated against <c>page</c> or <c>margin</c> does not.
+    /// </remarks>
+    [Theory]
+    [InlineData(FrameVerticalOrigin.Page, 20)]
+    [InlineData(FrameVerticalOrigin.PageMargin, 20)]
+    [InlineData(FrameVerticalOrigin.Paragraph, 72)]
+    public void TheSheetAndTheMarginRelationsAreNotNarrowed(
+        FrameVerticalOrigin origin, int expected)
+    {
+        Length offset = origin == FrameVerticalOrigin.PageMargin
+            ? Length.FromPoints(-52)
+            : Length.FromPoints(origin == FrameVerticalOrigin.Page ? 20 : -80);
+
+        PageFrame frame = Frame(FrameAnchor.Paragraph, height: 36) with
+        {
+            ObjectKind = FrameObjectKind.TextBoxShape,
+            Wrap = TextWrap.Both,
+            VerticalOrigin = origin,
+            VerticalOffset = offset,
+        };
+
+        FrameLayout.Place(
+                frame, Page, Page.TextArea, Length.FromPoints(100),
+                capturesOnPage: false, capturesWrappedObjects: true, narrowsCaptureToBody: true)
+            .Y.ShouldBe(Length.FromPoints(expected));
+    }
+
     /// <summary>The witness's own frame: 486 x 36 pt at a stated 100.90 pt below its anchor.</summary>
     private static PageFrame Frame(FrameAnchor anchor, double height) => new()
     {

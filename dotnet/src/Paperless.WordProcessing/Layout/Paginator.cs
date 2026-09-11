@@ -73,67 +73,97 @@ public sealed record PaginationOptions
     public bool CapturesAnchoredObjectsOnPage { get; init; } = true;
 
     /// <summary>
-    /// Whether a frame stated against a <em>margin band</em>, and wrapped around by the text, is
-    /// pulled back inside the page's body.
+    /// Whether an anchored object that <c>DoNotCaptureDrawObjsOnPage</c> does <em>not</em> exempt is
+    /// pulled back inside its page anyway.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Two C++ facts meet here and neither is the flag above.
-    /// <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
-    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801) is
-    /// <c>bDisablePositioning &amp;&amp; bIsWrapThrough</c> — a conjunction — so
-    /// <c>DisableOffPagePositioning</c> exempts a <em>wrap-through</em> object and nothing else, and a
-    /// DOCX frame stating <c>wp:wrapSquare</c> is captured although
-    /// <see cref="CapturesAnchoredObjectsOnPage"/> is off for that format. And the area it is captured
-    /// in is not the sheet: <c>ImplAdjustVertRelPos</c>
-    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:562-573) narrows it to the
-    /// page body frame under its own comment — <em>"Instead of using the top of the page as the
-    /// vertical limit, DOCX compatibilityMode 15 started to use the text body as the vertical limit for
-    /// most paragraph or line-oriented anchored non-wrapthrough objects"</em> — for every vertical
-    /// relation except <c>PAGE_FRAME</c> and <c>PAGE_PRINT_AREA</c> (:564-565).
+    /// The flag above is only one term of the C++ condition.
+    /// <c>SwAnchoredObjectPosition</c>'s constructor
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:125-144) sets
+    /// </para>
+    /// <code>
+    /// mbDoNotCaptureAnchoredObj = bConsidered &amp;&amp; !mbFollowTextFlow &amp;&amp; DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE
+    /// </code>
+    /// <para>
+    /// and <c>bConsidered</c> is <c>bWrapThrough &amp;&amp; !bTextBox</c> for a fly and
+    /// <c>bWrapThrough || !bTextBox</c> for a draw object — see <see cref="FrameObjectKind"/>, which
+    /// carries the asymmetry and its census. So a DOCX picture and a DOCX shape carrying a text box are
+    /// captured unless they wrap through, and only a shape with <em>no</em> text box escapes whatever
+    /// its wrap. A frame stating <c>wp:wrapSquare</c> is captured although
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> is off for its format.
     /// </para>
     /// <para>
-    /// <b>This is deliberately narrower than that rule, and the narrowing is measured rather than
-    /// cautious.</b> The C++ captures every non-wrap-through content-anchored frame, whatever its
-    /// origin. Applied that widely to this tree it moves <b>10 of the 338</b> words renderings and is
-    /// net worse against 26.2.4.2: the three documents this exists for improve (mean page ink
-    /// 1.347 → 0.588, 2.302 → 0.868, 3.065 → 2.441), and <c>b053-19</c> goes 11.254 → 19.508 and
-    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524.
+    /// <b>The wide rule was measured as net worse once and the area was why.</b>
+    /// <c>probes/frame-area-r85</c> applied the capture to every non-wrap-through content anchor and
+    /// held it inside the page <em>body</em> at every origin: three genograms improved and
+    /// <c>b053-19</c> went 11.254 → 19.508 of mean page ink and
+    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524, so it was narrowed to the two
+    /// margin bands and the rest left. Those two documents are <em>header</em>-anchored, and a header
+    /// anchor has no body frame — which is exactly the condition
+    /// <see cref="NarrowsCaptureToBody"/> now carries. <c>probes/words-close-r95</c>.
     /// </para>
     /// <para>
-    /// <b>The missing half is not <c>bCheckBottom = !DoesObjFollowsTextFlow()</c>, which this remark
-    /// used to name, and that suspect is refuted rather than untested.</b> The bottom correction is
-    /// skipped only for an object that follows the text flow
-    /// (<c>tocntntanchoredobjectposition.cxx</c>:457), and <c>IsFollowingTextFlow</c>'s pool default is
-    /// <em>false</em> (<c>sw/source/core/bastyp/init.cxx</c>:437) with no writerfilter path changing
-    /// it: the three seats that write <c>PROP_FOLLOW_TEXT_FLOW</c> are each gated on the anchor being
-    /// inside a table (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
-    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883). So the bottom check is <em>on</em> for every
-    /// object not in a table — which is what the wide rule already does. Censused over the corpus,
-    /// <b>552 of 6055</b> absolutely positioned objects in 40 of the 272 DOCX are inside a
-    /// <c>w:tbl</c>, and <b>none of them is in any of the ten documents the wide rule moved</b>.
+    /// <c>mbFollowTextFlow</c> is deliberately not modelled: its pool default is <em>false</em>
+    /// (<c>sw/source/core/bastyp/init.cxx</c>:437) and each of the three writerfilter seats that write
+    /// <c>PROP_FOLLOW_TEXT_FLOW</c> is gated on the anchor being inside a table
+    /// (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
+    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883), so outside a table the term drops out. Inside one
+    /// it would make the object captured — in its <em>cell</em> rather than in the page
+    /// (<c>anchoredobjectposition.cxx</c>:576-591), which is an area this does not model. 552 of the
+    /// corpus's 6055 positioned objects, in 40 of 272 documents;
     /// <c>probes/words-seat-r94/anchor-census.txt</c>.
     /// </para>
     /// <para>
-    /// Two other halves are named there instead, and one of them corrects this remark's own reading.
-    /// <c>mbDoNotCaptureAnchoredObj</c> is <c>bConsidered &amp;&amp; !mbFollowTextFlow &amp;&amp;
-    /// DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE</c>, and <c>bConsidered</c> asks a different question of the two
-    /// object kinds (<c>anchoredobjectposition.cxx</c>:125-144): a fly is
-    /// <c>bWrapThrough &amp;&amp; !bTextBox</c> and a draw object is <c>bWrapThrough || !bTextBox</c>, so
-    /// a <em>shape with no text box</em> is never captured whatever its wrap, not only a wrap-through
-    /// one. And the area of the wide rule is wrong: r85 clamped to the sheet at every origin where the
-    /// C++ clamps to the page <em>body</em> at every origin but <c>PAGE_FRAME</c> and
-    /// <c>PAGE_PRINT_AREA</c> (:562-573). Until one of those is measured the capture is applied where
-    /// r85 measured it — the two margin bands — and nowhere else, which regresses nothing because those
-    /// two origins reach nothing that was placed before.
-    /// </para>
-    /// <para>
-    /// Set for a DOCX stating <c>compatibilityMode</c> 15 or more. Below 15 the C++ area is the sheet
-    /// rather than the body, which for a top-margin band changes nothing at the top and only clamps a
-    /// frame hanging off the bottom; no corpus document exercises it, so it is left.
+    /// Set for every DOCX, since <c>WriterFilter.cxx</c>:332 sets the flag for every writerfilter
+    /// import. The RTF reader captures unconditionally instead and does not reach this — see
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> and <c>probes/rtf-shape-r73</c>.
     /// </para>
     /// </remarks>
-    public bool CapturesMarginBandObjects { get; init; }
+    public bool CapturesWrappedObjects { get; init; }
+
+    /// <summary>
+    /// Whether the area a captured object is held inside is the page's <em>body</em> rather than the
+    /// sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImplAdjustVertRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:552-573) narrows
+    /// <c>aPgAlignArea</c> from the page frame to the page body frame under its own comment —
+    /// <em>"Instead of using the top of the page as the vertical limit, DOCX compatibilityMode 15
+    /// started to use the text body as the vertical limit for most paragraph or line-oriented anchored
+    /// non-wrapthrough objects"</em>. Its guard is <c>bCompat15</c>
+    /// (<c>!TAB_OVER_MARGIN &amp;&amp; TAB_OVER_SPACING</c>), and four conditions beside it:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>the object does not wrap through — already true of anything captured
+    ///     here;</description></item>
+    ///   <item><description>the vertical relation is neither <c>PAGE_FRAME</c> nor
+    ///     <c>PAGE_PRINT_AREA</c> (:564-565), which are <see cref="FrameVerticalOrigin.Page"/> and
+    ///     <see cref="FrameVerticalOrigin.PageMargin"/> here. The two margin <em>bands</em> are
+    ///     <c>PAGE_PRINT_AREA_TOP</c> and <c>_BOTTOM</c>, separate enumerators, and are
+    ///     narrowed;</description></item>
+    ///   <item><description>it is not a split floating table (<c>GetFlySplit()</c>) and not a
+    ///     <c>w:framePr</c> text box (<c>SwTextBoxHelper::TextBoxIsFramePr</c>) — neither of which this
+    ///     tree builds a <see cref="PageFrame"/> for; and</description></item>
+    ///   <item><description><b>there is a body frame to narrow to</b>:
+    ///     <c>mpAnchorFrame-&gt;FindBodyFrame()</c> walked up to a page body frame whose upper is this
+    ///     page (:568-573). A header, a footer and a footnote anchor have none, so their objects stay
+    ///     bounded by the sheet.</description></item>
+    /// </list>
+    /// <para>
+    /// The last of those is what the previous two rounds were missing, and it is worth two documents on
+    /// its own: <c>b053-19</c> and <c>Case-Study-Heathrow-Airport</c> each carry one <c>wrapTight</c>
+    /// picture in <c>word/header1.xml</c> at a negative offset, which the reference draws where the
+    /// file states it and a body clamp drags down by the whole header.
+    /// </para>
+    /// <para>
+    /// Set for a DOCX stating <c>compatibilityMode</c> 15 or more. Below 15 the area is the sheet and
+    /// <see cref="CapturesWrappedObjects"/> alone applies.
+    /// </para>
+    /// </remarks>
+    public bool NarrowsCaptureToBody { get; init; }
 
     /// <summary>
     /// Whether a page-anchored fly may hang below the body into the bottom margin and the footer area
@@ -723,7 +753,8 @@ public sealed class Paginator
         // the blocks instead returned early on exactly those documents and left their frames unplaced.
         FrameResolution resolution = FrameResolution.Of(
             blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
-            _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
+            _options.CapturesAnchoredObjectsOnPage, _options.CapturesWrappedObjects,
+            _options.NarrowsCaptureToBody);
         if (resolution.IsEmpty) return Numbered(pages, blocks);
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
@@ -743,7 +774,8 @@ public sealed class Paginator
 
             FrameResolution settled = FrameResolution.Of(
                 blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
-                _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
+                _options.CapturesAnchoredObjectsOnPage, _options.CapturesWrappedObjects,
+                _options.NarrowsCaptureToBody);
             pages = next;
 
             bool converged = settled.SameAs(resolution);

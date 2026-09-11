@@ -19,6 +19,13 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | L1 | **On the draw layer the reference measures in one face and draws in another.** `FontAttribute` has no family-class field, so `getVclFontFromFontAttribute` rebuilds at `FAMILY_DONTKNOW` while the DX array was measured with the class on. `fc-match "Helvetica:bold"` → Liberation; `fc-match "Helvetica,sans:bold"` → DejaVu. | `probes/title-font-r92`; seventh confound in `CLAUDE.md`. Our output equals the reference's own class-less branch to 0.105 pt on a 155 pt line. |
 | L2 | **`a:normAutofit/@fontScale` is not honoured.** Twenty one-attribute variants over two decks, drawn `Tf` sizes read from the reference's own PDF: 90000, 50000, 25000, absent, and each of those beside a stated `lnSpcReduction`, all draw identical sizes. Only removing the element moves anything; what is drawn is `constScaleLevels`' own row. | `probes/slides-ink-r94`. The trap: PowerPoint's stored value sits *near* the search's answer, so a witness measured at its own value cannot separate the hypotheses. Closed **without** code change. |
 
+## Fixed in this tree — closed, kept so the mechanism is not re-derived
+
+| # | what | evidence |
+|---|---|---|
+| O8 | **Frame capture, all three of its halves.** `bConsidered` is `bWrapThrough && !bTextBox` for a fly and `bWrapThrough \|\| !bTextBox` for a draw object, so a shape with **no text box** is never captured whatever its wrap; the area narrows from the sheet to the page **body** under `compatibilityMode` 15 at every relation but `PAGE_FRAME`/`PAGE_PRINT_AREA`; and **only where `mpAnchorFrame->FindBodyFrame()` finds one**, which a header, a footer and a footnote anchor do not. That last is what r85's wide rule was missing and what cost it `b053-19` and `Case-Study-Heathrow-Airport`. | `probes/words-close-r95`. 93 one-attribute fixtures at 26.2.4.2: **79 → 91 of 93** (2 unscoreable). Corpus reach **4 of 947 renderings and 0 of 676 converted words**; no page and no glyph moves on any of the four. |
+| O9 | **`Body Text` and `caption` inherit the document's own `Normal`.** `PoolFormattingOf` answered a constant, which cannot express *Standard*; `PoolParentOf` answers `{None, Heading, Standard}` and the `\sbasedon` walk continues into style 0. | `probes/words-close-r95` §2. **Reach nil**: `caption` 0 of 338, `Body Text` 2 of 338 and neither moves, because both entries state their own `\fs` and a style's own `\fs` reaches no paragraph — 8 of 8 probes at the reference. |
+
 ## Confounds — closed as measurement hazards, not defects
 
 | # | what | note |
@@ -43,8 +50,6 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | O5 | `017_Timeline_Templates`: the reference prints a **blank page** from a print-area extent. | same, `SheetDrawingArea` |
 | O6 | `sistem-rekod-markah-srm`: pages 2 and 4 are narrow **spill columns** we fit onto the previous page. | same |
 | O7 | **Six documents made worse by the drawing-layer clip**, worst +0.48 — the clip now exposes our own band edge where it differs from the reference's (`Template Pilot Logbook` p18 cuts 22 pt early). A column-width/break question. | `probes/ink-pass-r92`, crop banked |
-| O8 | **Frame capture, the half that can still move the eight**: r85 clamped to the sheet where the C++ clamps to the page **body** at every relation but `PAGE_FRAME`/`PAGE_PRINT_AREA` (`anchoredobjectposition.cxx`:562-573). Separately, `bConsidered` is `&&` for a fly and `\|\|` for a draw object (:130-141) — checked, does not move these ten. | `probes/words-seat-r94` |
-| O9 | **`Body Text` and `caption` track the document's own `Normal`** — inheritance from *Standard*, not a pool value; needs `ConvertStyleName`'s two hundred names to be safe. `APoolStyleUnderStandardIsNotModelledYet` pins the gap. | `probes/rtf-bookmark-r88` |
 | O10 | **Chart category-axis rotation** needs a hyphenator and a pattern set — the trigger is `ParaIsHyphenation`, not width. A feature, not a round; wrong hyphenation turns axes the reference wraps. | `probes/chart-axisrot-r91` |
 | O11 | `048_Expense_trends_budget`: a remaining automatic-interval cap disagreement (ours step 50, reference 100 on 0…500). Fixing it properly means laying out at model size and scaling the finished `ChartDrawing`. | `probes/chart-axis-r87` |
 | O16 | **`TK-Syllabus` residual 205.57 is a row-height drift**, not formatting: 93.5 of it on pages 1-100, same rows in the same order with ours two rows lower, and 1235 pages on both sides. | `probes/sheet-ink-r94` |
@@ -56,6 +61,8 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | O13 | **Escher WordArt is not drawn as Fontwork.** `pres_ioc_phuket.ppt` p26: the reference clips a gradient to the glyph outlines, we paint the rectangle, so the title reads as a blank yellow bar. No MS-binary reader reaches `Paperless.Ooxml/DrawingML/Fontwork*`. | `probes/slides-ink-r94`; **reach 2 shapes in 2 of 181** |
 | O14 | The dark blue banner on that same page is **103.38 pt** tall in the reference and 64.88 in ours. Measured, uncharacterised, and separate from O13. | same |
 | O15 | 41 `.ppt`/`.pptx` pages still differ on the dominant drawn size across 33 documents; the witness bullet is 17.773 pt at y 175.011 against 17.802 at 175.663. **Untouched** — that round spent its budget on the `@fontScale` measurement instead, which is why L2 exists. | `probes/ppt-fit-r85` |
+| O21 | **`023_Unit_Circle_Chart_Circular_Percentage` draws its pie's data labels 32 pt right of the reference's inside an identical frame** — 10.718 → 16.424 of mean page ink once O8 put the frame where 26.2.4.2 puts it, and `021` 12.089 → 12.663 the same way, against `027` 12.396 → 11.265. The frames provably coincide: the chart is 682 pt wide on a 595 pt page, so the horizontal clamp saturates and three different stated offsets give one rendering on **both** sides. It is `ChartLayout`'s fit, not the capture. | `probes/words-close-r95` §1.5, `chart-variants.txt` |
+| O22 | **Six more RTF style names reach *Standard*, and not by the route O9 closed.** `header`/`footer` (5 documents each) go through `COLL_HEADERFOOTER`, `toc 1`–`toc 3` (2/1/1) through `COLL_REGISTER_BASE` and `Figure` (1) through `COLL_LABEL` — intermediates with properties of their own that the import does **not** reset. A bare `Heading` (1) is a second gap: it is in no `ConvertStyleName` entry, so what reuses Writer's style is `xStyles->hasByName` on the *unconverted* name, a set nobody has censused. | `probes/words-close-r95/standard-census.txt`, 84 names over the 338 `.rtf` |
 
 ## Open — measured as nil reach, kept only so they are not rediscovered
 
@@ -70,13 +77,18 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | N7 | `NAS-Infrastructure-Roadmaps-Weather.pptx` as an ink defect — **refuted**. All 90 text records on its largest page sit at identical positions; the 3.52 % is a 0.13 % anisotropy seen through a 512 px instrument. | `probes/slides-ink-r94` |
 | N8 | WMF raster op `0x7` (self-mask *and* invert the rectangle) — needs the destination back, and no corpus document reaches it | `probes/slides-ink-r94` |
 | N9 | An `.xlsx` whose `indexedColors` are written `ffRRGGBB`, where oox reads the top byte as transparency (`decodeIntegerHex_impl`) — modelling it faithfully took the one affected document from 20.15 to 68.17, so it is left | **1** corpus document; `probes/sheet-ink-r94` |
+| N10 | The `bConsidered` asymmetry of O8 — a draw object with no text box that does not wrap through — is the only case where the old reading and the C++'s differ | **4** objects in 4 of the 272 DOCX, of 6055 positioned objects (`probes/words-close-r95/capture-census.txt`) |
+| N11 | `caption` / `Caption` as an RTF style whose `\sbasedon` does not resolve | **0** of the 338 converted `.rtf` apply one (`probes/words-close-r95/standard-census.txt`) |
+| N12 | tdf#123002's escape — a header- or footer-anchored object whose top has passed the area's bottom is returned unadjusted. Modelled because leaving it out clamps where the reference does not; **no fixture and no census can reach it**, since it is a property of a computed position rather than of the markup | `probes/words-close-r95` §1.6 |
 
 ---
 
 ## How to close an entry
 
 1. **Fixed here** — cite the C++ rule, show the reach, show confinement by building both ways
-   with `obj`/`bin` cleared per leg and comparing byte for byte under `SOURCE_DATE_EPOCH`.
+   with `obj`/`bin` cleared per leg and comparing byte for byte under `SOURCE_DATE_EPOCH`, and
+   move the row into *Fixed in this tree* rather than deleting it: the next round needs the
+   mechanism as much as the previous one needed the seat.
 2. **LibreOffice defect** — show that the reference is internally inconsistent or contradicts its
    own documented rule, and that our behaviour matches the branch that is right. Add it to the
    table at the top and to `CLAUDE.md` if it is a measurement hazard as well.
