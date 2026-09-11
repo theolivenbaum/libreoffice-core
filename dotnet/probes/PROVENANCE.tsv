@@ -1851,3 +1851,17 @@ dotnet/probes/slides-r100/tests.log	2026-09-11	current	26.2.4.2	present	current
 dotnet/probes/slides-r100/tfy-page-count.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/slides-r100/tfz.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/slides-r100/witness-p14.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-types-r101/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-types-r101/census-ooxml.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/census-odf.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/census-biff.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/census_biff_lib.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/census-ppt-ole.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/crosscheck.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/summarise.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/ooxml-raw.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/odf-joined.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/biff-raw.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/ppt-ole.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/summary.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
+dotnet/probes/chart-types-r101/crosscheck.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-types-r101/results.md
