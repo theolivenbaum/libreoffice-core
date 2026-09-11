@@ -352,6 +352,20 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // documents the missing one costs.
             NarrowsCaptureToBody = compatibility.CompatibilityMode >= 15,
 
+            // `WriterFilter.cxx`:333 sets `DisableOffPagePositioning` one line below the flag above,
+            // and it is the other half of `SwAnchoredObject::IsDraggingOffPageAllowed` — so a DOCX's
+            // wrap-through object is the one kind `SwFlyFreeFrame::CheckClip` leaves alone, at
+            // whatever size it states. See `PaginationOptions.DisablesOffPagePositioning`.
+            //
+            // **It is DOCX's alone and not the writerfilter's.** That file is the OOXML filter;
+            // `Rich_Text_Format.xcu` names `com.sun.star.comp.Writer.RtfFilter`, and that class'
+            // `setTargetDocument` (`RtfFilter.cxx`:191-195) sets no property at all. Grepping `sw/`
+            // for the setting finds exactly one setter. So the RTF reader leaves this false and its
+            // oversize flies are squeezed whatever they wrap, which is what the reference does.
+            // (`probes/chart-fit-r97` §3; the round that salvaged this had the prose the other way
+            // round and the code this way.)
+            DisablesOffPagePositioning = true,
+
             // LibreOffice's PARA_SPACE_MAX means the two spacings *add*; when it is off the larger
             // wins, which is Word's behaviour. Its OOXML exporter writes
             // w:doNotUseHTMLParagraphAutoSpacing exactly when the flag is on (docxexport.cxx), so

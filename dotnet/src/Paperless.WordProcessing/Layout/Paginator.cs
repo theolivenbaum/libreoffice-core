@@ -166,6 +166,32 @@ public sealed record PaginationOptions
     public bool NarrowsCaptureToBody { get; init; }
 
     /// <summary>
+    /// Whether a wrap-through object is exempt from being cut down to its page.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>DisableOffPagePositioning</c>. <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
+    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801) is that setting <em>and</em> a
+    /// wrap-through object, and <c>SwFlyFreeFrame::CheckClip</c>
+    /// (<c>sw/source/core/layout/flylay.cxx</c>:493) returns at once when it holds — so under it a
+    /// wrap-through frame may hang off the sheet at whatever size it states. See
+    /// <see cref="FrameLayout.Place"/>'s squeeze for what the setting exempts an object from.
+    /// </para>
+    /// <para>
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 is its <strong>only</strong> setter
+    /// in the whole of <c>sw/</c>, one line below the <c>DoNotCaptureDrawObjsOnPage</c> that
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> carries — and that file is the <em>OOXML</em>
+    /// filter. <strong>RTF does not share it</strong>, although it shares the writerfilter tokeniser:
+    /// <c>Rich_Text_Format.xcu</c> names <c>com.sun.star.comp.Writer.RtfFilter</c> as its service and
+    /// <c>RtfFilter::setTargetDocument</c> (<c>sw/source/writerfilter/filter/RtfFilter.cxx</c>:191-195)
+    /// sets no document property whatsoever. The WW8 binary filter and the ODF one do not set it
+    /// either, so it is off in <see cref="Default"/> and in <see cref="Word"/> and true only for
+    /// DOCX.
+    /// </para>
+    /// </remarks>
+    public bool DisablesOffPagePositioning { get; init; }
+
+    /// <summary>
     /// Whether a page-anchored fly may hang below the body into the bottom margin and the footer area
     /// rather than being split there.
     /// </summary>
@@ -754,7 +780,7 @@ public sealed class Paginator
         FrameResolution resolution = FrameResolution.Of(
             blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
             _options.CapturesAnchoredObjectsOnPage, _options.CapturesWrappedObjects,
-            _options.NarrowsCaptureToBody);
+            _options.NarrowsCaptureToBody, _options.DisablesOffPagePositioning);
         if (resolution.IsEmpty) return Numbered(pages, blocks);
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
@@ -775,7 +801,7 @@ public sealed class Paginator
             FrameResolution settled = FrameResolution.Of(
                 blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
                 _options.CapturesAnchoredObjectsOnPage, _options.CapturesWrappedObjects,
-                _options.NarrowsCaptureToBody);
+                _options.NarrowsCaptureToBody, _options.DisablesOffPagePositioning);
             pages = next;
 
             bool converged = settled.SameAs(resolution);

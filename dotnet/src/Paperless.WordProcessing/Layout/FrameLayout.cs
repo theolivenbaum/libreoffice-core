@@ -71,6 +71,11 @@ public static class FrameLayout
     /// Where the anchor sits on the page, which decides two of the capture's own conditions. See
     /// <see cref="FrameAnchorPlace"/>.
     /// </param>
+    /// <param name="disablesOffPagePositioning">
+    /// Writer's <c>DisableOffPagePositioning</c>, which exempts a wrap-through object from
+    /// <c>SwFlyFreeFrame::CheckClip</c> — see
+    /// <see cref="PaginationOptions.DisablesOffPagePositioning"/> and <see cref="Squeezed"/>.
+    /// </param>
     public static DocRect Place(
         PageFrame frame,
         PageGeometry geometry,
@@ -82,7 +87,8 @@ public static class FrameLayout
         bool capturesOnPage = true,
         bool capturesWrappedObjects = false,
         bool narrowsCaptureToBody = false,
-        FrameAnchorPlace anchorPlace = FrameAnchorPlace.Body)
+        FrameAnchorPlace anchorPlace = FrameAnchorPlace.Body,
+        bool disablesOffPagePositioning = false)
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(geometry);
@@ -262,11 +268,171 @@ public static class FrameLayout
             && anchorPlace == FrameAnchorPlace.Furniture
             && placedY > verticalArea.Bottom;
 
+        return Squeezed(
+            frame,
+            page,
+            new DocRect(
+                captured ? CapturedOnPageAcross(frame, page, placedX) : placedX,
+                captured && !offPage ? CapturedOnPage(frame, verticalArea, placedY) : placedY,
+                frame.Size.Width,
+                frame.Size.Height),
+            disablesOffPagePositioning);
+    }
+
+    /// <summary>
+    /// A frame bigger than its page, cut down to the page — and proportionally when what it holds is
+    /// a picture or a chart.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwFlyFreeFrame::CheckClip</c> (<c>sw/source/core/layout/flylay.cxx</c>:471-660), called from
+    /// <c>MakeAll</c> (:251) once the frame's position and size are both valid, on <em>every</em> free
+    /// fly and independently of the capture <see cref="CapturedOnPageAcross"/> models. Its clip
+    /// rectangle is the anchor's page frame — <c>CalcClipRect</c> (:1232-1275) takes
+    /// <c>pClipFrame-&gt;getFrameArea()</c> for a fly at content whenever
+    /// <c>CONSIDER_WRAP_ON_OBJECT_POSITION</c> is set, which every Word import sets, and intersects it
+    /// with the root's, which changes nothing.
+    /// </para>
+    /// <para>
+    /// <strong>The rule reduces to "bigger than the page".</strong> The C++ first gives up the
+    /// position — <c>SetPosX(max(aClip.Left(), nClipRig − aFrm.Width()))</c> (:530-534) and the same
+    /// down the page — and only squeezes if the frame still does not fit, which for a frame that
+    /// <em>fits</em> the page it never does. So the only frames whose size this changes are the ones
+    /// wider or taller than the sheet, and for them the move lands the frame flush with the page's own
+    /// edge, which is where the squeeze then starts from. Modelling it this way rather than as a move
+    /// plus a test keeps every frame that fits exactly where it was.
+    /// </para>
+    /// <para>
+    /// <strong>Proportional for a picture or an OLE object, and only for them</strong> (:598-627):
+    /// <c>Lower()-&gt;IsNoTextFrame()</c>, which is a <c>SwGrfNode</c> or a <c>SwOLENode</c> and is not
+    /// a text frame's text. When both axes are over, <em>the bigger change is the relevant one</em>
+    /// (:602-612) — the other axis is restored and then recomputed from the ratio, so the aspect is
+    /// kept.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 through the flat ODT, which prints the resolved model without
+    /// rendering anything</strong> — and it is visible there because :638-648 writes the squeezed size
+    /// back into the frame format for an OLE node. On
+    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c>, whose chart states 682.10 x 493.50 pt on a
+    /// 595.30 x 841.89 pt page, one <c>wp:extent</c> changed at a time:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>682.10 x 493.50 (as authored)</term><description><b>595.30 x 430.70</b></description></item>
+    ///   <item><term>708.66 x 157.48 — width alone over</term><description><b>595.30 x 132.29</b></description></item>
+    ///   <item><term>314.96 x 905.51 — height alone over</term><description><b>292.79 x 841.89</b></description></item>
+    ///   <item><term>708.66 x 905.51 — both, width by more</term><description><b>595.30 x 760.65</b></description></item>
+    ///   <item><term>393.70 x 236.22 — neither</term><description>unchanged</description></item>
+    /// </list>
+    /// <para>
+    /// <strong>The flat ODT can only see an OLE object, so the other three cases were rendered</strong>
+    /// (<c>probes/chart-fit-r97/nodekind.py</c>), one attribute changed at a time on the same
+    /// document and the drawn width read back out of 26.2.4.2's PDF. The write-back at :638-648 is
+    /// what puts a squeeze in the flat ODT and it is OLE-only, but the squeeze itself is not:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>the chart, <c>wrapSquare</c></term><description>682.10 -> <b>595.30 x 430.70</b></description></item>
+    ///   <item><term>the chart, wrap alone changed to <c>wrapNone</c></term><description><b>not squeezed</b> — its pie grows by 682.10/595.30</description></item>
+    ///   <item><term>the picture given the chart's extent, <c>wrapNone</c> as authored</term><description><b>not squeezed</b> — drawn 682.10 x 493.50, running 334 pt off the sheet</description></item>
+    ///   <item><term>the same picture, wrap alone changed to <c>wrapSquare</c></term><description>682.10 -> <b>595.30 x 430.70</b></description></item>
+    /// </list>
+    /// <para>
+    /// So it is the wrap that decides and not the node kind, which is the escape below; and a graphic
+    /// node is squeezed exactly as an OLE node is. The corpus carries the same rule unprompted:
+    /// <c>fleetfastfacts16nov2023.docx</c> anchors a 606.90 x 231.60 pt picture on a 595.30 pt page
+    /// and 26.2.4.2 draws it at <b>595.30 x 227.20</b>, flush with the left edge.
+    /// </para>
+    /// <para>
+    /// <strong>An as-character object is not a free fly and is never squeezed.</strong>
+    /// <c>SwFlyInContentFrame</c> derives from <c>SwFlyFrame</c> and not from <c>SwFlyFreeFrame</c>
+    /// (<c>sw/source/core/inc/flyfrms.hxx</c>:212 against :150), whose method this is. Measured:
+    /// <c>tibs_guidelines_2.docx</c> holds a 686.20 pt <c>wp:inline</c> picture on a 612 pt page and
+    /// 26.2.4.2 draws all 686.20 pt of it, and <c>PES-Technical-Report-Template_Jan_2019.docx</c>'s
+    /// 612.50 x 792.70 pt one on a 612 x 792 pt page likewise. Nothing is needed here for that:
+    /// <see cref="Place"/> is not called for an as-character frame at all — those hang on a line in
+    /// <c>HangInline</c> — so this method only ever sees a free fly.
+    /// </para>
+    /// <para>
+    /// <strong>Three of the C++'s own sub-conditions are not modelled</strong>, each of which only
+    /// stops the frame being *moved* first and so squeezes a frame that fits: a fly in a header
+    /// (:497-503), a fly carrying anchored objects of its own, and a fly inside a table. And the
+    /// escape is <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
+    /// (<c>anchoredobject.cxx</c>:790-801), which needs <c>DisableOffPagePositioning</c> — whose only
+    /// setter anywhere in <c>sw/</c> is <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333, the
+    /// <em>OOXML</em> filter's <c>setTargetDocument</c>, and <strong>not</strong> RTF's:
+    /// <c>RtfFilter::setTargetDocument</c> (<c>RtfFilter.cxx</c>:191-195) assigns the document and
+    /// sets no property at all, and <c>filter/source/config/fragments/filters/Rich_Text_Format.xcu</c>
+    /// names <c>com.sun.star.comp.Writer.RtfFilter</c> as its service — <em>and</em> a wrap-through
+    /// object.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The frame, for what it holds.</param>
+    /// <param name="page">The page rectangle, which is the clip rectangle.</param>
+    /// <param name="placed">Where the frame landed, at the size the file states.</param>
+    /// <param name="disablesOffPagePositioning">The document setting the escape needs.</param>
+    private static DocRect Squeezed(
+        PageFrame frame, DocRect page, DocRect placed, bool disablesOffPagePositioning)
+    {
+        // A *drawing object* is not a fly and never reaches `SwFlyFreeFrame::CheckClip` at all: it
+        // is an `SwAnchoredDrawObject`, whose `MakeObjPos` adjusts the position and nothing else.
+        //
+        // **That includes a shape carrying a text box**, which `CapturesAnchoredObjectsOnPage`'s
+        // `bConsidered` treats as a fly and this must not. `SwTextBoxHelper` pairs a *draw* format
+        // with a fly format; the fly holds the text and goes through `CheckClip`, and the shape —
+        // its fill, its outline, the rectangle that is actually drawn — stays a draw object. A
+        // `PageFrame` here is the drawing, so both shape kinds are exempt.
+        //
+        // Measured, because reading it the other way regressed three corpus documents before it
+        // was caught. `ABCD-WB-08-00 Weight and Balance Report`, `ABCD-FE-01-00 Flight Envelope`
+        // and `ABCD-SDE-23-00 - Avionic System Description` each state a `wrapSquare`
+        // `wp:anchor`/`wps:txbx` banner in a running head — 739.25 x 56.85 pt on a 595.30 pt page
+        // for the first two, 839.80 x 56.85 for the third — and 26.2.4.2 draws all of
+        // 739.2 and 839.8 of them, running off the sheet. The same documents' *pictures* are cut:
+        // `b053-19.docx`'s header picture is 612.5 pt on a 612 pt page and the reference draws it
+        // 612.0 x 87.75, which is this method's own arithmetic.
+        //
+        // Only the DOCX reader tells the kinds apart (`FrameObjectKind`), so an ODF or RTF custom
+        // shape wider than its page is squeezed here where the reference would leave it — the same
+        // gap `CapturesWrappedObjects` records, in the same place.
+        if (frame.ObjectKind is FrameObjectKind.Shape or FrameObjectKind.TextBoxShape) return placed;
+
+        if (disablesOffPagePositioning && frame.Wrap == TextWrap.Through) return placed;
+
+        Length width = placed.Width;
+        Length height = placed.Height;
+        bool across = width > page.Width;
+        bool down = height > page.Height;
+        if (!across && !down) return placed;
+
+        Length cut = across ? page.Width : width;
+        Length shortened = down ? page.Height : height;
+
+        // A picture's and a chart's aspect is kept; a text frame's two axes are cut independently.
+        if (frame.Chart is not null || frame.IsImage
+            || frame.Image is not null || frame.Vector is not null)
+        {
+            // Both over: the bigger change decides, and the other axis goes back to what it was
+            // before the ratio is applied to it.
+            if (across && down)
+            {
+                if (width - cut > height - shortened) shortened = height;
+                else cut = width;
+            }
+
+            if (cut != width && width.Emu != 0)
+            {
+                shortened = height * ((double)cut.Emu / width.Emu);
+            }
+            else if (shortened != height && height.Emu != 0)
+            {
+                cut = width * ((double)shortened.Emu / height.Emu);
+            }
+        }
+
         return new DocRect(
-            captured ? CapturedOnPageAcross(frame, page, placedX) : placedX,
-            captured && !offPage ? CapturedOnPage(frame, verticalArea, placedY) : placedY,
-            frame.Size.Width,
-            frame.Size.Height);
+            across ? page.X : placed.X,
+            down ? page.Y : placed.Y,
+            cut,
+            shortened);
     }
 
     /// <summary>
@@ -511,6 +677,10 @@ internal sealed class FrameResolution
     /// Whether the area a captured object is held inside narrows from the sheet to the page's body —
     /// see <see cref="PaginationOptions.NarrowsCaptureToBody"/>.
     /// </param>
+    /// <param name="disablesOffPagePositioning">
+    /// Whether a wrap-through object is exempt from the page clip — see
+    /// <see cref="PaginationOptions.DisablesOffPagePositioning"/>.
+    /// </param>
     public static FrameResolution Of(
         IReadOnlyList<PageBlock> blocks,
         IReadOnlyList<PaginatedSection> sections,
@@ -519,7 +689,8 @@ internal sealed class FrameResolution
         bool addsCellLineSpacing = false,
         bool capturesOnPage = true,
         bool capturesWrappedObjects = false,
-        bool narrowsCaptureToBody = false)
+        bool narrowsCaptureToBody = false,
+        bool disablesOffPagePositioning = false)
     {
         Dictionary<int, Placement> placements = [];
 
@@ -605,7 +776,8 @@ internal sealed class FrameResolution
                     capturesOnPage: capturesOnPage,
                     capturesWrappedObjects: capturesWrappedObjects,
                     narrowsCaptureToBody: narrowsCaptureToBody,
-                    anchorPlace: anchorPlace);
+                    anchorPlace: anchorPlace,
+                    disablesOffPagePositioning: disablesOffPagePositioning);
 
                 frames++;
                 signature.Add(area.X.Emu);
