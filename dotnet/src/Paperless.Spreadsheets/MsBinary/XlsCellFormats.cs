@@ -148,6 +148,21 @@ internal sealed class XlsCellFormats
     public BiffFont? FontAt(int index)
         => index >= 0 && index < _fonts.Count ? _fonts[index] : null;
 
+    /// <summary>
+    /// The ink a <c>FONT</c>'s colour index names, or null where it states none.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than black for <see cref="AutomaticColour"/> and for an index outside the
+    /// palette, so a caller that has its own default — a shape run's is the drawing layer's black,
+    /// not the workbook's window text — can tell "the font stated a colour" from "it did not".
+    /// A cell's format wants the opposite and keeps <see cref="ColourAt"/>.
+    /// </remarks>
+    /// <param name="font">The font record.</param>
+    public Colour? StatedColour(BiffFont font)
+        => font.ColourIndex >= 0 && font.ColourIndex < _palette.Count
+            ? _palette[font.ColourIndex]
+            : null;
+
     /// <summary>Replaces the palette from index eight upwards, which is what <c>PALETTE</c> sets.</summary>
     /// <param name="colours">The colours the record listed, in order.</param>
     public void SetPalette(IReadOnlyList<Colour> colours)

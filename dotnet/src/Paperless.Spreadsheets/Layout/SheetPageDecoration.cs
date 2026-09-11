@@ -68,6 +68,18 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     private static readonly Length BarInset = Length.FromPoints(0.2);
 
     /// <summary>
+    /// How many columns past the printed block a merged cell's fill may reach.
+    /// </summary>
+    /// <remarks>
+    /// One. <c>ScOutputData::DrawBackground</c>'s width accumulation breaks at
+    /// <c>nCol &gt; mnX2 + 2</c> while adding the width of column <c>nCol - 1</c>, so the last
+    /// column it can add is <c>mnX2 + 1</c>. See <see cref="DrawBackgrounds"/> for the 26.2.4.2
+    /// measurement that settles it, which is what the bound rests on — a wider merge is cut here
+    /// and not merely clipped by the paper.
+    /// </remarks>
+    private const int OverflowLimit = 1;
+
+    /// <summary>
     /// One dash of a data bar's axis, and one gap: <c>LineInfo</c>'s 3 logic units.
     /// </summary>
     /// <remarks>
@@ -124,11 +136,25 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// </para>
     /// <para>
     /// A merged block takes its fill from its origin cell and covers the whole block, which is why
-    /// this asks <see cref="DecorationAt"/> rather than the formatting directly.
-    /// <c>ScOutputData::DrawBackground</c> extends one run across <c>ATTR_MERGE</c>'s column count
-    /// (<c>sc/source/ui/view/output.cxx:1155-1170</c>); painting the origin's colour into each
-    /// covered cell's own rectangle covers the same area with the same ink, and survives a block
-    /// split across two pages, which one extended rectangle would not.
+    /// this asks <see cref="DecorationAt"/> rather than the formatting directly. Inside the printed
+    /// block, painting the origin's colour into each covered cell's own rectangle covers the same
+    /// area with the same ink as <c>ScOutputData::DrawBackground</c>'s single extended run
+    /// (<c>sc/source/ui/view/output.cxx:1148-1172</c> in this tree, which is 27.2.0.0.alpha0+ and
+    /// not the reference binary's source).
+    /// </para>
+    /// <para>
+    /// <strong>What it does not cover is a merge running off the right of the block, which the
+    /// reference paints past it anyway — up to a bound of its own rather than the paper's.</strong>
+    /// The run's width is accumulated
+    /// over the merged columns and the accumulation stops at <c>nCol &gt; mnX2 + 2</c>, where the
+    /// column whose width is added is <c>nCol - 1</c> — so the fill reaches one column past the
+    /// block's last and no further, however wide the merge is. <see cref="OverflowLimit"/> is that
+    /// bound. Measured at 26.2.4.2 rather than read off the loop, on
+    /// <c>tests/corpus/features/sheet-merge-fill-overflow.fods</c>: a 2 cm column A alone on page 1
+    /// with a merge of A:D (11 cm) and one of A:C (8 cm) is painted <strong>5 cm wide in both
+    /// cases</strong>, which is A + B exactly, while the unmerged control keeps its 2 cm. On page 2,
+    /// where the origin is off the block to the left, the same two merges are painted B + C + D and
+    /// B + C — their covered columns' own widths, which is what this already draws.
     /// </para>
     /// </remarks>
     /// <param name="columns">The columns on the page.</param>
@@ -140,15 +166,63 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         SheetFormatting formatting = sheet.Formatting;
         if (formatting.IsEmpty) return;
 
+        SheetMerges merges = sheet.Merges;
+        int lastPrinted = placement.Cells.LastColumn;
+
         foreach (PlacedRow row in rows)
         {
             foreach (PlacedColumn column in columns)
             {
                 if (DecorationAt(row.Row, column.Column).Background is not { } colour) continue;
 
-                Fill(new DocRect(column.X, row.Y, column.Width, row.Height), colour, sink);
+                // The repeated print-title columns are in `columns` too, at their own band's X
+                // and with their own fixed width, so only a column of the page's own block may be
+                // widened — a merge beginning inside a repeat band is drawn as it always was.
+                Length width = column.Width;
+                if (!merges.IsEmpty
+                    && column.Column >= placement.Cells.FirstColumn
+                    && column.Column <= lastPrinted)
+                {
+                    width += Overflow(merges, row.Row, column.Column, lastPrinted);
+                }
+
+                Fill(new DocRect(column.X, row.Y, width, row.Height), colour, sink);
             }
         }
+    }
+
+    /// <summary>
+    /// How much of a merge runs off the right of the printed block and is painted anyway.
+    /// </summary>
+    /// <remarks>
+    /// Zero unless the merge's own <em>origin</em> is the position asked about and the merge reaches
+    /// past <paramref name="lastPrinted"/>. The origin is what carries <c>ATTR_MERGE</c> and
+    /// therefore the column count the run is extended by; a covered cell carries
+    /// <c>ATTR_MERGE_FLAG</c> and no count, so a merge whose origin is off the left of the block
+    /// extends nothing and each of its covered columns paints its own rectangle as before. Measured
+    /// as well as read: on page 2 and page 27 of <c>TOGAF9-Tool-ConfReqts-CSQ.xls</c> the reference
+    /// draws exactly the covered columns' own widths for merges that begin on an earlier page
+    /// column, and widening those two costs 0.01 and 0.65 of ink.
+    /// </remarks>
+    /// <param name="merges">The sheet's merged blocks.</param>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    /// <param name="lastPrinted">The last column of the page's printed block.</param>
+    private Length Overflow(SheetMerges merges, int row, int column, int lastPrinted)
+    {
+        if (merges.Covering(row, column) is not { } merge) return Length.Zero;
+        if (merge.LastColumn <= lastPrinted) return Length.Zero;
+        if (column != merge.FirstColumn) return Length.Zero;
+
+        Length extra = Length.Zero;
+        int limit = Math.Min(merge.LastColumn, lastPrinted + OverflowLimit);
+        for (int at = column + 1; at <= limit; at++)
+        {
+            if (sheet.Grid.Columns.IsHidden(at)) continue;
+            extra += SheetDeviceUnits.Snap(sheet.Grid.Columns.SizeAt(at)) * _scale;
+        }
+
+        return extra;
     }
 
     /// <summary>Paints the bars a <c>dataBar</c> conditional format draws over its cells.</summary>
