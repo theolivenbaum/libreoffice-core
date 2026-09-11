@@ -927,18 +927,26 @@ internal sealed class PptSlideLayout
         double rotation = Rotation(shape);
         local = Uprighted(local, rotation);
 
+        string? preset = PptShapeGeometry.PresetOf(shape.ShapeType);
+        int? adjustment = shape.Properties.Has(PptShapeGeometry.AdjustValue)
+            ? PptShapeGeometry.Adjustment(
+                shape.ShapeType, shape.Properties.SignedValue(PptShapeGeometry.AdjustValue))
+            : null;
+
+        // The shape resizes itself around its own text before anything else is measured against
+        // it: the fill, the outline, the picture and the text all sit in the *fitted* rectangle.
+        PptShapeText? text = TextIn(shape, context);
+        if (text is not null)
+        {
+            local = Fitted(shape, text, local, preset, adjustment);
+        }
+
         AffineTransform placement = Placement(
             local,
             rotation,
             (shape.Flags & EscherShapeAttributes.FlipHorizontal) != 0,
             (shape.Flags & EscherShapeAttributes.FlipVertical) != 0,
             space);
-
-        string? preset = PptShapeGeometry.PresetOf(shape.ShapeType);
-        int? adjustment = shape.Properties.Has(PptShapeGeometry.AdjustValue)
-            ? PptShapeGeometry.Adjustment(
-                shape.ShapeType, shape.Properties.SignedValue(PptShapeGeometry.AdjustValue))
-            : null;
 
         // A shape's own vertex array outranks its type, because LibreOffice's exporter writes one
         // on nearly every shape and names no preset at all; falling through to the type would draw
@@ -972,7 +980,7 @@ internal sealed class PptSlideLayout
             Fill = Fill(shape, context.Scheme, local, placement),
             Line = Line(shape, context.Scheme),
             Picture = Picture(shape, bounds),
-            Text = Text(shape, context, local, preset, adjustment, placement),
+            Text = Text(text, local, preset, adjustment, placement),
             Shadow = Shadow(shape, context.Scheme),
         };
     }
@@ -1252,13 +1260,153 @@ internal sealed class PptSlideLayout
         _ => LineJoin.Round,
     };
 
-    private PlacedText? Text(
-        EscherShape shape,
-        Context context,
-        DocRect local,
-        string? preset,
-        int? adjustment,
-        AffineTransform placement)
+    /// <summary>
+    /// The rectangle a shape occupies once it has resized itself around its own text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong><c>fFitShapeToText</c> is the shape growing, not the text shrinking</strong>, and
+    /// it is the one of the two that this reader had no answer for at all. Escher states it as
+    /// bit 1 of <c>DFF_Prop_FitTextToShape</c> (191); <c>svdfppt.cxx</c>:1049-1110 turns it into
+    /// <c>SdrTextAutoGrowHeightItem</c> on every horizontal text object it builds — the
+    /// <c>SdrObjCustomShape</c> branch at <c>:1053-1055</c> and the <c>SdrRectObj</c> branch at
+    /// <c>:1090</c> both — and into auto-grow-<em>width</em> instead when the text is vertical
+    /// (<c>:1077-1080</c>), which is why a turned body is left alone here.
+    /// </para>
+    /// <para>
+    /// The arithmetic is <c>SdrTextObj::AdjustTextFrameWidthAndHeight</c>
+    /// (<c>svx/source/svdraw/svdotxat.cxx</c>:44-236) and its custom-shape twin
+    /// (<c>svx/source/svdraw/svdoashp.cxx</c>:2249-2421), which agree line for line on the height:
+    /// the text is broken to the frame's <em>open</em> width less the two horizontal distances and
+    /// floored at two units, the height is the outliner's plus <b>one unit of tolerance</b>, that
+    /// is clamped to the minimum frame height, and only then are the two vertical distances added.
+    /// The growth then moves the edge the vertical anchor does not hold: the bottom for a
+    /// top-anchored body, the top for a bottom-anchored one, and half of it each way for a
+    /// centred one.
+    /// </para>
+    /// <para>
+    /// <strong>The minimum is where the two branches differ, and it decides whether a shape may
+    /// shrink.</strong> <c>makeSdrTextMinFrameHeightItem</c> is set only on the
+    /// <c>SdrRectObj</c> branch (<c>svdfppt.cxx</c>:1116-1119), to the stated rectangle's height
+    /// less the two vertical distances (<c>:982</c>) — so a real placeholder can only grow. A
+    /// custom shape gets no such item, its minimum falls through to 1, and a box with less text
+    /// than it has room for shrinks to fit. The branch is taken on exactly one condition
+    /// (<c>:1041-1055</c>): the text object's kind is rewritten to Rectangle, and therefore the
+    /// custom shape keeps its own text, unless the shape names a placeholder <em>and</em> its
+    /// text kind is not <c>Other</c>.
+    /// </para>
+    /// <para>
+    /// Measured on <c>pres_ioc_phuket.ppt</c> page 26, whose dark blue banner states 519 master
+    /// units — 64.88 pt — and holds two empty 40 pt paragraphs: 26.2.4.2 resolves it to 3.647 cm,
+    /// <b>103.38 pt</b>, and drew a bar 38.5 pt short of the reference's before this. Over the
+    /// corpus's 51 <c>.ppt</c>, <b>1691 live slide shapes in 38 documents state the bit</b> and
+    /// 1348 of those hold text; the reference's own flat-ODP export disagrees with the stated
+    /// anchor by more than a millimetre on <b>101 shapes in 22 documents</b> — 83 taller and 18
+    /// shorter (<c>probes/slides-r97/growth.py</c>).
+    /// </para>
+    /// <para>
+    /// Not modelled: the rotation compensation at <c>svdotxat.cxx</c>:229-236, which moves the
+    /// grown rectangle so that a rotated shape's own top-left stays where it was — a rotated
+    /// shape grows about its centre here instead. <strong>That is unmeasured rather than measured
+    /// as nil</strong>: the census above matches on <c>svg:x</c>/<c>svg:y</c>, which a rotated
+    /// shape's export does not state at all, so it can say nothing about one.
+    /// </para>
+    /// </remarks>
+    private DocRect Fitted(
+        EscherShape shape, PptShapeText text, DocRect local, string? preset, int? adjustment)
+    {
+        // A turned body grows the shape's width instead, which this does not model.
+        if (text.Flow != VerticalText.None) return local;
+
+        if ((shape.Properties.Value(PptShapeGeometry.FitTextToShape, 0)
+             & PptShapeGeometry.FitShapeToText) == 0)
+        {
+            return local;
+        }
+
+        DocRect frame = SlidePresetGeometry.TextRectangle(preset, local.Size, Guides(adjustment));
+        if (frame.Height <= Length.Zero || local.Height <= Length.Zero) return local;
+
+        Margins insets = Insets(shape);
+        long across = insets.Left.Mm100 + insets.Right.Mm100;
+        long down = insets.Top.Mm100 + insets.Bottom.Mm100;
+
+        // `Size aSiz(rR.GetSize()); aSiz.AdjustWidth(-1);` is the open width, and the floor of two
+        // is the reference's own (`svdotxat.cxx`:113-116).
+        Length width = Length.FromMm100(Math.Max(frame.Width.Mm100 - across, 2));
+
+        long height = SlideTextLayout.Height(text.Body, width, _fonts).Mm100 + 1;
+        height = Math.Clamp(height, MinimumFrameHeight(shape, text, frame, down), MaximumFrameHeight);
+        height += down;
+        if (height < 1) height = 1;
+
+        long growth = height - frame.Height.Mm100;
+        if (growth == 0) return local;
+
+        // `ImpCalculateTextFrame` (`svdoashp.cxx`:2424-2450) scales the text frame's movement back
+        // onto the shape's own rectangle, which is the identity whenever the preset's text area is
+        // the whole shape and a proportion whenever it is not.
+        double scale = (double)local.Height.Mm100 / frame.Height.Mm100;
+        long half = growth / 2;
+        (long top, long bottom) = Anchor(shape) switch
+        {
+            TextAnchor.Bottom => (-growth, 0L),
+            TextAnchor.Middle => (-half, growth - half),
+            _ => (0L, growth),
+        };
+
+        Length newTop = local.Y + Length.FromMm100((long)(top * scale));
+        Length newBottom = local.Bottom + Length.FromMm100((long)(bottom * scale));
+        return new DocRect(local.X, newTop, local.Width, newBottom - newTop);
+    }
+
+    /// <summary>
+    /// The ceiling a grown frame's text height is clamped to, in hundredths of a millimetre.
+    /// </summary>
+    /// <remarks>
+    /// <c>Size aMaxSiz(100000, 100000)</c> — a metre — which the model's own
+    /// <c>GetMaxObjSize()</c> may narrow and never widens (<c>svdotxat.cxx</c>:76-84,
+    /// :98-108). No corpus shape reaches it; it is here because the reference has it and a
+    /// runaway measurement would otherwise draw a shape off the deck.
+    /// </remarks>
+    private const long MaximumFrameHeight = 100000;
+
+    /// <summary>
+    /// The floor the reference puts under a grown frame's text height, in hundredths of a
+    /// millimetre.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="Fitted"/>: a shape whose text object was built as an <c>SdrRectObj</c> —
+    /// a real placeholder — carries <c>makeSdrTextMinFrameHeightItem(rTextRect.GetHeight() -
+    /// (nTextTop + nTextBottom))</c> and can therefore only grow; everything else falls through
+    /// to the item default of zero, which the fit raises to one.
+    /// </remarks>
+    private long MinimumFrameHeight(
+        EscherShape shape, PptShapeText text, DocRect frame, long down)
+    {
+        bool placeholder = text.Kind != PptTextKind.Other
+                           && PlaceholderOf(shape) != PptPlaceholders.None;
+
+        if (!placeholder) return 1;
+
+        return Math.Max(frame.Height.Mm100 - down, 1);
+    }
+
+    /// <summary>A shape's text body, with the two things the fit and the layout both need.</summary>
+    /// <param name="Body">The body, already turned if the shape's flow turns it.</param>
+    /// <param name="Flow">Which way the shape's own text runs.</param>
+    /// <param name="Kind">The text kind its <c>TextHeaderAtom</c> names.</param>
+    private sealed record PptShapeText(SlideTextBody Body, VerticalText Flow, PptTextKind Kind);
+
+    /// <summary>
+    /// The text a shape holds, built once and used both by the fit and by the layout.
+    /// </summary>
+    /// <remarks>
+    /// Built before the shape is placed because <see cref="Fitted"/> resizes the shape around it:
+    /// the fill, the outline and the picture all have to be measured in the rectangle the text
+    /// leaves behind, not in the one the anchor states.
+    /// </remarks>
+    private PptShapeText? TextIn(EscherShape shape, Context context)
     {
         if (TextOf(shape, context) is not { } run) return null;
 
@@ -1274,6 +1422,21 @@ internal sealed class PptSlideLayout
         {
             body = body with { Rotation = Quarter(flow) };
         }
+
+        return new PptShapeText(body, flow, run.Kind);
+    }
+
+    private PlacedText? Text(
+        PptShapeText? text,
+        DocRect local,
+        string? preset,
+        int? adjustment,
+        AffineTransform placement)
+    {
+        if (text is null) return null;
+
+        SlideTextBody body = text.Body;
+        VerticalText flow = text.Flow;
 
         DocRect rectangle = SlidePresetGeometry.TextRectangle(preset, local.Size, Guides(adjustment));
 

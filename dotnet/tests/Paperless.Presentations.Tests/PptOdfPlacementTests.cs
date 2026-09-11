@@ -44,6 +44,28 @@ public class PptOdfPlacementTests
     /// </remarks>
     private const double TolerancePoints = 0.2;
 
+    /// <summary>
+    /// The height 26.2.4.2 resolves for the deck's ellipse when it reads the <c>.ppt</c>, in
+    /// points — 2.067 cm.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The reference itself does not place this shape identically through the two
+    /// paths, so the rule this class asserts has one measured exception.</strong>
+    /// <c>--convert-to fodp</c> on the two fixtures gives the ellipse <c>svg:height="2.067cm"</c>
+    /// out of the <c>.ppt</c> and <c>"2.012cm"</c> out of the <c>.odp</c>, and the reason is in
+    /// the graphic styles it writes beside them: the binary shape's carries
+    /// <c>draw:auto-grow-height="true"</c> and the ODF shape's does not, because
+    /// <c>svdfppt.cxx</c>:1049-1110 turns Escher's <c>fFitShapeToText</c> into an
+    /// <c>SdrTextAutoGrowHeightItem</c> and the <c>.odp</c> states no such thing.
+    /// </para>
+    /// <para>
+    /// So the two vocabularies do <em>not</em> describe the same rectangle here, and pinning the
+    /// binary side to the ODF side pinned it to a shape 1.55 pt shorter than the reference draws.
+    /// </para>
+    /// </remarks>
+    private const double GrownEllipsePoints = 2.067 * 72.0 / 2.54;
+
     private static IReadOnlyList<LaidOutSlide> Layout(string name)
     {
         using IDocument document =
@@ -80,6 +102,15 @@ public class PptOdfPlacementTests
                 mine.X.Points.ShouldBe(theirs.X.Points, TolerancePoints, $"{where}: left");
                 mine.Y.Points.ShouldBe(theirs.Y.Points, TolerancePoints, $"{where}: top");
                 mine.Width.Points.ShouldBe(theirs.Width.Points, TolerancePoints, $"{where}: width");
+
+                if (slide == 1 && shape == 1)
+                {
+                    // The one shape whose height the two paths are NOT allowed to agree on. See
+                    // TheBinarysGrownShapeIsWhatTwentySixTwoResolvesForIt.
+                    mine.Height.Points.ShouldBe(GrownEllipsePoints, TolerancePoints, $"{where}: height");
+                    continue;
+                }
+
                 mine.Height.Points.ShouldBe(theirs.Height.Points, TolerancePoints, $"{where}: height");
             }
         }
