@@ -57,6 +57,33 @@ internal readonly record struct SheetBandFace(string? Family, bool Bold, bool It
 /// </remarks>
 internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement placement)
 {
+    /// <summary>
+    /// How far inside its cell a data bar is painted, on every edge.
+    /// </summary>
+    /// <remarks>
+    /// Two pixels of the PDF writer's own 720 dpi device — <c>2 * nOneX</c> in
+    /// <c>drawDataBars</c> — which is 4 twips. See <see cref="DrawDataBars"/> for the
+    /// measurements this was checked against.
+    /// </remarks>
+    private static readonly Length BarInset = Length.FromPoints(0.2);
+
+    /// <summary>
+    /// One dash of a data bar's axis, and one gap: <c>LineInfo</c>'s 3 logic units.
+    /// </summary>
+    /// <remarks>
+    /// <strong>The logic unit is a hundredth of a millimetre, not a twip</strong>, and the axis is
+    /// what says so: <c>LineInfo(LineStyle::Dash, 1)</c> with <c>SetDashLen(3)</c> and
+    /// <c>SetDistance(3)</c> comes out of 26.2.4.2's PDF of
+    /// <c>sheet-cf-data-bar-negative.xlsx</c> as <c>0.02835 w</c> and a dash array of eight
+    /// <c>0.08504</c>, which are exactly 1 and 3 hundredths of a millimetre. That settles
+    /// <see cref="BarInset"/> too: one pixel of the writer's 720 dpi device is 2540/720 = 3.5278
+    /// of the same unit, so <c>2 * nOneX</c> is 7.0556, which is 0.19999 pt.
+    /// </remarks>
+    private static readonly Length AxisDash = Length.FromPoints(3 * 2.54 / 100 * 72 / 25.4);
+
+    /// <summary>The axis line's own width, which is one of those units.</summary>
+    private static readonly Length AxisWidth = Length.FromPoints(2.54 / 100 * 72 / 25.4);
+
     /// <summary>One centimetre, the width of the printed row headings.</summary>
     /// <remarks><c>PRINT_HEADER_WIDTH</c>, <c>sc/source/ui/inc/printfun.hxx:45</c>.</remarks>
     public static Length HeadingWidth { get; } = Length.FromTwips(567);
@@ -122,6 +149,108 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 Fill(new DocRect(column.X, row.Y, column.Width, row.Height), colour, sink);
             }
         }
+    }
+
+    /// <summary>Paints the bars a <c>dataBar</c> conditional format draws over its cells.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>drawDataBars</c> (<c>sc/source/ui/view/output.cxx</c>:883-950) is the whole of the
+    /// geometry and it is short. The cell's rectangle is inset by two device pixels on every
+    /// edge; the axis sits at <see cref="SheetDataBar.Zero"/> per cent of what is left; and the
+    /// bar runs from there to <see cref="SheetDataBar.Length"/> per cent of the remaining width
+    /// on whichever side its sign names. **A length of zero returns before painting anything**,
+    /// which is why a cell sitting exactly on an automatic minimum shows no bar at all rather
+    /// than a hairline.
+    /// </para>
+    /// <para>
+    /// <strong>The inset is a device pixel and the device is the PDF writer's, at 720 dpi</strong>
+    /// — <c>vcl::PDFWriter</c>'s reference resolution, so <c>PixelToLogic(Size(1,1))</c> is two
+    /// twips and <c>2 * nOneX</c> is <see cref="BarInset"/>. Measured rather than derived from
+    /// that: on 26.2.4.2's own PDF of <c>088_To-do_list_with_progress_tracker</c> the full-length
+    /// bar spans 518.54-600.55 inside a 518.35-600.75 cell and stands 20.62 pt in a 21.01 pt row,
+    /// which is 0.195 pt a side, and on
+    /// <c>tests/corpus/features/sheet-cf-data-bar-auto.xlsx</c> the rows give 0.21. The residual
+    /// against 0.2 is under a fortieth of a point.
+    /// </para>
+    /// <para>
+    /// The axis is drawn across the <em>whole</em> cell and not across the inset rectangle —
+    /// <c>Point aPoint1(nPosZero, rRect.Top())</c> — which the negative fixture shows directly:
+    /// its first row's bar stands y 71.0-85.49 and its axis runs 70.8-85.69.
+    /// </para>
+    /// </remarks>
+    /// <param name="columns">The columns on the page.</param>
+    /// <param name="rows">The rows on the page.</param>
+    /// <param name="sink">Receives the drawing commands.</param>
+    public void DrawDataBars(
+        IReadOnlyList<PlacedColumn> columns, IReadOnlyList<PlacedRow> rows, IDrawingSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(rows);
+
+        SheetFormatting formatting = sheet.Formatting;
+        if (formatting.IsEmpty) return;
+
+        foreach (PlacedRow row in rows)
+        {
+            foreach (PlacedColumn column in columns)
+            {
+                if (formatting.BarAt(row.Row, column.Column) is not { } bar) continue;
+                if (bar.Length == 0) continue;
+
+                Length left = column.X + BarInset;
+                Length right = column.Right - BarInset;
+                Length top = row.Y + BarInset;
+                Length bottom = row.Bottom - BarInset;
+                if (right <= left || bottom <= top) continue;
+
+                Length span = right - left;
+                Length zero = left + (span * (bar.Zero / 100.0));
+
+                Length from;
+                Length to;
+                if (bar.Length < 0)
+                {
+                    to = zero;
+                    from = zero + ((zero - left) * (bar.Length / 100.0));
+                }
+                else
+                {
+                    from = zero;
+                    to = zero + ((right - zero) * (bar.Length / 100.0));
+                }
+
+                if (to > from) Fill(new DocRect(from, top, to - from, bottom - top), bar.Colour, sink);
+
+                if (bar.HasAxis) AxisLine(zero, row, bar.AxisColour, sink);
+            }
+        }
+    }
+
+    /// <summary>The dashed vertical a data bar draws at its zero, when it has one inside the cell.</summary>
+    /// <remarks>
+    /// <c>LineInfo(LineStyle::Dash, 1)</c> with four dashes of three logic units and three
+    /// between them, over the cell's own full height. **No corpus rule reaches it** — all nine
+    /// resolve a minimum at or above zero, so their zero sits on the left edge and
+    /// <c>drawDataBars</c> returns before the axis — so the only witness is
+    /// <c>tests/corpus/features/sheet-cf-data-bar-negative.xlsx</c>, on which 26.2.4.2 draws four
+    /// of them, one per row that has a bar and none on the row whose length is zero.
+    /// </remarks>
+    private static void AxisLine(Length at, PlacedRow row, Colour colour, IDrawingSink sink)
+    {
+        sink.StrokePath(
+            new GraphicsPath().MoveTo(new DocPoint(at, row.Y)).LineTo(new DocPoint(at, row.Bottom)),
+            new Stroke(
+                Paint.Solid(colour),
+                AxisWidth,
+                LineCap.Butt,
+                LineJoin.Round,
+                // Four dashes and four gaps rather than one of each, because `SetDashCount(4)`
+                // is what the reference states and its PDF carries all eight entries. The two
+                // spellings paint the same line; this one matches operator for operator.
+                DashPattern: [
+                    AxisDash, AxisDash, AxisDash, AxisDash,
+                    AxisDash, AxisDash, AxisDash, AxisDash,
+                ]));
     }
 
     /// <summary>

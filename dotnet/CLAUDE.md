@@ -2985,6 +2985,19 @@ sixteen of the reference's, and the two we add are §4's tab.
 `Microsoft Excel 2007+` — a zip — with six `containsText` rules, and is one of the three movers. No
 census filtered on `.xlsx`/`.xlsm` can see it.
 
+***And the `iconSet` half of that census was corrected in the wrong direction: it is 20 rules in 9
+documents, not 2 in 2.*** Round 96 took an earlier over-count of 20 down to 2 by parsing each
+worksheet's `cfRule` elements instead of grepping for `type="iconSet"`, which is the right
+instrument for the wrong element — **an `x14:cfRule` in a worksheet's `extLst` can be a rule of its
+own** rather than an extension of a main-namespace one, carrying its own `xm:sqref`, and the
+reference imports and paints it. 18 of the corpus's 20 are of that kind, and
+`088_To-do_list_with_progress_tracker`'s `H3:H7` set is the proof in one file: it exists nowhere
+but the extension list and 26.2.4.2 draws a 16 × 16 image for it. The test is whether some
+main-namespace rule claims the `x14` rule's `id` through an `<x14:id>`; `dataBar` is unaffected,
+because all nine of its extensions are claimed that way and r96's 9-in-6 is exact.
+**Census the extension list as well as the sheet, and match the two by `id`.**
+`probes/cond-format-r97/census-drawrules.py`.
+
 ### A wrapping cell whose text begins outside its own column draws nothing at all
 
 **Only a wrapping cell is clipped to its column, and only a wrapping cell has a paper.**

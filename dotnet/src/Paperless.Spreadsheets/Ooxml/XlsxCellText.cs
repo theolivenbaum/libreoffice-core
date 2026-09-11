@@ -108,6 +108,53 @@ internal static class XlsxCellText
     public static string Of(string? raw)
         => string.IsNullOrEmpty(raw) ? string.Empty : Normalise(Decode(raw));
 
+    /// <summary>
+    /// The text Calc <em>stores</em> for the same element: stage 1 alone, with no control
+    /// normalisation over it.
+    /// </summary>
+    /// <param name="raw">The element's value, straight from the XML.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>A cell's drawn text and its compared value are two different strings, and only the
+    /// first of them goes through <see cref="Of"/>.</b> The reference's own shared-string
+    /// import is one line — <c>RichStringPortion::setText</c> is
+    /// <c>maText = AttributeConversion::decodeXString(rText)</c>
+    /// (<c>sc/source/filter/oox/richstring.cxx</c>:60-63) — so what Calc holds in the cell is
+    /// the escape-decoded string and nothing else. Every control character survives into the
+    /// document model; the eliding <see cref="Of"/> describes happens later, in the drawing
+    /// layer, and a conditional format never sees it.
+    /// </para>
+    /// <para>
+    /// The difference is not academic. <c>ScConditionEntry::FillCache</c> keys a
+    /// <c>duplicateValues</c> cache on the cell's own string, so on
+    /// <c>ST Capability List Rev.16</c> the reference reads <c>"\tD5758620001301"</c> and
+    /// <c>"D5758620001301"</c> as two different keys and paints neither, while a reader that
+    /// compares the drawn text sees one key twice and paints both. The same string reaches
+    /// <c>containsBlanks</c>, whose replacement formula is <c>LEN(TRIM(#B))=0</c>: <c>TRIM</c>
+    /// takes spaces and not tabs, so a cell holding a lone <c>U+0009</c> is <em>not</em> blank
+    /// to the reference and is blank to a reader that normalised the tab away first.
+    /// </para>
+    /// <para>
+    /// Both halves are measured on <c>tests/corpus/features/sheet-cf-stored-vs-drawn.xlsx</c>
+    /// at 26.2.4.2 — see <c>probes/cond-format-r97/results.md</c>.
+    /// </para>
+    /// </remarks>
+    public static string Stored(string? raw)
+        => string.IsNullOrEmpty(raw) ? string.Empty : Decode(raw);
+
+    /// <summary>
+    /// The drawn text of a string that has already been through <see cref="Stored"/>.
+    /// </summary>
+    /// <param name="stored">The stored spelling, escapes resolved and controls intact.</param>
+    /// <remarks>
+    /// <c>Drawn(Stored(x))</c> is <c>Of(x)</c> — the same string and, where nothing needs
+    /// changing, the same instance — so a caller that wants both spellings decodes once instead
+    /// of twice. A shared string table runs to tens of thousands of entries and both callers
+    /// want both.
+    /// </remarks>
+    public static string Drawn(string stored)
+        => string.IsNullOrEmpty(stored) ? string.Empty : Normalise(stored);
+
     /// <summary>Resolves every <c>_xHHHH_</c>, returning the original when there is none.</summary>
     private static string Decode(string raw)
     {

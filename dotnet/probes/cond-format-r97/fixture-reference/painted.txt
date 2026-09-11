@@ -1,0 +1,65 @@
+# `soffice --convert-to pdf` of each fixture, LibreOffice 26.2.4.2, 2026-09-11.
+# Filled rectangles, stroked paths, embedded images and text spans with their colours.
+# A gradient arrives as hundreds of one-colour slices; those are summarised per row.
+
+=== sheet-cf-data-bar-auto.pdf
+    p1 fill   #2e75b6 x    53.89-   65.62 y    85.90-  100.38
+    p1 fill   #2e75b6 x    53.89-   77.36 y   100.80-  115.26
+    p1 fill   #2e75b6 x    53.89-   89.07 y   115.70-  130.14
+    p1 fill   #2e75b6 x    53.89-  100.80 y   130.60-  145.02
+    p1 span   #000000 x    94.42 y    71.25 '0'
+    p1 span   #000000 x    88.87 y    86.14 '25'
+    p1 span   #000000 x    88.87 y   101.02 '50'
+    p1 span   #000000 x    88.87 y   115.90 '75'
+    p1 span   #000000 x    83.28 y   130.78 '100'
+
+=== sheet-cf-data-bar-lengths.pdf
+    p1 gradient 209 slices x 53.83-58.65 y 71.00  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.83-68.06 y 85.90  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.86-77.39 y 100.70  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.86-86.74 y 115.60  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.86-96.15 y 130.50  #2e75b6 .. #ffffff
+    p1 span   #000000 x    94.42 y    71.25 '0'
+    p1 span   #000000 x    88.87 y    86.14 '25'
+    p1 span   #000000 x    88.87 y   101.02 '50'
+    p1 span   #000000 x    88.87 y   115.90 '75'
+    p1 span   #000000 x    83.28 y   130.78 '100'
+
+=== sheet-cf-data-bar-negative.pdf
+    p1 stroke #000000 x    77.33-   77.33 y    70.80-   85.69
+    p1 fill   #c00000 x    53.89-   77.36 y    71.00-   85.49
+    p1 stroke #000000 x    77.33-   77.33 y    85.70-  100.57
+    p1 fill   #c00000 x    65.62-   77.36 y    85.90-  100.38
+    p1 stroke #000000 x    77.33-   77.33 y   115.50-  130.34
+    p1 fill   #2e75b6 x    77.33-   89.06 y   115.70-  130.14
+    p1 stroke #000000 x    77.33-   77.33 y   130.30-  145.22
+    p1 fill   #2e75b6 x    77.33-  100.80 y   130.60-  145.02
+    p1 span   #000000 x    79.91 y    71.25 '-100'
+    p1 span   #000000 x    85.49 y    86.14 '-50'
+    p1 span   #000000 x    94.42 y   101.02 '0'
+    p1 span   #000000 x    88.87 y   115.90 '50'
+    p1 span   #000000 x    83.28 y   130.78 '100'
+
+=== sheet-cf-data-bar-only.pdf
+    p1 gradient 209 slices x 53.83-58.65 y 71.00  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.83-68.06 y 85.90  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.86-77.39 y 100.70  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.86-86.74 y 115.60  #2e75b6 .. #ffffff
+    p1 gradient 209 slices x 53.86-96.15 y 130.50  #2e75b6 .. #ffffff
+
+=== sheet-cf-stored-vs-drawn.pdf
+    p1 fill   #cce5ff x   148.20-  195.42 y    70.80-   85.72
+    p1 fill   #ffc7ce x    53.77-  101.03 y    85.70-  100.60
+    p1 fill   #ffc7ce x   148.20-  195.42 y    85.70-  100.60
+    p1 fill   #ffc7ce x    53.77-  101.03 y   100.60-  115.48
+    p1 fill   #cce5ff x   148.20-  195.42 y   100.60-  115.48
+    p1 fill   #ffc7ce x    53.77-  101.03 y   130.30-  160.13
+    p1 span   #000000 x    54.82 y    71.25 'alpha'
+    p1 span   #9c0006 x    54.82 y    86.14 'alpha'
+    p1 span   #9c0006 x   149.22 y    86.14 '   '
+    p1 span   #9c0006 x    54.82 y   101.02 'alpha'
+    p1 span   #0000ff x   149.22 y   101.02 'zulu'
+    p1 span   #000000 x    54.82 y   115.90 'bravo'
+    p1 span   #9c0006 x    54.82 y   130.78 'bravo'
+    p1 span   #9c0006 x    54.82 y   145.66 'bravo'
+

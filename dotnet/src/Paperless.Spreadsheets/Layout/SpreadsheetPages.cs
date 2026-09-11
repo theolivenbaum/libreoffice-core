@@ -398,6 +398,11 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
             List<PlacedRow> rows = Rows(origin.Y, out List<RowBand> rowBands);
 
             _decoration.DrawBackgrounds(columns, rows, sink);
+
+            // Between the fills and the borders, which is where `drawCells` puts them: a bar is
+            // painted inside the same `DrawBackground` pass as the cell's own colour and over it
+            // (`sc/source/ui/view/output.cxx`:1000-1035), long before any border or text.
+            _decoration.DrawDataBars(columns, rows, sink);
             _decoration.DrawBorders(columns, rows, sink);
 
             foreach (PlacedRow row in rows)
@@ -921,6 +926,13 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         IDrawingSink sink,
         ColumnBand band)
     {
+        // A `dataBar` stating `showValue="0"` takes the cell's own value off the page rather than
+        // hiding it behind the bar, and it does so at drawing time: `ScOutputData::DrawStrings`
+        // clears `bDoCell` after the row's height is already settled
+        // (`sc/source/ui/view/output2.cxx`:1691-1697), so the layout keeps the cell and only the
+        // paint drops it.
+        if (sheet.Formatting.HidesValue(row.Row, column.Column)) return;
+
         SheetTextLayout.Draw(sink, ContextFor(band), new SheetCellText(
             text,
             cell.Value,

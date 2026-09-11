@@ -203,6 +203,7 @@ public sealed class SheetFormatting
     private readonly Dictionary<int, int> _rows = [];
     private readonly List<(int First, int Last, int Format)> _columns = [];
     private readonly Dictionary<(int Row, int Column), Colour> _conditional = [];
+    private readonly Dictionary<(int Row, int Column), SheetDataBar> _bars = [];
     private int _default;
     private bool _hasDefaults;
 
@@ -215,7 +216,8 @@ public sealed class SheetFormatting
     /// dictionary lookup per cell per page.
     /// </remarks>
     public bool IsEmpty => _palette.Count == 1 && _cells.Count == 0 && _blocks.IsEmpty
-                           && _rows.Count == 0 && _columns.Count == 0 && _conditional.Count == 0;
+                           && _rows.Count == 0 && _columns.Count == 0 && _conditional.Count == 0
+                           && _bars.Count == 0;
 
     /// <summary>Interns a format and returns the handle the setters take.</summary>
     /// <param name="format">The format to intern.</param>
@@ -342,6 +344,46 @@ public sealed class SheetFormatting
         if (row < 0 || column < 0) return;
         _conditional[(row, column)] = colour;
     }
+
+    /// <summary>Sets the data bar a <c>dataBar</c> rule draws over one cell.</summary>
+    /// <remarks>
+    /// A third layer beside the stated formats and the conditional fills, for the reason
+    /// <see cref="SheetDataBar"/> gives: a bar covers part of a cell and is drawn over its
+    /// background rather than instead of it, so it can be neither an interned format nor a
+    /// conditional fill. It is kept out of <see cref="Cells"/>, <see cref="Rows"/> and
+    /// <see cref="ColumnRuns"/> for the same reason a conditional fill is — a rule must not
+    /// extend how far the sheet prints.
+    /// </remarks>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    /// <param name="bar">The bar the rule resolved to for this cell.</param>
+    public void SetConditionalBar(int row, int column, SheetDataBar bar)
+    {
+        if (row < 0 || column < 0) return;
+        _bars[(row, column)] = bar;
+    }
+
+    /// <summary>The data bar drawn over one cell, or null when no rule reaches it.</summary>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    public SheetDataBar? BarAt(int row, int column)
+        => _bars.Count > 0 && _bars.TryGetValue((row, column), out SheetDataBar bar) ? bar : null;
+
+    /// <summary>
+    /// Whether a rule takes one cell's own value off the page entirely.
+    /// </summary>
+    /// <remarks>
+    /// <c>showValue="0"</c>. The reference does not hide the number behind the bar, it does not
+    /// draw it: <c>ScOutputData::DrawStrings</c> clears <c>bDoCell</c> before laying anything out
+    /// (<c>sc/source/ui/view/output2.cxx</c>:1691-1697), and 26.2.4.2's own PDF of
+    /// <c>tests/corpus/features/sheet-cf-data-bar-only.xlsx</c> holds no text-showing operator at
+    /// all. The row's height is unaffected, which is why this is asked at drawing time rather
+    /// than folded into the cell's text.
+    /// </remarks>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    public bool HidesValue(int row, int column)
+        => BarAt(row, column) is { ShowValue: false };
 
     /// <summary>Sets the format everything with no other answer takes.</summary>
     /// <param name="format">A handle from <see cref="Intern"/>.</param>

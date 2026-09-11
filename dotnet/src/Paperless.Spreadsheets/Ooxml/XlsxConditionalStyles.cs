@@ -869,9 +869,19 @@ internal static class XlsxConditionalStyles
 
     /// <summary>A sheet's values, by position, for the rules to be asked against.</summary>
     /// <remarks>
+    /// <para>
     /// A formula cell's cached <c>v</c> is what is read, on the same terms as every other reader
     /// here: the reference recalculates, so a rule testing a volatile formula is the divergence
     /// this project already records rather than one this introduces.
+    /// </para>
+    /// <para>
+    /// <strong>A string cell holds the text Calc stores, not the text it draws.</strong>
+    /// <c>RichStringPortion::setText</c> decodes the <c>_xHHHH_</c> escapes and stops
+    /// (<c>sc/source/filter/oox/richstring.cxx</c>:60-63), so a control character the drawing
+    /// layer elides is still in the string every condition here compares — see
+    /// <see cref="XlsxCellText.Stored"/>. The <c>str</c> arm is the one exception, and only
+    /// because it was never decoded either way and no corpus cell reaches it.
+    /// </para>
     /// </remarks>
     private sealed class Sheet
     {
@@ -962,14 +972,15 @@ internal static class XlsxConditionalStyles
                     return Xlsx.Child(cell, "v")?.Value is { } key
                            && int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture,
                                            out int index)
-                        ? Value.OfText(shared[index] ?? string.Empty)
+                        ? Value.OfText(shared.StoredAt(index) ?? string.Empty)
                         : null;
 
                 case "str":
                     return Xlsx.Child(cell, "v")?.Value is { } literal ? Value.OfText(literal) : null;
 
                 case "inlineStr":
-                    return Value.OfText(XlsxSharedStrings.ReadRichString(Xlsx.Child(cell, "is")));
+                    XlsxSharedStrings.ReadRichString(Xlsx.Child(cell, "is"), out string inline);
+                    return Value.OfText(inline);
 
                 case "e":
                     return null;
