@@ -322,6 +322,80 @@ public sealed class RtfStyleFormattingTests
     }
 
     /// <summary>
+    /// A heading-parented style takes the document's own <c>Normal</c> in every property
+    /// <em>Heading</em> does not state — bold, italic and alignment among them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>COLL_HEADLINE_BASE</c>'s own pool parent is <c>COLL_STANDARD</c>
+    /// (<c>sw/source/core/doc/poolfmt.cxx</c>:279-289), so <em>Heading</em> is an intermediate and
+    /// not the end of the walk. Rounds 87 and 95 both folded it in as a constant and neither
+    /// measured it, which is why the structural citation is not what this test rests on: the
+    /// intermediate states four things and each of them shadows <c>Normal</c>, so what survives had
+    /// to be measured property by property.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 on 75 probes — twelve heading-parented names × five arms, plus three
+    /// controls (<c>probes/rtf-heading-r98/genheading.py</c>, read out of
+    /// <c>--convert-to fodt</c>). All twelve resolve as <c>Heading_20_N&gt;Heading&gt;Standard</c>
+    /// and take <c>bold@Standard</c>, <c>italic@Standard</c>, <c>#ff0000@Standard</c>,
+    /// <c>solid@Standard</c> underline and strike, <c>uppercase@Standard</c> and
+    /// <c>center@Standard</c> from the document's own <c>Normal</c>.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("heading 1")]
+    [InlineData("heading 2")]
+    [InlineData("heading 5")]
+    [InlineData("heading 9")]
+    [InlineData("Heading 1")]
+    [InlineData("Title")]
+    [InlineData("Subtitle")]
+    public void AHeadingParentedStyleTakesTheDocumentsOwnNormal(string name)
+    {
+        string styles = @"{\s0\snext0\f0\fs20\b\i\qc Normal;}"
+            + @"{\s7\sbasedon9\snext0 " + name + ";}"
+            + @"{\s9\sbasedon0\snext9\fs18 Notes;}";
+
+        First(@"\pard\plain\s7 MARKER\par", styles).Weight.ShouldBe(700);
+        Italic(@"\pard\plain\s7 HEAD\par", styles).ShouldBeTrue();
+        Formats(@"\pard\plain\s7 HEAD\par", styles)[0].Alignment.ShouldBe(TextAlignment.Centre);
+    }
+
+    /// <summary>
+    /// And it takes none of the four <em>Heading</em> does state, however loudly <c>Normal</c>
+    /// states them.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the same rule, and the half that keeps the walk from being a regression:
+    /// the reference's resolved <em>Heading</em> is <c>fo:font-size="14pt"</c>,
+    /// <c>fo:margin-top="0.1665in"</c>, <c>fo:margin-bottom="0.0835in"</c> and
+    /// <c>fo:keep-with-next="always"</c> over <c>style:parent-style-name="Standard"</c>, so a
+    /// <c>Normal</c> of <c>\fs36\sb400</c> changes none of them. <c>\fs36</c> rather than
+    /// <c>\fs28</c> because <c>PT_14</c> <em>is</em> <c>\fs28</c> and a probe that cannot tell the
+    /// two apart measures nothing. <c>probes/rtf-heading-r98/</c>, the <c>size</c> and <c>paras</c>
+    /// arms.
+    /// </remarks>
+    [Theory]
+    [InlineData("heading 1")]
+    [InlineData("heading 4")]
+    [InlineData("Title")]
+    [InlineData("Subtitle")]
+    public void TheHeadingPoolStillShadowsSizeSpacingAndKeep(string name)
+    {
+        string styles = @"{\s0\snext0\f0\fs36\sb400 Normal;}"
+            + @"{\s7\sbasedon9\snext0 " + name + ";}"
+            + @"{\s9\sbasedon0\snext9\fs18\b Notes;}";
+
+        First(@"\pard\plain\s7 MARKER\par", styles).Size.ShouldBe(Length.FromPoints(14));
+
+        ParagraphFormat format = Formats(@"\pard\plain\s7 HEAD\par", styles)[0];
+        format.SpaceBefore.ShouldBe(Length.FromPoints(12));
+        format.SpaceAfter.ShouldBe(Length.FromPoints(6));
+        format.KeepWithNext.ShouldBeTrue();
+    }
+
+    /// <summary>
     /// <c>Body Text</c> and <c>caption</c> take the document's own <c>Normal</c>, not a constant.
     /// </summary>
     /// <remarks>

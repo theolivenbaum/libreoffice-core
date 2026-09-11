@@ -422,14 +422,31 @@ public sealed class RtfStyles
     /// <para>
     /// Every heading maps to a pool style whose parent is <em>Heading</em>, and
     /// <c>SwPoolFormatId::COLL_HEADLINE_BASE</c>
-    /// (<c>sw/source/core/doc/DocumentStylePoolManager.cxx</c>:768-819) is where the four values
+    /// (<c>sw/source/core/doc/DocumentStylePoolManager.cxx</c>:769-820) is where the four values
     /// below come from: <c>SvxFontHeightItem aFntSize(PT_14, …)</c> at <c>:809</c>,
     /// <c>SvxULSpaceItem aUL(PT_12, PT_6, …)</c> at <c>:810</c> and
-    /// <c>SvxFormatKeepItem(true, RES_KEEP)</c> at <c>:814</c>. The per-level percentages in
-    /// <c>aHeadlineSizes</c> (<c>:107-115</c>) do <em>not</em> arrive with them: the import resets
+    /// <c>SvxFormatKeepItem(true, RES_KEEP)</c> at <c>:813</c>. The per-level percentages in
+    /// <c>aHeadlineSizes</c> (<c>:107-114</c>) do <em>not</em> arrive with them: the import resets
     /// the level style's own properties, so <c>heading 1</c> through <c>heading 9</c> all answer
     /// 14 pt. Measured on the reference, nine levels and four properties —
     /// <c>probes/rtf-holdover-r87/</c>.
+    /// </para>
+    /// <para>
+    /// <b>And <em>Heading</em> is an intermediate rather than the end of the walk.</b>
+    /// <c>COLL_HEADLINE_BASE</c>'s own pool parent is <c>COLL_STANDARD</c>
+    /// (<c>sw/source/core/doc/poolfmt.cxx</c>:279-289, the <c>COLL_DOC_BITS</c> arm, where
+    /// <c>COLL_HEADLINE1</c>…<c>COLL_HEADLINE10</c>, <c>COLL_DOC_TITLE</c> and
+    /// <c>COLL_DOC_SUBTITLE</c> take the <c>default:</c> branch to <c>COLL_HEADLINE_BASE</c> and
+    /// <c>COLL_HEADLINE_BASE</c> itself takes the one above it to <c>COLL_STANDARD</c>), so a
+    /// document's own <c>Normal</c> reaches a heading in every property the intermediate leaves
+    /// unstated. Rounds 87 and 95 both folded <see cref="RtfPoolParent.Heading"/> in as a constant
+    /// and neither measured it; <c>probes/rtf-heading-r98/</c> does, 75 probes over twelve names
+    /// and three controls, and the reference inherits <b>bold, italic, underline, strike,
+    /// capitals, colour and alignment</b> from <c>Normal</c> at all twelve while shadowing size,
+    /// space above, space below and keep with the intermediate's own. It is <em>not</em> the
+    /// structural claim on its own that settles this: the intermediate states four things and
+    /// every one of them shadows <c>Normal</c>, so which properties survive had to be measured
+    /// property by property.
     /// </para>
     /// </remarks>
     /// <returns>Which pool style the name inherits from, or <see cref="RtfPoolParent.None"/>.</returns>
@@ -519,7 +536,7 @@ public sealed class RtfStyles
     /// <param name="id">Its own <c>\s</c> id, so that <c>Normal</c> cannot inherit from itself.</param>
     private RtfStyleFormatting PoolInheritance(string name, int id) => PoolParentOf(name) switch
     {
-        RtfPoolParent.Heading => HeadingPool,
+        RtfPoolParent.Heading => HeadingPool.Over(NormalInheritance(id)),
         RtfPoolParent.Standard => NormalInheritance(id),
         RtfPoolParent.Caption => _captionStyleId is { } caption && caption != id
             ? FormattingOf(caption)
@@ -541,6 +558,19 @@ public sealed class RtfStyles
     private const int DefaultStyleId = 0;
 
     /// <summary>Writer's <em>Heading</em> pool style, as an RTF style's inherited half.</summary>
+    /// <remarks>
+    /// <b>These four values and nothing else, because they are what the intermediate states and
+    /// everything it leaves unstated comes from the document's own <c>Normal</c> instead.</b> The
+    /// reference's own resolved <em>Heading</em> — read out of a <c>--convert-to fodt</c> of
+    /// <c>probes/rtf-heading-r98/</c>'s probes, so it is 26.2.4.2's answer and not this tree's
+    /// reading of a different version's source — is exactly
+    /// <c>style:parent-style-name="Standard"</c> with a font, <c>fo:font-size="14pt"</c>,
+    /// <c>fo:margin-top="0.1665in"</c>, <c>fo:margin-bottom="0.0835in"</c> and
+    /// <c>fo:keep-with-next="always"</c>. The face is the one member deliberately absent: no
+    /// style's face reaches a run at all (<see cref="ContributionOf"/>), so modelling the
+    /// intermediate's <c>LATIN_HEADING</c> font would change nothing and modelling it as an RTF
+    /// <c>\f</c> index is not possible.
+    /// </remarks>
     private static readonly RtfStyleFormatting HeadingPool = new()
     {
         FontSizeHalfPoints = 28,
@@ -598,16 +628,19 @@ public sealed class RtfStyles
             current = style.BasedOn;
 
             // The style at the top of the chain named no parent this sheet could resolve, so
-            // Writer's own style of that name keeps the pool parent it came with. `Heading` is a
-            // constant; `Standard` is the *document's* own `Normal`, which is style 0 -- and the
-            // walk continues into it rather than folding a constant in, which is what makes
-            // `\fs20 Normal` and `\fs28 Normal` give different answers. `Caption` is a constant
-            // only until the document declares a `caption` of its own, at which point the import
-            // resets the pool style and the walk continues into that entry instead.
+            // Writer's own style of that name keeps the pool parent it came with. None of the
+            // three ends the walk: `Standard` *is* the document's own `Normal`, which is style 0,
+            // and that is what makes `\fs20 Normal` and `\fs28 Normal` give different answers;
+            // `Heading` and `Caption` are an intermediate pool style laid over that same `Normal`,
+            // because `COLL_HEADLINE_BASE` and `COLL_LABEL` both answer `COLL_STANDARD` for a pool
+            // parent. `Caption` stops being the pool style's own values -- and becomes the
+            // document's `caption` entry -- as soon as the document declares one, because the
+            // import resets the pool style it matched.
             switch (style.BasedOn is null ? PoolParentOf(style.Name) : RtfPoolParent.None)
             {
                 case RtfPoolParent.Heading:
                     chain.Add(HeadingPool);
+                    current = DefaultStyleId;
                     break;
                 case RtfPoolParent.Standard:
                     current = DefaultStyleId;
