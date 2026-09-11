@@ -1188,6 +1188,47 @@ is the **importer's** rule — the BIFF and SpreadsheetML filters have no such l
 so it belongs in `OdsPrintSetup` and not in `SheetOptimalRowHeights`.
 `probes/ods-resid-r80/results.md` §2.
 
+**Which of Calc's two row-height answers a row gets is decided by two things that are not
+properties of its text, and both were unread.** `ScColumn::GetOptimalHeight` takes the cheap
+arithmetic — `lcl_GetAttribHeight`, `trunc(sizeTwips × 1.18) + margins − 23` — only while
+`bStdOnly` holds, and clears it for a cell whose **pattern carries a conditional format**,
+whatever the condition says and whether or not it fires (`column2.cxx`:937-941, *"conditional
+formatting: loop all cells"*). It is the *pattern* that is tested, so a rule declared over a whole
+column makes every row of that column measured. Separately a **hyperlink** cell is an
+`EditTextObject` holding one field, the same object a rich string makes. Both come out at one
+EditEngine line of the cell's own face — **298 twips for Calibri 11 against the arithmetic's
+276** — and `StandingEditLine` had computed exactly that since round 56 without ever being asked.
+
+**The instrument is the reference's own `--convert-to fods`, and on a scaled sheet nothing else
+will do.** It prints the height Calc computed for every row as `style:row-height`;
+`Special-Procedures_2025-07-10.ods` prints at `style:scale-to="39%"`, so its rows reach the page at
+5.373 pt against 5.804 and neither number is a row height. One-attribute variants then settle it:
+deleting that document's `calcext:conditional-formats` element moves rows 6–200 from 298 to 276,
+and on `hdss-bulletin-index-2019-2022.ods` — a table of hyperlinks — rewriting every `<text:a>` to
+its own text does the same, while its header row, the one row holding no link, is 276 either way.
+A twelve-size sweep confirms the arithmetic branch is exact at every size (6–10 pt on the 256-twip
+floor, 11 → 276, 12 → 300, 24 → 583), so the 298 is the other branch and not a different sum.
+Reach **95 of the 307 converted `.ods` state a conditional format and 74 hold a `text:a`**; the
+`.ods` gate goes **274 → 278** and the same 307 documents as `.xlsx`/`.xls`/`.xlsm` stay at 294.
+The spelling read is `calcext:conditional-format`, which is what LibreOffice writes — the ODF 1.2
+`style:map` spelling is left, and exactly **one** of the 307 states it without the other.
+`probes/ods-notes-r92/results.md` §2.
+
+**And the ODF half of "Comments: at end of sheet" needed three inputs, not two.** The flag is a
+token inside a list — `style:print="… annotations …"`, mapped to `PROP_PrintAnnotations` by
+`XMLPMPropHdl_Print(XML_ANNOTATIONS)` (`xmloff/source/style/PageMasterStyleMap.cxx`:80,
+`PageMasterPropHdlFactory.cxx`:85) and read into `aTableParam.bNotes`
+(`sc/source/ui/view/printfun.cxx`:944). The notes are fastened to their cells by **containment**,
+as `office:annotation` children of the `table:table-cell`, so the address comes from a walk of the
+table and cannot come from the content tree, which hoists an annotation into a section of its own.
+And **the author line is inside the text rather than in `dc:creator`**: every annotation in both
+witnesses says `<dc:creator>Unknown Author</dc:creator>` and 26.2.4.2 prints none of them, while
+the page opens each note with the name the note's own first paragraph carries. Reach 2 of the 307
+and both were failing; both are page-exact after it. *`Paperless.Spreadsheets/TODO.md`'s "the
+flat-ODS export drops cell annotations entirely" is refuted — 12 of 12 and 8 of 8 survive
+`--convert-to fods`, and the wrong figure is `grep -c` on a one-line `content.xml`. Count
+occurrences, not lines.*
+
 **And a Calc cell the importer made several paragraphs of is measured by the EditEngine, which
 answers the widest *paragraph* and a line per paragraph — not the whole string and not one line.**
 `ScColumn::GetNeededSize` takes the edit branch for `CELLTYPE_EDIT` (`column2.cxx`:297-300),

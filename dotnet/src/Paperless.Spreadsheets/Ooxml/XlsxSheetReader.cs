@@ -165,6 +165,45 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     }
 
     /// <summary>
+    /// The blocks a worksheet part's <c>conditionalFormatting</c> elements cover.
+    /// </summary>
+    /// <remarks>
+    /// Every one of them, whatever the rule inside says, because what the row height turns on is
+    /// the presence of <c>ATTR_CONDITIONAL</c> on the cell's pattern rather than any condition
+    /// being true — see <see cref="SheetLayout.ConditionalRanges"/>. An <c>x14</c> rule in an
+    /// <c>extLst</c> is deliberately not read: it states its range as an
+    /// <c>xm:sqref</c> in a namespace this reader does not carry, and the plain element is what
+    /// every workbook the corpus holds writes.
+    /// </remarks>
+    /// <param name="worksheet">The worksheet part's root element, or null when it did not load.</param>
+    public static IReadOnlyList<SheetRange> ReadConditionalRanges(XElement? worksheet)
+    {
+        if (worksheet is null) return [];
+
+        List<SheetRange> ranges = [];
+
+        foreach (XElement format in Xlsx.Children(worksheet, "conditionalFormatting"))
+        {
+            string? sqref = Xlsx.Attribute(format, "sqref");
+            if (string.IsNullOrEmpty(sqref)) continue;
+
+            foreach (string part in sqref.Split(
+                         ' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!Xlsx.TryParseRange(part, out int firstColumn, out int firstRow,
+                                        out int lastColumn, out int lastRow))
+                    continue;
+
+                if (lastColumn < firstColumn || lastRow < firstRow) continue;
+
+                ranges.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
+            }
+        }
+
+        return ranges;
+    }
+
+    /// <summary>
     /// Reads the sheet's cell comments, each as its own section.
     /// </summary>
     /// <remarks>
