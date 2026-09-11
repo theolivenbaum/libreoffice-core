@@ -1910,3 +1910,16 @@ dotnet/probes/chart-smooth-r102/confine-before.tsv	2026-09-11	current	26.2.4.2	p
 dotnet/probes/chart-smooth-r102/confine-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
 dotnet/probes/chart-smooth-r102/confine-ooxml.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
 dotnet/probes/chart-smooth-r102/confine-odf.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-smooth-r102/results.md
+dotnet/probes/iconset-r103/census-iconset.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/fixture-reference/fixture-glyphs.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/fixture-reference/painted.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/icon-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/icon-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/iconset-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/make-fixtures.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/reference-glyphs.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/reference-glyphs.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/results.md	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/score-movers.sh	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/sweep-after-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md
+dotnet/probes/iconset-r103/sweep-base-hashes.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/iconset-r103/results.md

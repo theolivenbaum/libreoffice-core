@@ -29,6 +29,13 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// </remarks>
 internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostics)
 {
+    /// <summary>The 2009 conditional-formatting extension namespace.</summary>
+    private const string X14Namespace
+        = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+
+    /// <summary>The namespace an extension states its ranges and formulas in.</summary>
+    private const string XmNamespace = "http://schemas.microsoft.com/office/excel/2006/main";
+
     /// <summary>
     /// The widest row materialised. Matches SpreadsheetML's own column limit, so no valid
     /// sheet is truncated by it.
@@ -170,10 +177,26 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     /// <remarks>
     /// Every one of them, whatever the rule inside says, because what the row height turns on is
     /// the presence of <c>ATTR_CONDITIONAL</c> on the cell's pattern rather than any condition
-    /// being true — see <see cref="SheetLayout.ConditionalRanges"/>. An <c>x14</c> rule in an
-    /// <c>extLst</c> is deliberately not read: it states its range as an
-    /// <c>xm:sqref</c> in a namespace this reader does not carry, and the plain element is what
-    /// every workbook the corpus holds writes.
+    /// being true — see <see cref="SheetLayout.ConditionalRanges"/>.
+    /// <para>
+    /// <strong>And the <c>x14</c> extension list is one of them.</strong> This used to skip it, on
+    /// the stated grounds that "the plain element is what every workbook the corpus holds writes"
+    /// — which is false: <strong>six corpus documents state an <c>x14:cfRule</c> over a range no
+    /// main-namespace <c>conditionalFormatting</c> covers</strong>, carrying it as an
+    /// <c>xm:sqref</c> beside the rule, and <c>ExtLstLocalContext</c> builds a whole
+    /// <c>ScConditionalFormat</c> for such an entry
+    /// (<c>sc/source/filter/oox/extlstcontext.cxx</c>:165-194). Its cells carry
+    /// <c>ATTR_CONDITIONAL</c> like any other and are therefore measured through
+    /// <c>GetNeededSize</c> rather than by <c>lcl_GetAttribHeight</c>'s arithmetic. The difference
+    /// is 22 twips a row at 11 pt, and an authored fixture shows it directly: 26.2.4.2's baseline
+    /// pitch on <c>tests/corpus/features/sheet-cf-icon-set-formula.xlsx</c>, whose only rule is an
+    /// <c>x14</c>-only one, is <strong>14.88 pt where this reader gave 13.78</strong>.
+    /// </para>
+    /// <para>
+    /// An extension a main-namespace rule <em>does</em> claim needs no entry of its own, since the
+    /// rule it extends already covers the range; adding one anyway costs nothing, so the two are
+    /// not told apart here.
+    /// </para>
     /// </remarks>
     /// <param name="worksheet">The worksheet part's root element, or null when it did not load.</param>
     public static IReadOnlyList<SheetRange> ReadConditionalRanges(XElement? worksheet)
@@ -184,23 +207,34 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
 
         foreach (XElement format in Xlsx.Children(worksheet, "conditionalFormatting"))
         {
-            string? sqref = Xlsx.Attribute(format, "sqref");
-            if (string.IsNullOrEmpty(sqref)) continue;
+            Add(ranges, Xlsx.Attribute(format, "sqref"));
+        }
 
-            foreach (string part in sqref.Split(
-                         ' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                if (!Xlsx.TryParseRange(part, out int firstColumn, out int firstRow,
-                                        out int lastColumn, out int lastRow))
-                    continue;
-
-                if (lastColumn < firstColumn || lastRow < firstRow) continue;
-
-                ranges.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
-            }
+        foreach (XElement format in worksheet.Descendants(
+                     XName.Get("conditionalFormatting", X14Namespace)))
+        {
+            Add(ranges, format.Element(XName.Get("sqref", XmNamespace))?.Value);
         }
 
         return ranges;
+    }
+
+    /// <summary>Adds every range one <c>sqref</c> names, however the element spelled it.</summary>
+    private static void Add(List<SheetRange> ranges, string? sqref)
+    {
+        if (string.IsNullOrEmpty(sqref)) return;
+
+        foreach (string part in sqref.Split(
+                     ' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!Xlsx.TryParseRange(part, out int firstColumn, out int firstRow,
+                                    out int lastColumn, out int lastRow))
+                continue;
+
+            if (lastColumn < firstColumn || lastRow < firstRow) continue;
+
+            ranges.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
+        }
     }
 
     /// <summary>
