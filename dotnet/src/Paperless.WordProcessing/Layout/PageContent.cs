@@ -1096,6 +1096,16 @@ public readonly record struct PageRun(
 /// Zero on every line of every paragraph but the first one a fly displaced — see
 /// <see cref="ParagraphTop"/> for why it has to come back off again.
 /// </param>
+/// <param name="BodyLeft">
+/// The left edge of the text area this line was laid out in, when that is not the page's own — see
+/// <see cref="BodyWidth"/>, which is what says whether either is stated.
+/// </param>
+/// <param name="BodyWidth">
+/// The width of that text area, or zero when the line takes the page's. Zero rather than a nullable
+/// pair because a text area of no width is not a thing a section can state, so the degenerate value is
+/// free to mean <em>unstated</em> — and because every line of every document that has no text section in
+/// it then leaves the two at their default.
+/// </param>
 /// <remarks>
 /// <see cref="UpperSpace"/> is carried because a frame anchored to the paragraph is positioned from a
 /// point above the line: Writer's <c>SwAnchoredObjectPosition::GetTopForObjPos</c>
@@ -1112,6 +1122,15 @@ public readonly record struct PageRun(
 /// again below — and the page as a whole then has no single answer. Reading the count off the page put
 /// the *last* section's answer on every line of it, which drew a full-width paragraph into half a column.
 /// </para>
+/// <para>
+/// <see cref="BodyWidth"/> is carried for the other half of the same argument. A page carries one text
+/// area and it is whichever section's was current when the page was emitted, but an ODF
+/// <c>text:section</c> is a frame inside the body and takes its own indents
+/// (<c>SwSectionFrame::Init</c>, <c>sw/source/core/layout/sectfrm.cxx</c>:129-166), so a page can hold a
+/// stretch measured from one left edge above a stretch measured from another. Line breaking already used
+/// the indented measure; the drawing used the page's, which put an indented two-column section's first
+/// column at 72 pt where 26.2.4.2 draws it at 108.
+/// </para>
 /// </remarks>
 public readonly record struct PlacedLine(
     int ParagraphIndex,
@@ -1123,8 +1142,16 @@ public readonly record struct PlacedLine(
     int Columns = 1,
     Length ColumnGap = default,
     ColumnRuler? ColumnRuler = null,
-    Length FlyDisplacement = default)
+    Length FlyDisplacement = default,
+    Length BodyLeft = default,
+    Length BodyWidth = default)
 {
+    /// <summary>True when the line was laid out in a text area of its own rather than the page's.</summary>
+    /// <remarks>
+    /// <see cref="BodyWidth"/> is the discriminator and <see cref="BodyLeft"/> is meaningless without it.
+    /// </remarks>
+    public bool HasOwnBody => BodyWidth > Length.Zero;
+
     /// <summary>Where a frame anchored to this line's paragraph measures its offset from.</summary>
     /// <remarks>
     /// The paragraph's top for object positioning — see <see cref="UpperSpace"/>. Equal to
@@ -1335,7 +1362,7 @@ public sealed record LaidOutPage
     /// </remarks>
     /// <param name="column">The column, counted from zero at the leading edge.</param>
     public DocRect ColumnArea(int column)
-        => Area(ColumnCount, ColumnGap, ColumnRuler, column);
+        => Area(BodyArea, ColumnCount, ColumnGap, ColumnRuler, column);
 
     /// <summary>
     /// The rectangle one line's own coordinates are relative to.
@@ -1355,21 +1382,40 @@ public sealed record LaidOutPage
     /// <param name="line">The line whose rectangle is wanted.</param>
     public DocRect ColumnArea(PlacedLine line)
     {
-        if (line.Columns <= 1) return BodyArea;
+        DocRect body = BodyAreaOf(line);
 
-        return Area(line.Columns, line.ColumnGap, line.ColumnRuler, line.Column);
+        if (line.Columns <= 1) return body;
+
+        return Area(body, line.Columns, line.ColumnGap, line.ColumnRuler, line.Column);
     }
 
+    /// <summary>The text area one line was laid out in, which is the page's unless it states its own.</summary>
+    /// <remarks>
+    /// Horizontal only: a text section is inset from the body's sides and begins wherever the flow had
+    /// reached, so its top and its height are the page's — <see cref="PlacedLine.Top"/> is measured from
+    /// the page's body area and stays so. See <see cref="PlacedLine.BodyWidth"/>.
+    /// </remarks>
+    /// <param name="line">The line whose text area is wanted.</param>
+    public DocRect BodyAreaOf(PlacedLine line)
+        => line.HasOwnBody
+            ? new DocRect(line.BodyLeft, BodyArea.Y, line.BodyWidth, BodyArea.Height)
+            : BodyArea;
+
     /// <summary>
-    /// One column's rectangle inside <see cref="BodyArea"/>, from either description of the columns.
+    /// One column's rectangle inside a text area, from either description of the columns.
     /// </summary>
     /// <remarks>
-    /// The page and a line each state their own count, gap and ruler — a page can hold sections that
-    /// disagree about all three — and the arithmetic below is the same for both, so it lives here rather
-    /// than twice. A ruler whose count does not match is ignored, which is the lenient reading a section
-    /// that states widths for columns it does not have needs.
+    /// The page and a line each state their own count, gap and ruler, and a line its own text area — a
+    /// page can hold sections that disagree about all four — and the arithmetic below is the same for
+    /// both, so it lives here rather than twice. A ruler whose count does not match is ignored, which is
+    /// the lenient reading a section that states widths for columns it does not have needs.
     /// </remarks>
-    private DocRect Area(int count, Length gap, ColumnRuler? ruler, int column)
+    /// <param name="body">The text area being divided: the page's, or the line's own.</param>
+    /// <param name="count">How many columns it is divided into.</param>
+    /// <param name="gap">The gap between two of them.</param>
+    /// <param name="ruler">Their stated widths, or null when they are even.</param>
+    /// <param name="column">The column wanted, counted from zero at the leading edge.</param>
+    private DocRect Area(DocRect body, int count, Length gap, ColumnRuler? ruler, int column)
     {
         int columns = Math.Max(1, count);
         int at = Math.Clamp(column, 0, columns - 1);
@@ -1381,14 +1427,14 @@ public sealed record LaidOutPage
         if (ruler is { } stated && stated.Count == columns)
         {
             return new DocRect(
-                BodyArea.X + stated.OffsetOf(at), BodyArea.Y, stated.WidthAt(at), BodyArea.Height);
+                body.X + stated.OffsetOf(at), body.Y, stated.WidthAt(at), body.Height);
         }
 
         Length gaps = gap * (columns - 1);
-        Length width = BodyArea.Width - gaps;
-        width = width > Length.Zero ? width / columns : BodyArea.Width;
+        Length width = body.Width - gaps;
+        width = width > Length.Zero ? width / columns : body.Width;
 
-        return new DocRect(BodyArea.X + ((width + gap) * at), BodyArea.Y, width, BodyArea.Height);
+        return new DocRect(body.X + ((width + gap) * at), body.Y, width, body.Height);
     }
 
     /// <summary>The lines on the page, in order.</summary>

@@ -1459,3 +1459,21 @@ dotnet/probes/title-font-r92/run-census-ours-page1.txt	2026-09-10	current	26.2.4
 dotnet/probes/title-font-r92/run-census-ref-page1.txt	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
 dotnet/probes/title-font-r92/run-census.py	2026-09-10	current	26.2.4.2	present	current	
 dotnet/probes/title-font-r92/variant-table.tsv	2026-09-10	current	26.2.4.2	present	current	dotnet/probes/title-font-r92/results.md
+dotnet/probes/words-seat-r94/anchor-census.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/anchor-census.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/anchor-kind.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/anchor-kind.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/colscore.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/columnx.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/confine.list	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/confinement.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-colscore.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-movers.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-rows-after.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-rows-before.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-selfmove.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/odt-startx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/plain-margins-crop.png	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/results.md	2026-09-11	current	26.2.4.2	present	current	
+dotnet/probes/words-seat-r94/selfmove.py	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
+dotnet/probes/words-seat-r94/variant-columnx.txt	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/words-seat-r94/results.md
