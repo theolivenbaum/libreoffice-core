@@ -30,6 +30,7 @@ public sealed class SheetCellFormats
     private readonly Dictionary<int, int> _columns;
     private readonly int _sheet;
     private readonly Dictionary<(int Row, int Column), SheetConditionalText> _conditional;
+    private readonly Dictionary<(int Row, int Column), SheetPivotStyle> _pivot;
 
     private SheetCellFormats(
         List<SheetCellFormat> pool,
@@ -39,7 +40,8 @@ public sealed class SheetCellFormats
         Dictionary<int, int> columns,
         int sheet,
         int lastAllocatedColumn,
-        Dictionary<(int, int), SheetConditionalText>? conditional = null)
+        Dictionary<(int, int), SheetConditionalText>? conditional = null,
+        Dictionary<(int, int), SheetPivotStyle>? pivot = null)
     {
         _pool = pool;
         _cells = cells;
@@ -49,6 +51,7 @@ public sealed class SheetCellFormats
         _sheet = sheet;
         LastAllocatedColumn = lastAllocatedColumn;
         _conditional = conditional ?? [];
+        _pivot = pivot ?? [];
     }
 
     /// <summary>A sheet whose every cell is in the default format.</summary>
@@ -81,7 +84,31 @@ public sealed class SheetCellFormats
         return conditional.Count == 0
             ? this
             : new SheetCellFormats(
-                _pool, _cells, _blocks, _rows, _columns, _sheet, LastAllocatedColumn, conditional);
+                _pool, _cells, _blocks, _rows, _columns, _sheet, LastAllocatedColumn, conditional,
+                _pivot);
+    }
+
+    /// <summary>
+    /// The same formats with a pivot table's generated cell styles laid over them.
+    /// </summary>
+    /// <remarks>
+    /// A second overlay rather than a wider <see cref="SheetConditionalText"/>, because the two
+    /// are different layers of the same cell and can both apply: a conditional format is
+    /// evaluated over whatever the cell resolves to, which on a pivot's output is the generated
+    /// style. A new instance for the reason <see cref="WithConditionalText"/> gives — a pivot
+    /// sheet very often states no text formatting at all and is therefore holding the shared
+    /// <see cref="Empty"/>.
+    /// </remarks>
+    /// <param name="pivot">What each cell's generated pivot style changes about its text.</param>
+    public SheetCellFormats WithPivotStyles(Dictionary<(int Row, int Column), SheetPivotStyle> pivot)
+    {
+        ArgumentNullException.ThrowIfNull(pivot);
+
+        return pivot.Count == 0
+            ? this
+            : new SheetCellFormats(
+                _pool, _cells, _blocks, _rows, _columns, _sheet, LastAllocatedColumn, _conditional,
+                pivot);
     }
 
     /// <summary>
@@ -163,6 +190,11 @@ public sealed class SheetCellFormats
     public SheetCellFormat At(int row, int column)
     {
         SheetCellFormat stated = Stated(row, column);
+
+        // The generated style first: a pivot's output is what the cell resolves to before any
+        // rule is evaluated over it, and a conditional format wins over both.
+        if (_pivot.Count > 0 && _pivot.TryGetValue((row, column), out SheetPivotStyle generated))
+            stated = generated.Over(stated);
 
         return _conditional.Count > 0
                && _conditional.TryGetValue((row, column), out SheetConditionalText rule)

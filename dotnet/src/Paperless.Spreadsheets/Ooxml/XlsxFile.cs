@@ -1,3 +1,4 @@
+using System.Xml;
 using System.Xml.Linq;
 using Paperless.Containers;
 using Paperless.Containers.Ooxml;
@@ -236,19 +237,20 @@ public sealed class XlsxFile : IDisposable
     }
 
     /// <summary>
-    /// Loads the <c>pivotTableDefinition</c> roots a sheet relates to, in relationship order.
+    /// Loads the <c>pivotTableDefinition</c> parts a sheet relates to, in relationship order.
     /// </summary>
     /// <remarks>
     /// Like a table part, a pivot table part hangs off the <em>worksheet</em> that shows its
-    /// output. What is needed from it here is only the <c>location</c>; the cache, the fields and
-    /// the items are not read, because the cells Excel already wrote are what gets drawn.
+    /// output. The cache definition behind it is not loaded — only its <c>cacheSource</c> kind is
+    /// looked at, because that is what decides whether Calc builds a data pilot for the pivot at
+    /// all, and a cache's records can be the largest part in the package.
     /// </remarks>
-    public IReadOnlyList<XElement> LoadPivotTables(XlsxSheetEntry sheet)
+    public IReadOnlyList<XlsxPivotTable> LoadPivotTables(XlsxSheetEntry sheet)
     {
         ArgumentNullException.ThrowIfNull(sheet);
         if (sheet.PartName is null) return [];
 
-        List<XElement> pivots = [];
+        List<XlsxPivotTable> pivots = [];
         foreach (OpcXml.Relationship relationship in
                  _package.GetRelationshipsByType(RelationshipBase + "pivotTable", sheet.PartName))
         {
@@ -256,10 +258,66 @@ public sealed class XlsxFile : IDisposable
             IPackagePart? part = _package.GetPart(relationship.Target);
             if (part is null) continue;
 
-            using Stream content = part.Open();
-            if (OoxmlXml.TryLoad(content, out _) is { } root) pivots.Add(root);
+            XElement? root;
+            using (Stream content = part.Open()) root = OoxmlXml.TryLoad(content, out _);
+            if (root is null) continue;
+
+            pivots.Add(new XlsxPivotTable(root, HasWorksheetCache(part.Name)));
         }
         return pivots;
+    }
+
+    /// <summary>
+    /// Whether a pivot table's cache reads a range of this workbook.
+    /// </summary>
+    /// <remarks>
+    /// <c>PivotCache::importPivotCacheDefinition</c> keeps only a worksheet source
+    /// (<c>sc/source/filter/oox/pivotcachebuffer.cxx</c>, in the C++ tree read here): a cache
+    /// over an external connection reaches no <c>ScDPObject</c>, so the reference draws no pivot
+    /// output for it. Measured on the corpus, the three workbooks whose caches are all
+    /// <c>type="external"</c> write <c>0</c> <c>table:data-pilot-table</c> elements between them.
+    /// </remarks>
+    private bool HasWorksheetCache(string partName)
+    {
+        foreach (OpcXml.Relationship relationship in
+                 _package.GetRelationshipsByType(RelationshipBase + "pivotCacheDefinition", partName))
+        {
+            if (relationship.IsExternal) continue;
+            IPackagePart? part = _package.GetPart(relationship.Target);
+            if (part is null) continue;
+
+            if (CacheSourceType(part) == "worksheet") return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The <c>cacheSource/@type</c> of one cache definition, read without loading the part.
+    /// </summary>
+    /// <remarks>
+    /// <c>cacheSource</c> is the definition's first child, and the rest of the part is its
+    /// fields' shared items — on a wide source that is megabytes of strings nothing here reads.
+    /// </remarks>
+    private static string? CacheSourceType(IPackagePart part)
+    {
+        try
+        {
+            using Stream content = part.Open();
+            using XmlReader reader = OoxmlXml.CreateSafeReader(content);
+            while (reader.Read())
+            {
+                if (reader.NodeType != XmlNodeType.Element) continue;
+                if (reader.LocalName == "pivotCacheDefinition") continue;
+                return reader.LocalName == "cacheSource" ? reader.GetAttribute("type") : null;
+            }
+        }
+        catch (XmlException)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     /// <inheritdoc/>
@@ -355,3 +413,11 @@ public sealed class XlsxFile : IDisposable
 /// The worksheet part it resolves to, or null when the relationship does not resolve.
 /// </param>
 public sealed record XlsxSheetEntry(string Name, int Index, bool IsHidden, string? PartName);
+
+/// <summary>One pivot table part, with the one thing outside it that decides its fate.</summary>
+/// <param name="Root">The <c>pivotTableDefinition</c> root.</param>
+/// <param name="HasWorksheetCache">
+/// True when the pivot's cache reads a range of this workbook. A cache over an external
+/// connection reaches no data pilot in Calc, so nothing is generated for such a pivot.
+/// </param>
+public sealed record XlsxPivotTable(XElement Root, bool HasWorksheetCache);
