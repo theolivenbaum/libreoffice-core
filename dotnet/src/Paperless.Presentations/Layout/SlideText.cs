@@ -384,6 +384,33 @@ public sealed record SlideParagraph(
     /// </para>
     /// </remarks>
     public bool LineSpacingStated { get; init; }
+
+    /// <summary>
+    /// Whether a paragraph with <em>no characters</em> still sits at the numbering level its
+    /// <see cref="Marker"/> comes from — which decides whether its line is floored at the
+    /// bullet's box even though no bullet is drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every reader suppresses an empty paragraph's bullet, and <strong>they do not suppress it in
+    /// the same place</strong>. The OOXML importer sets the paragraph's <em>level</em> to −1
+    /// (<c>oox/source/drawingml/textparagraph.cxx:192-196</c>, "empty paragraphs do not have
+    /// bullets in ppt"), and <c>Outliner::GetNumberFormat</c> answers null below zero
+    /// (<c>editeng/source/outliner/outliner.cxx:1289-1300</c>) — so there is no numbering format,
+    /// no bullet area, and nothing to floor the line with. The binary PowerPoint importer sets
+    /// only the <em>state</em>, <c>EE_PARA_BULLETSTATE</c>
+    /// (<c>filter/source/msfilter/svdfppt.cxx:2363-2366</c>, "in PPT empty paragraphs never gets a
+    /// bullet"), and leaves the depth it inserted the paragraph at (<c>:2309</c>) alone; ODF takes
+    /// its level from the list nesting and suppresses nothing at all. On those two the format
+    /// survives and the box with it.
+    /// </para>
+    /// <para>
+    /// So this is true for <c>.ppt</c> and for ODF and false for OOXML, and the difference is
+    /// worth a whole <c>constScaleLevels</c> row on an autofitted body. See
+    /// <c>SlideTextLayout.BulletFloored</c>, which carries the measurement.
+    /// </para>
+    /// </remarks>
+    public bool EmptyKeepsMarkerLevel { get; init; }
 }
 
 /// <summary>

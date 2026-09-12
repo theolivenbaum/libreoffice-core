@@ -85,6 +85,11 @@ internal static class OdfTextBody
                     StartIndent = label.Start,
                     FirstLineIndent = label.Hanging,
                     Marker = label.Marker,
+
+                    // ODF takes the level from the list nesting and suppresses nothing when the
+                    // paragraph is empty, so the numbering format — and the bullet box that
+                    // floors an empty line — survives. See SlideParagraph.EmptyKeepsMarkerLevel.
+                    EmptyKeepsMarkerLevel = true,
                 }
                 : read1);
         }

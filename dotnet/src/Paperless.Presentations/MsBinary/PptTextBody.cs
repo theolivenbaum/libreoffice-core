@@ -289,6 +289,31 @@ internal static class PptTextBody
             // See probes/slides-r54/results.md for the A/B and for the authored known-answer deck.
             LineSpacingStated = true,
 
+            // `rOutliner.Insert(OUString(), nParaIndex, mnDepth)` gives every paragraph its depth
+            // before anything looks at its text (`svdfppt.cxx:2309`), and the empty-paragraph
+            // suppression at `:2363-2366` clears only EE_PARA_BULLETSTATE. So a binary
+            // paragraph's numbering level survives having no characters, and its bullet's box
+            // still floors the line. See SlideParagraph.EmptyKeepsMarkerLevel.
+            //
+            // <strong>A PICTURE bullet is a hole in this, and it is measured rather than
+            // guessed.</strong> `nBuBlip != 0xffff` with a graphic behind it makes the level
+            // SVX_NUM_BITMAP (`svdfppt.cxx:3448-3465`) and `Outliner::ImplGetBulletSize` then
+            // answers `pFmt->GetGraphicSize()` rather than a font's ascent and descent
+            // (`outliner.cxx:1345-1350`), so the box is the picture's. This reader does not read
+            // the picture: it falls back to the level's bullet CHARACTER, and on
+            // `ws_prod-g-doc-Events-2007-september-M.017-(French)-France.ppt` -- the one corpus
+            // deck whose outline masters carry one, `text:list-level-style-image` on
+            // `Default-outline1` and `Default-outline2` in 26.2.4.2's own flat ODP of it -- that
+            // character is a Wingdings 2 slot recoding to a Private Use code point no installed
+            // face holds, drawn at 31 pt beside 20 pt text. Flooring an empty line at that
+            // fiction's box costs pages 8 and 15 of that deck, which the same tree reading the
+            // reference's own ODP of the file gets right. Gating on the paragraph's own
+            // `BulletBlip` does NOT reach it: this deck's blip is inherited from the master's
+            // `aExtParaSheet[instance].aExtParaLevel[level]` (`svdfppt.cxx:3425-3446`), which
+            // nothing here reads -- tried, measured inert on all four pages, and removed rather
+            // than left in as dead code. See probes/slides-size2-r110.
+            EmptyKeepsMarkerLevel = true,
+
             // The master's own value, which PowerPoint writes as 0x240 — one inch — and which the
             // record's default already is. Reading it matters for the deck that states something
             // else, and stating nothing must not fall back to a word processor's half inch.
