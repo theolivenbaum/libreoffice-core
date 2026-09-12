@@ -1117,6 +1117,14 @@ public sealed partial record ChartPlot
     /// it does not, and a chart on a zoomed sheet drew a denser axis than the reference for that
     /// reason alone.
     /// </para>
+    /// <para>
+    /// <strong>No consumer sets it any more, and the mechanism it belongs to is why.</strong>
+    /// <c>SheetChart</c> multiplied the print zoom into a chart's type sizes and recorded it here;
+    /// it now lays the chart out on the chart's own page and scales the finished drawing, so the
+    /// zoom never reaches the composition and this is 1 everywhere. Kept because the quantity is
+    /// real — a caller that does scale a chart's type has to say so — and because
+    /// <see cref="ChartLayout"/>'s interval cap is still the ratio that would notice.
+    /// </para>
     /// </remarks>
     public double TypeScale { get; init; } = 1.0;
 
