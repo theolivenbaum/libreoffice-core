@@ -18,9 +18,11 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// </para>
 /// <para>
 /// The same fallback order the format lookup states: a cell's own <c>s</c>, then its row's, then
-/// its column's, then <c>cellXfs[0]</c>. A row's is only its default when <c>customFormat</c> says
-/// so; without the flag the <c>s</c> on a <c>&lt;row&gt;</c> is Excel's record of what the row
-/// happens to hold and applies to nothing.
+/// its column's, then the workbook's <c>Normal</c> cell style — <em>not</em> <c>cellXfs[0]</c>.
+/// See <see cref="XlsxCellFormatTable.StyleDefault"/> for why, and for the two corpus workbooks
+/// that separate the two. A row's format is only its default when <c>customFormat</c> says so;
+/// without the flag the <c>s</c> on a <c>&lt;row&gt;</c> is Excel's record of what the row happens
+/// to hold and applies to nothing.
 /// </para>
 /// <para>
 /// Rich text is read in the same pass because it needs the same two answers — which cell, and what
@@ -49,7 +51,15 @@ internal static class XlsxSheetFormats
         int[] pooled = new int[formats.Count];
         for (int at = 0; at < formats.Count; at++) pooled[at] = builder.Intern(formats[at]);
 
-        builder.SetSheetDefault(pooled[0]);
+        // What a cell resolves to when neither it, its row nor its column states a format: the
+        // `Normal` cell style, which is Calc's `Default`. A cell element states its format as
+        // `@s`, and an absent one is read as *no XF at all* — `rAttribs.getInteger(XML_s, -1)`
+        // (`sc/source/filter/oox/sheetdatacontext.cxx`:371), after which
+        // `SheetDataBuffer::setCellFormat` returns immediately on a negative id
+        // (`sheetdatabuffer.cxx`:721), leaving whatever the sheet already carries. Confirmed
+        // against 26.2.4.2's own `.fods`: see `XlsxCellFormatTable.StyleDefault`.
+        int sheetDefault = builder.Intern(table.StyleDefault);
+        builder.SetSheetDefault(sheetDefault);
 
         foreach (XElement column in Xlsx.Children(Xlsx.Child(worksheet, "cols"), "col"))
         {
@@ -101,7 +111,13 @@ internal static class XlsxSheetFormats
                 int? style = Index(cell, "s");
                 if (style is { } own) builder.SetCell(rowIndex, column, pooled[own]);
 
-                ReadRichCell(cell, rowIndex, column, style ?? rowFormat ?? 0);
+                // A rich cell's runs are resolved over what the cell itself resolves to, which
+                // for one stating no `s` is its row's format and then the sheet's default.
+                ReadRichCell(
+                    cell, rowIndex, column,
+                    (style ?? rowFormat) is { } inherited
+                        ? formats[inherited]
+                        : table.StyleDefault);
             }
         }
 
@@ -112,12 +128,11 @@ internal static class XlsxSheetFormats
                 ? value
                 : null;
 
-        void ReadRichCell(XElement cell, int row, int column, int style)
+        void ReadRichCell(XElement cell, int row, int column, SheetCellFormat cellFormat)
         {
             (IReadOnlyList<XlsxRichRun> runs, string text) = RunsOf(cell, file);
             if (runs.Count == 0) return;
 
-            SheetCellFormat cellFormat = formats[Math.Clamp(style, 0, formats.Count - 1)];
             List<SheetTextPortion> portions = [];
 
             foreach (XlsxRichRun run in runs)
