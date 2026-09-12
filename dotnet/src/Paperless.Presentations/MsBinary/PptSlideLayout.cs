@@ -956,6 +956,22 @@ internal sealed class PptSlideLayout
             (shape.Flags & EscherShapeAttributes.FlipVertical) != 0,
             space);
 
+        // An Escher WordArt is not a shape with text on it: `EnhancedCustomShapeEngine::render2`
+        // replaces the whole custom shape with the curves `EnhancedCustomShapeFontWork::CreateFontWork`
+        // builds, so the box, its geometry and its shadow are not drawn at all. The fill survives
+        // because `CreateSdrObjectFromParagraphOutlines` copies the shape's own item set onto the
+        // path object -- see `PptFontwork`.
+        if (PptFontwork.Outline(shape, local.Size, _fonts) is { } warped)
+        {
+            return new PlacedShape
+            {
+                Name = shape.Name,
+                Outline = ShapeTransform.Apply(placement, warped),
+                Bounds = ShapeTransform.PlacedBounds(placement, local.Size),
+                Fill = Fill(shape, context.Scheme, local, placement),
+            };
+        }
+
         // A shape's own vertex array outranks its type, because LibreOffice's exporter writes one
         // on nearly every shape and names no preset at all; falling through to the type would draw
         // a bounding rectangle for a triangle it had the exact path for.
