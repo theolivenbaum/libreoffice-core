@@ -1,4 +1,6 @@
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -33,11 +35,46 @@ namespace Paperless.Spreadsheets.Layout;
 /// 9970 (<c>probes/pivot-res-r108/clearing-census.py</c>).
 /// </para>
 /// <para>
-/// What is <em>still</em> narrower than the reference is everything else the two calls remove: a
-/// font face, a size, a colour, a fill and a border on a pivot cell all survive here and none
-/// survives there. Borders are nil on this corpus — not one cell of the twenty-eight pivot
-/// ranges has a <c>cellXfs</c> entry stating one
-/// (<c>probes/pivot-res-r108/statedborders.py</c>) — and the other four are unmeasured.
+/// <strong>All five are cleared, and what puts most of them back is the pivot's own
+/// <c>&lt;format&gt;</c> records.</strong> <c>ScDPOutput::Output</c> ends with
+/// <c>maFormatOutput.apply</c> (<c>dpoutput.cxx</c>:1190), which lays those records over the
+/// generated styles — and they are not rare: <strong>286 across 12 of the corpus's 28 pivot
+/// parts</strong> (<c>probes/pivot-fmt-r110/format-census.py</c>, correcting an r108 census that
+/// searched for <c>&lt;format&gt;</c> as a direct child of <c>pivotTableDefinition</c> where it
+/// is a child of <c>&lt;formats&gt;</c>). <see cref="Dxf"/> carries what they say and
+/// <c>XlsxPivotFormats</c> works out which cells they land on.
+/// </para>
+/// <para>
+/// <strong>That the clearing is total is a measurement and not a reading.</strong>
+/// <c>033_Event_planning_tracker</c> with its <c>&lt;formats&gt;</c> element deleted and nothing
+/// else changed comes back from 26.2.4.2 with all ninety-one cells of its pivot at the
+/// <c>Default</c> cell style, and with the element back they carry a 12 pt <c>Consolas</c> on a
+/// black ground.
+/// </para>
+/// <para>
+/// Scored by value against 26.2.4.2's own resolved view of the 9878 cells of the corpus's
+/// nineteen generatable pivot rectangles — <c>probes/pivot-fmt-r110/check-dxf.py</c>, where
+/// <em>merge</em> is what this tree did before r110 and <em>clear</em> is clearing with no
+/// <c>dxf</c> half:
+/// </para>
+/// <list type="table">
+/// <item><description>face — merge 9877, clear 9878, clear+dxf <strong>9878</strong></description></item>
+/// <item><description>size — merge 9872, clear 9783, clear+dxf <strong>9878</strong></description></item>
+/// <item><description>colour — merge 9876, clear 9873, clear+dxf <strong>9878</strong></description></item>
+/// <item><description>fill — merge 9806, clear 9752, clear+dxf <strong>9869</strong></description></item>
+/// </list>
+/// <para>
+/// So clearing on its own is worse than merging for the size and the colour, and only the two
+/// halves together beat both. The nine cells still wrong are one workbook's field-button row and
+/// corner, where the reference paints a fill this does not.
+/// </para>
+/// <para>
+/// <strong>The alignment and the indent are still the generated styles' and take nothing from a
+/// <c>dxf</c>.</strong> That is measured too: <c>033</c> states nine alignment <c>dxf</c>s, three
+/// of which match its whole data area, and 26.2.4.2's automatic style for those cells carries no
+/// <c>fo:text-align</c> and no <c>fo:margin-left</c> — which is why r108's 0 disagreements over
+/// 9970 cells on those two properties still stand. Borders are nil on this corpus
+/// (<c>probes/pivot-res-r108/statedborders.py</c>) and number formats are not modelled.
 /// </para>
 /// </remarks>
 public readonly record struct SheetPivotStyle
@@ -51,8 +88,31 @@ public readonly record struct SheetPivotStyle
     /// <summary>The indent from the aligned edge, or null to keep the cell's own.</summary>
     public Length? Indent { get; init; }
 
+    /// <summary>
+    /// The format the emptied rectangle falls back to, or null for a cell outside one.
+    /// </summary>
+    /// <remarks>
+    /// Not the cell's own and not <c>cellXfs[0]</c>: the <c>Normal</c> <c>cellStyleXf</c>, which
+    /// is what Calc calls the <c>Default</c> cell style — see
+    /// <c>XlsxCellFormats.NormalStyleXf</c>, which records the probe workbook that settles it.
+    /// The face, the declared class, the size and the colour are all taken from it, and
+    /// <see cref="Dxf"/> then puts back whatever the pivot's own records state.
+    /// </remarks>
+    public SheetCellFormat? Cleared { get; init; }
+
+    /// <summary>
+    /// What the pivot's own <c>&lt;format&gt;</c> records put back over the cleared base.
+    /// </summary>
+    /// <remarks>
+    /// Applied last, so a record's weight beats the generated <c>Pivot Table Result</c> bold —
+    /// which is the order <c>ScDPOutput::Output</c> applies them in.
+    /// </remarks>
+    public SheetPivotDxf Dxf { get; init; }
+
     /// <summary>True when the style changes nothing about the text.</summary>
-    public bool IsNone => FontWeight is null && Horizontal is null && Indent is null;
+    public bool IsNone
+        => FontWeight is null && Horizontal is null && Indent is null && Cleared is null
+           && Dxf.IsNone;
 
     /// <summary>Lays this style over what the cell states.</summary>
     /// <param name="stated">The format the cell resolves to on its own.</param>
@@ -61,11 +121,60 @@ public readonly record struct SheetPivotStyle
         ArgumentNullException.ThrowIfNull(stated);
         if (IsNone) return stated;
 
+        // One `with`: `At` is called for every drawn cell of every page and a pivot's rectangle
+        // can be ten thousand cells, so the cleared base, the generated style and the pivot's own
+        // records are folded into the same copy rather than allocating three.
+        SheetCellFormat over = Cleared ?? stated;
+
         return stated with
         {
-            FontWeight = FontWeight ?? stated.FontWeight,
-            Horizontal = Horizontal ?? stated.Horizontal,
-            Indent = Indent ?? stated.Indent,
+            FontFamily = Dxf.FontFamily ?? over.FontFamily,
+            DeclaredFontClass = Dxf.FontFamily is not null
+                ? Dxf.DeclaredFontClass ?? FontFamilyClass.Unknown
+                : over.DeclaredFontClass,
+            FontSize = Dxf.FontSize ?? over.FontSize,
+            Colour = Dxf.Colour ?? over.Colour,
+            FontWeight = Dxf.FontWeight ?? FontWeight ?? over.FontWeight,
+            Horizontal = Horizontal ?? over.Horizontal,
+            Indent = Indent ?? over.Indent,
         };
     }
+}
+
+/// <summary>
+/// What one of a pivot table's own <c>&lt;format&gt;</c> records changes about a cell's text.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A differential like <see cref="SheetPivotStyle"/> itself, and applied over it: the record is
+/// laid on last, so a <c>dxf</c> stating a weight beats the generated <c>Pivot Table Result</c>
+/// bold. Its fill is not here — that goes into the sheet's decoration beside the generated
+/// borders, because a background is not a property of the text.
+/// </para>
+/// <para>
+/// Four of the six things a <c>dxf</c> can state are modelled and two are not, each for a
+/// measured reason: an <c>&lt;alignment&gt;</c> reaches no cell in 26.2.4.2 and a
+/// <c>&lt;border&gt;</c> is nil on this corpus. See <c>XlsxPivotFormats</c>.
+/// </para>
+/// </remarks>
+public readonly record struct SheetPivotDxf
+{
+    /// <summary>The face the record names, or null when it names none.</summary>
+    public string? FontFamily { get; init; }
+
+    /// <summary>The generic class qualifying that face.</summary>
+    public FontFamilyClass? DeclaredFontClass { get; init; }
+
+    /// <summary>The em size, or null.</summary>
+    public Length? FontSize { get; init; }
+
+    /// <summary>The text colour, or null.</summary>
+    public Colour? Colour { get; init; }
+
+    /// <summary>The weight on the usual 100–900 scale, or null.</summary>
+    public int? FontWeight { get; init; }
+
+    /// <summary>True when the record changes nothing about the text.</summary>
+    public bool IsNone
+        => FontFamily is null && FontSize is null && Colour is null && FontWeight is null;
 }

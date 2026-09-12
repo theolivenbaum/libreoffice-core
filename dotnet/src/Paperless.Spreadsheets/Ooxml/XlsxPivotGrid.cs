@@ -170,23 +170,90 @@ internal sealed class XlsxPivotGrid
     /// <param name="pivots">The sheet's pivot table parts, with their cache source kinds.</param>
     /// <param name="formatting">The decoration the generated borders are merged into.</param>
     /// <param name="formats">The text formats the generated styles are laid over.</param>
+    /// <param name="cleared">
+    /// The format an emptied cell falls back to: the <c>Normal</c> <c>cellStyleXf</c>, which is
+    /// Calc's <c>Default</c> cell style. Not the sheet's default <c>cellXf</c>, which is a
+    /// different entry — <c>XlsxCellFormats.NormalStyleXf</c> records the probe workbook that
+    /// separates them and what 26.2.4.2 answered on it.
+    /// </param>
+    /// <param name="differences">
+    /// The workbook's <c>dxfs</c>, which the pivot's own <c>&lt;format&gt;</c> records index. They
+    /// are applied last, after the generated styles, exactly as <c>maFormatOutput.apply</c> is the
+    /// last statement of <c>ScDPOutput::Output</c> — see <see cref="XlsxPivotFormats"/>.
+    /// </param>
     public static (SheetFormatting Formatting, SheetCellFormats Formats) Apply(
-        IReadOnlyList<XlsxPivotTable> pivots, SheetFormatting formatting, SheetCellFormats formats)
+        IReadOnlyList<XlsxPivotTable> pivots, SheetFormatting formatting, SheetCellFormats formats,
+        SheetCellFormat cleared, IReadOnlyList<XlsxPivotFormats.Difference> differences)
     {
         ArgumentNullException.ThrowIfNull(pivots);
         ArgumentNullException.ThrowIfNull(formatting);
         ArgumentNullException.ThrowIfNull(formats);
+        ArgumentNullException.ThrowIfNull(cleared);
+        ArgumentNullException.ThrowIfNull(differences);
 
         Dictionary<(int Row, int Column), SheetPivotStyle> styles = [];
         foreach (XlsxPivotTable pivot in pivots)
         {
             if (Build(pivot) is not { } grid) continue;
             if (ReferenceEquals(formatting, SheetFormatting.Empty)) formatting = new SheetFormatting();
+            formatting.ClearBackgrounds(
+                grid._clearedFirstRow, grid._clearedLastRow,
+                grid._clearedFirstColumn, grid._clearedLastColumn);
             grid.MergeInto(formatting);
-            grid.CollectStyles(styles, formats.SheetDefault);
+            grid.CollectStyles(styles, cleared);
+            grid.LayFormatsOver(pivot.Root, differences, styles, formatting);
         }
 
         return (formatting, formats.WithPivotStyles(styles));
+    }
+
+    /// <summary>
+    /// Lays the pivot's own <c>&lt;format&gt;</c> records over the generated styles.
+    /// </summary>
+    /// <remarks>
+    /// Last, because that is where <c>maFormatOutput.apply</c> sits (<c>dpoutput.cxx</c>:1190),
+    /// and cell by cell in document order, because <c>ApplyPattern</c> merges each record's own
+    /// items into whatever is already there rather than replacing the lot.
+    /// </remarks>
+    private void LayFormatsOver(
+        XElement root,
+        IReadOnlyList<XlsxPivotFormats.Difference> differences,
+        Dictionary<(int Row, int Column), SheetPivotStyle> styles,
+        SheetFormatting formatting)
+    {
+        if (differences.Count == 0) return;
+
+        XlsxPivotFormats.Apply(
+            root, differences,
+            new XlsxPivotFormats.Geometry(_tabStartColumn, _dataStartColumn, _dataStartRow),
+            (column, row, difference) =>
+            {
+                if (row < _clearedFirstRow || row > _clearedLastRow) return;
+                if (column < _clearedFirstColumn || column > _clearedLastColumn) return;
+
+                if (!difference.Text.IsNone && styles.TryGetValue((row, column), out SheetPivotStyle style))
+                {
+                    SheetPivotDxf over = style.Dxf;
+                    styles[(row, column)] = style with
+                    {
+                        Dxf = new SheetPivotDxf
+                        {
+                            FontFamily = difference.Text.FontFamily ?? over.FontFamily,
+                            DeclaredFontClass = difference.Text.FontFamily is not null
+                                ? difference.Text.DeclaredFontClass
+                                : over.DeclaredFontClass,
+                            FontSize = difference.Text.FontSize ?? over.FontSize,
+                            Colour = difference.Text.Colour ?? over.Colour,
+                            FontWeight = difference.Text.FontWeight ?? over.FontWeight,
+                        },
+                    };
+                }
+
+                if (difference.Fill is not { } fill) return;
+                SheetCellDecoration stated = formatting.At(row, column);
+                if (stated.Background == fill) return;
+                formatting.SetCell(row, column, formatting.Intern(stated with { Background = fill }));
+            });
     }
 
     /// <summary>
@@ -740,19 +807,26 @@ internal sealed class XlsxPivotGrid
     private void CollectStyles(
         Dictionary<(int Row, int Column), SheetPivotStyle> into, SheetCellFormat cleared)
     {
-        // Every cell of the emptied rectangle states the three properties outright, so the
-        // overlay replaces what the workbook put on a pivot cell rather than merging with it —
-        // which is what the two clearing calls above do. What it replaces them with is the
-        // sheet's own default format and not nothing: `clearContents` takes a cell back to the
-        // Default cell style, and a workbook whose default `cellXf` states an alignment or an
-        // indent still states it afterwards. `049_Expenses_calculator` is that workbook — 47
-        // cells of its pivot resolve their left justification and indent through `cellXfs[0]`
-        // and no cell of the range states an `s` of its own, and the reference keeps all 47.
+        // Every cell of the emptied rectangle states these properties outright, so the overlay
+        // replaces what the workbook put on a pivot cell rather than merging with it — which is
+        // what the two clearing calls above do. What it replaces them with is the Default cell
+        // style and not nothing, and a workbook whose Default states an alignment or an indent
+        // still states it afterwards. `049_Expenses_calculator` is that workbook — 47 cells of
+        // its pivot resolve their left justification and indent that way and no cell of the
+        // range states an `s` of its own, and the reference keeps all 47.
+        //
+        // `Cleared` carries the whole base format rather than four more nullable fields, because
+        // the face, the declared class, the size and the colour are all taken from it whole; the
+        // three below are a differential the generated style may overwrite, and `Dxf` is a fifth
+        // laid over everything by `LayFormatsOver`. `SheetPivotStyle`'s remarks give the
+        // cell-for-cell score for each property, and the null experiment that says the clearing
+        // reaches all four.
         SheetPivotStyle bare = new()
         {
             FontWeight = cleared.FontWeight,
             Horizontal = cleared.Horizontal,
             Indent = cleared.Indent,
+            Cleared = cleared,
         };
 
         for (int row = _clearedFirstRow; row <= _clearedLastRow; row++)
