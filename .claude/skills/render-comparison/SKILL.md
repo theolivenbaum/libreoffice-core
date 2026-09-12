@@ -687,10 +687,51 @@ The same export settles rounding questions that no amount of source-reading will
 workbooks came back 111.50 → 111 and 121.64 → 121 but 139.97 → 140 and 152.70 → 153, which
 says a device's quantisation decides them rather than a rounding rule.
 
+## What is drawn may not be the renderer's drawing at all
+
+An OLE object arrives with a **replacement picture** the authoring application stored beside
+it, and LibreOffice will happily draw that instead of rendering the object itself. So a page
+can be full of ink that LibreOffice's own layout code never produced, and every conclusion
+you draw about "how the reference draws this" is then a conclusion about Excel or PowerPoint.
+
+This is not a rare corner. A census of the corpus's six 3-D charts recorded five as rasters
+and one as **362 and 309 vector path items** — and built a scope decision on that one being
+the single document a 3-D implementation could be measured against. It was a `.ppt` OLE
+`Excel.Sheet.8`, and the vectors were PowerPoint's stored preview. LibreOffice had drawn a
+picture.
+
+**The test is a round trip, and it is a proper single-variable experiment.** Convert the
+document to flat ODF with the same binary and re-render it. Flat ODF carries the object's
+*model*, and drops a preview it has no reason to keep, so the second render is forced to
+draw the object live:
+
+```sh
+soffice --headless --convert-to fodp --outdir rt deck.ppt
+soffice --headless --convert-to pdf:impress_pdf_Export --outdir rt2 rt/deck.fodp
+```
+
+The same binary, the same slide, the same chart model — 362 and 309 paths one way, a
+635 x 155 raster and no paths the other. That difference *is* the preview.
+
+Two habits follow:
+
+- Before attributing drawn geometry to LibreOffice, check whether the frame holding it is an
+  OLE object. `--convert-to` will tell you: an object left as `<draw:object-ole>` with a raw
+  OLE2 payload was never converted, and one resolved to a real `<chart:chart>` or
+  `<office:document>` was.
+- A resolved model in the flat ODF does **not** prove the model was what got drawn. This
+  document's chart resolved to a genuine `chart:circle` with `chart:three-dimensional="true"`
+  and a `dr3d:transform`, and was still drawn from the preview.
+
+Note the round trip cuts both ways: it removes the preview, which is what makes it a clean
+experiment, and it also removes anything else the flat format cannot carry. Use it to answer
+*"is this the renderer's own drawing"*, not to establish what the renderer's drawing looks
+like in the original document.
+
 ## The C++ in this tree is not the reference binary
 
 The checkout is a development branch; the `soffice` generating your references is a release
-(24.2.7.2 here). They disagree, and the source is the more persuasive of the two, which makes
+(26.2.4.2 here). They disagree, and the source is the more persuasive of the two, which makes
 it the more dangerous.
 
 Two diagnoses in this project were inverted by checking the installed binary instead of the
