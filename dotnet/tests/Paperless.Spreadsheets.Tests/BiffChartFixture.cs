@@ -434,6 +434,12 @@ internal static class BiffChartFixture
     public const ushort ChAreaFormat = 0x100A;
     public const ushort ChLegend = 0x1015;
     public const ushort ChAxis = 0x101D;
+
+    /// <summary><c>CHTICK</c>, <c>EXC_ID_CHTICK</c>.</summary>
+    public const ushort ChTick = 0x101E;
+
+    /// <summary><c>CHAXISLINE</c>, which names which of an axis' lines the next format is for.</summary>
+    public const ushort ChAxisLine = 0x1021;
     public const ushort ChDefaultText = 0x1024;
     public const ushort ChText = 0x1025;
     public const ushort ChFont = 0x1026;

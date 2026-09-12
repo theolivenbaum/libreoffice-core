@@ -2077,3 +2077,16 @@ dotnet/probes/slides-r107/warpfill.py	2026-09-12	current	26.2.4.2	present	curren
 dotnet/probes/slides-r107/warpfill.txt	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/slides-r107/results.md
 dotnet/probes/slides-r107/wordart-props.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/slides-r107/results.md
 dotnet/probes/slides-r107/wordart-props.txt	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/slides-r107/results.md
+dotnet/probes/chart-geom-r108/results.md	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/xls-confine.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/ofpie-fit.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/ofpie-fit.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/ofpie-ladder.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/ofpie-region.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/ofpie-region.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/width-ladder.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/width-ladder-twoword.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/width-ladder-oneword.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/fine-width.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/fine-width.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
+dotnet/probes/chart-geom-r108/gauge-after.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/chart-geom-r108/results.md
