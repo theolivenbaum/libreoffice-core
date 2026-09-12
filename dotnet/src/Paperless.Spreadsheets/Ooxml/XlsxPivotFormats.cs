@@ -128,13 +128,26 @@ internal static class XlsxPivotFormats
     /// </para>
     /// <para>
     /// A <c>&lt;patternFill&gt;</c> that states a <c>bgColor</c> and <strong>no</strong>
-    /// <c>patternType</c> is turned into a <em>solid</em> fill whose colour is the pattern
-    /// colour — and the pattern colour, unstated, is automatic, which resolves against the window
-    /// <em>text</em> colour and is therefore <strong>black</strong>. That, and nothing in the
-    /// workbook, is where <c>033_Event_planning_tracker</c>'s black band comes from; it is 89
-    /// cells of one page and it is the fill <c>probes/pivot-res-r108</c> recorded as
-    /// unexplained. The same file also states <c>patternType="none"</c> beside a <c>bgColor</c>,
-    /// which applies nothing at all — <c>XML_none should not apply any color</c>, <c>:2009</c>.
+    /// <c>patternType</c> is turned into a <em>solid</em> fill, and the colour it paints is the
+    /// <c>bgColor</c>: the arm at <c>:1988-1994</c> moves <c>maFillColor</c> — which
+    /// <c>importBgColor</c> filled, <c>:1890</c> — <em>into</em> <c>maPatternColor</c> and sets
+    /// <c>mnPattern = XML_solid</c>, so the <c>fgColor</c>'s own value is pushed aside into
+    /// <c>maFilterPatternColor</c> and never painted. What makes
+    /// <c>033_Event_planning_tracker</c>'s band <strong>black</strong> is therefore that its
+    /// <c>bgColor</c> is <c>auto="1"</c>, and an automatic colour in the pattern position
+    /// resolves against the window <em>text</em> colour. That, and nothing in the workbook, is
+    /// where the band comes from; it is 89 cells of one page and it is the fill
+    /// <c>probes/pivot-res-r108</c> recorded as unexplained. The same file also states
+    /// <c>patternType="none"</c> beside a <c>bgColor</c>, which applies nothing at all —
+    /// <c>XML_none should not apply any color</c>, <c>:2009</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Round 110's write-up said this the other way round</strong> — that the solid takes
+    /// the <em>pattern</em> colour and that an unstated pattern colour is what is automatic. The
+    /// code below was always right; only the prose was not, and <c>033</c> cannot tell the two
+    /// apart because its <c>fgColor</c> is unstated <em>and</em> its <c>bgColor</c> is
+    /// <c>auto="1"</c>, so both readings paint black. A workbook stating a real <c>bgColor</c>
+    /// under no <c>patternType</c> would separate them.
     /// </para>
     /// </remarks>
     private static Colour? ReadFill(XElement? fill, XlsxPalette palette)

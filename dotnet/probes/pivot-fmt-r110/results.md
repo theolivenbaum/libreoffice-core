@@ -199,8 +199,20 @@ And a record with **no references matches every line** through the broad path, s
 `033`.
 
 **And the `dxf` fill rule is the one that produces the black.** A `<patternFill>` stating a
-`bgColor` and **no** `patternType` becomes a *solid* fill whose colour is the *pattern* colour, and
-an unstated pattern colour is automatic, which resolves against the window **text** colour: black.
+`bgColor` and **no** `patternType` becomes a *solid* fill, and the colour it paints is the
+`bgColor`: the arm at `stylesbuffer.cxx`:1988-1994 moves `maFillColor` — which `importBgColor`
+filled at :1890 — *into* `maPatternColor` and sets `mnPattern = XML_solid`, so the `fgColor`'s own
+value is pushed aside into `maFilterPatternColor` and never painted. What makes `033`'s band
+**black** is that its `bgColor` is `auto="1"`, and an automatic colour in the pattern position
+resolves against the window **text** colour.
+
+> **Corrected after the round.** This paragraph first said the solid takes the *pattern* colour and
+> that an unstated pattern colour is what is automatic. The reader that was shipped
+> (`XlsxPivotFormats.ReadFill`) was always right — it reads the `bgColor` — but the prose was not.
+> `033` cannot separate the two readings, because its `fgColor` is unstated *and* its `bgColor` is
+> `auto="1"`, so both paint black; a workbook stating a real `bgColor` under no `patternType`
+> would.
+
 The same file also states `patternType="none"` beside a `bgColor`, which applies nothing.
 `Fill::finalizeImport`'s `mbDxf` arm, `stylesbuffer.cxx`:1988-2009.
 
