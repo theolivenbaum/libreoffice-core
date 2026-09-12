@@ -109,33 +109,6 @@ public static partial class ChartLayout
         DocRect? GhostKey);
 
     /// <summary>
-    /// Whether this plot's labels go through the best-fit machinery at all.
-    /// </summary>
-    /// <remarks>
-    /// <c>bMovementAllowed &amp;&amp; !m_bUseRings</c>: a doughnut keeps <c>AVOID_OVERLAP</c>'s
-    /// conversion to <c>CENTER</c> and never moves, which is why <see cref="ChartPlot.Rings"/>
-    /// gates this and the chart kind alone does not.
-    /// </remarks>
-    private static bool HasBestFitLabels(ChartPlot plot)
-    {
-        if (plot.Rings || plot.Kind is not (ChartPlotKind.Pie or ChartPlotKind.OfPie)) return false;
-
-        foreach (ChartSeries series in plot.Series)
-        {
-            for (int at = 0; at < series.Values.Count; at++)
-            {
-                if (series.LabelAt(at) is { Draws: true } label
-                    && (label.Placement ?? ChartLabelPlacement.BestFit) is ChartLabelPlacement.BestFit)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// The label layout of one pie, in the caller's coordinates.
     /// </summary>
     /// <param name="plot">The chart.</param>
@@ -524,13 +497,34 @@ public static partial class ChartLayout
     /// <remarks>
     /// <c>ShapeFactory::getRectangleOfShape(mxDiagramWithAxesShapes)</c> — the bounding box of the
     /// whole diagram group, which for a pie is the wall plus the wedges plus every label group.
-    /// The wedges are inscribed in the wall, so only the wall and the label blocks contribute.
+    /// A plain pie's wedges are inscribed in the wall, so only the wall and the label blocks
+    /// contribute; an of-pie's composition is not, and a doughnut's labels are not.
+    /// </remarks>
+    /// <remarks>
+    /// <para>
+    /// <strong>An of-pie overflows its own diagram square by design.</strong> The composition runs
+    /// from <c>m_fLeftShift − m_fLeftScale</c> = −1.4167 unit radii to <c>m_fBarRight</c> = 1.25
+    /// (a bar form) or <c>m_fRightShift + m_fRightScale</c> = 1.0833 (a second-pie form) across,
+    /// and to ±<c>m_fLeftScale</c> = ±0.6667 down (<c>PieChart.hxx:258-269</c>), so it is 2.667
+    /// unit radii wide against the square's 2. Leaving it out makes the consumed rectangle the
+    /// wall's, which grows the diagram back to the whole available rectangle every time.
+    /// </para>
+    /// <para>
+    /// <strong>A doughnut's labels never leave the ring.</strong> <c>AVOID_OVERLAP</c> is turned
+    /// into <c>CENTER</c> for a ring chart and the labels cannot move
+    /// (<c>bMovementAllowed &amp;&amp; !m_bUseRings</c>), so nothing a doughnut draws is outside
+    /// its own wall — which is what 26.2.4.2's own resolved view says on all fifteen corpus
+    /// doughnuts, whose <c>&lt;chart:coordinate-region&gt;</c> is 0.9999 of the square inscribed
+    /// in their <c>&lt;chart:plot-area&gt;</c>. Running this file's single-pie label placer over a
+    /// ring would invent outside labels and shrink every one of them.
+    /// </para>
     /// </remarks>
     private static DocRect PieConsumedRect(
         ChartPlot plot, DocRect area, DocRect available, ChartText measurer)
     {
         List<ChartSeries> pie = plot.SeriesOf(ChartPlotKind.Pie, 0);
-        if (pie.Count == 0) pie = plot.SeriesOf(ChartPlotKind.OfPie, 0);
+        bool split = pie.Count == 0;
+        if (split) pie = plot.SeriesOf(ChartPlotKind.OfPie, 0);
         if (pie.Count == 0) return area;
 
         DocPoint centre = new(area.X + (area.Width / 2), area.Y + (area.Height / 2));
@@ -538,13 +532,30 @@ public static partial class ChartLayout
 
         Length left = area.Left, top = area.Top, right = area.Right, bottom = area.Bottom;
 
-        foreach (PiePlacedLabel placed in PieLabels(
-                     plot, pie[0], centre, radius, available, measurer))
+        // The of-pie's own drawn extent, which AddOfPie composes from the same constants. Below
+        // the four-point minimum it draws a plain pie instead and there is nothing to add.
+        if (split && pie[0].Values.Count >= OfPieMinimumPoints)
         {
-            left = Length.Min(left, placed.Block.Left);
-            top = Length.Min(top, placed.Block.Top);
-            right = Length.Max(right, placed.Block.Right);
-            bottom = Length.Max(bottom, placed.Block.Bottom);
+            double far = plot.OfPieType is ChartOfPieType.Bar
+                ? OfPieBarRight
+                : OfPieRightShift + OfPieRightScale;
+
+            left = Length.Min(left, centre.X + (radius * (OfPieLeftShift - OfPieLeftScale)));
+            right = Length.Max(right, centre.X + (radius * far));
+            top = Length.Min(top, centre.Y - (radius * OfPieLeftScale));
+            bottom = Length.Max(bottom, centre.Y + (radius * OfPieLeftScale));
+        }
+
+        if (!plot.Rings)
+        {
+            foreach (PiePlacedLabel placed in PieLabels(
+                         plot, pie[0], centre, radius, available, measurer))
+            {
+                left = Length.Min(left, placed.Block.Left);
+                top = Length.Min(top, placed.Block.Top);
+                right = Length.Max(right, placed.Block.Right);
+                bottom = Length.Max(bottom, placed.Block.Bottom);
+            }
         }
 
         return new DocRect(left, top, right - left, bottom - top);

@@ -1226,11 +1226,28 @@ public static partial class ChartLayout
         // The pie's own second pass, and the only chart type that has one:
         // impl_createDiagramAndContent draws the series once, takes the bounding box of everything
         // the diagram group produced — the labels included — and recreates the whole thing at
-        // adjustInnerSize(consumedOuterRect). It is what makes a pie with best-fit labels smaller
-        // than a pie without them, measured at radius 99.78 against 110.44 on the corpus witness,
-        // and it is gated on there being a best-fit label because that is the only placement whose
-        // labels can leave the diagram rectangle at all.
-        if (HasBestFitLabels(plot))
+        // adjustInnerSize(consumedOuterRect).
+        //
+        // The gate is `if( bIsPieOrDonut )` at `ChartView.cxx:682`, and `lcl_IsPieOrDonut` is
+        // `xDiagram->isPieOrDonutChart()` (`:339-346`) — the chart type and nothing else. This
+        // stood on `HasBestFitLabels` for eleven rounds on the reasoning that only a best-fit
+        // label can leave the diagram rectangle, which is refuted by the reference's own resolved
+        // view: `--convert-to fodt` on `027_Unit_Circle_Chart_Graphical_Chart`, whose labels are
+        // all `outEnd`, gives `<chart:coordinate-region>` 0.876 of its `<chart:plot-area>`'s
+        // square, and on the 15 corpus doughnuts it gives 0.9999 — so the pass runs on both and
+        // simply consumes nothing on a doughnut, whose labels `AVOID_OVERLAP` turns into `CENTER`.
+        //
+        // And it is skipped for a chart that states its own *inner* rectangle, which is the other
+        // half of the same guard: `getAvailablePosAndSizeForDiagram` sets `mbUseFixedInnerSize` to
+        // the diagram's `PosSizeExcludeAxes` (`ChartView.cxx:946-981`), which is what
+        // `c:layoutTarget val="inner"` and ODF's `<chart:coordinate-region>` both set, and every
+        // call to `adjustInnerSize` in `impl_createDiagramAndContent` — the pie's at `:684-686`
+        // included — is guarded by `if (!rParam.mbUseFixedInnerSize)`. A BIFF chart is the
+        // opposite case and keeps the pass: `setDiagramPositionIncludingAxes` leaves
+        // `PosSizeExcludeAxes` false (`xichart.cxx:4038-4046`, `DiagramWrapper.cxx:843-853`), so
+        // its stated rectangle is the *available* one.
+        if ((plot.Kind is ChartPlotKind.Pie or ChartPlotKind.OfPie)
+            && plot.PlotArea is null && plot.PlotAreaFraction is null)
         {
             DocRect outer = DiagramAreaOf(plot, frame, measurer);
 

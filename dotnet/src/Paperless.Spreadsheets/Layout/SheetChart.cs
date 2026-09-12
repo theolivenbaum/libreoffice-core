@@ -25,12 +25,35 @@ namespace Paperless.Spreadsheets.Layout;
 /// exactly what a fill-by-fill comparison against LibreOffice's PDF catches.
 /// </para>
 /// <para>
-/// <strong>The print zoom scales the type, not just the rectangle.</strong> The box this is given
-/// has already been through <c>SheetPageGraphics</c>'s scale; the font sizes have not, and a chart
-/// laid out at 100% type inside a 50% rectangle reserves twice the room its labels need and
-/// squeezes the plot area to nothing. So the sizes are scaled here rather than a transform being
-/// pushed onto the sink, which keeps every glyph run in page coordinates and readable out of the
-/// content stream.
+/// <strong>A print zoom is a scale on the finished chart, not a smaller chart.</strong> A BIFF or
+/// ODF chart is an OLE object with a page of its own — <c>&lt;chart:chart svg:width&gt;</c> in the
+/// reference's own resolved view — and Calc lays it out on that page and then scales the whole
+/// object into the anchor its sheet gives it. The box this is given has already been through
+/// <c>SheetPageGraphics</c>'s zoom, so the chart is laid out at <c>box / scale</c> — the page it
+/// would have had at 100% — and the finished <see cref="ChartDrawing"/> is mapped onto the box
+/// afterwards.
+/// </para>
+/// <para>
+/// <strong>Scaling the type instead, which is what this did for eleven rounds, is wrong wherever
+/// the composition holds a length that is not proportional to the type.</strong> Three families
+/// are: the BIFF unit grid's border gap, a flat 250 hundredths of a millimetre off each edge of
+/// the <em>chart's</em> page (<c>XclChRootData::InitConversion</c>); every absolute constant in
+/// <c>ChartLayout</c> — <c>AXIS2D_TICKLABELSPACING</c>'s 100, <c>AXIS2D_TICKLENGTH</c>'s 150, a
+/// pie's flat 350 margin; and the 96 dpi whole-pixel em a chart's text is measured on, which makes
+/// a line height a step function of the size rather than a fixed fraction of the em.
+/// <c>ChartPlot.TypeScale</c> was added to keep the zoom out of the one ratio that noticed; laying
+/// the chart out on its own page keeps it out of all of them at once.
+/// </para>
+/// <para>
+/// Measured on <c>EHEST-Pre-departure-checklist-Rev.-1-06-12-2016.xls</c>, whose sheet is
+/// <c>scale-to-X="1"</c> and resolves to 65%: 26.2.4.2's page-15 gauge resolves to
+/// <c>&lt;chart:plot-area&gt;</c> 654.32 × 266.00 pt of a 744.89 pt chart page and a
+/// <c>&lt;chart:coordinate-region&gt;</c> that lands on the sheet at 65.19, 417.00 – 478.94,
+/// 577.04. Laid out in the zoomed box this tree drew 69.06, 419.42 – 478.06, 574.44; laid out on
+/// the chart's own page and scaled it draws 65.18, 417.50 – 477.73, 576.88 — the left edge from
+/// 3.87 pt out to 0.01 and the worst of the eight value-axis gridlines from 2.95 pt to 0.50.
+/// The 3.81 chart pt the left edge moved is <c>250 × (1/0.65 − 1)</c> hundredths of a millimetre
+/// of border gap, which is 3.83.
 /// </para>
 /// </remarks>
 internal static class SheetChart
@@ -39,7 +62,7 @@ internal static class SheetChart
     /// <param name="sink">Receives the drawing commands.</param>
     /// <param name="plot">The chart.</param>
     /// <param name="box">Where the frame lands on the page, already scaled.</param>
-    /// <param name="scale">The print zoom, applied to the type.</param>
+    /// <param name="scale">The print zoom the box has already been through.</param>
     public static void Draw(IDrawingSink sink, ChartPlot plot, DocRect box, double scale)
     {
         ArgumentNullException.ThrowIfNull(sink);
@@ -47,7 +70,16 @@ internal static class SheetChart
 
         if (box.Width <= Length.Zero || box.Height <= Length.Zero) return;
 
-        ChartDrawing drawing = ChartLayout.Place(Sized(plot, scale), box, Measurer.Instance);
+        bool zoomed = double.IsFinite(scale) && scale > 0.0 && scale != 1.0;
+
+        // The chart's own page: the anchor it would have had before the sheet's zoom, with its
+        // origin at zero so that Zoomed's mapping is a plain scale about the box's corner.
+        DocRect page = zoomed
+            ? new DocRect(Length.Zero, Length.Zero, box.Width / scale, box.Height / scale)
+            : box;
+
+        ChartDrawing drawing = ChartLayout.Place(plot, page, Measurer.Instance);
+        if (zoomed) drawing = Zoomed(drawing, box, scale);
         if (drawing.PlotArea.Width <= Length.Zero || drawing.PlotArea.Height <= Length.Zero) return;
 
         foreach (ChartBox filled in drawing.Boxes)
@@ -80,29 +112,86 @@ internal static class SheetChart
     }
 
     /// <summary>
-    /// The chart with every stated type size taken through the print zoom.
+    /// A chart laid out on its own page, mapped onto the box the sheet's zoom left for it.
     /// </summary>
     /// <remarks>
-    /// Returned unchanged at 100%, which is every sheet in the corpus, so the common case allocates
-    /// nothing.
+    /// A plain scale about <paramref name="box"/>'s top-left corner, applied to every length the
+    /// drawing carries — positions, sizes, stroke widths, dash patterns and the type. That is what
+    /// scaling the OLE object does, and it is why the drawn result is unchanged for everything
+    /// that <em>is</em> proportional to the zoom while the composition behind it is no longer
+    /// computed in a space the chart never had.
     /// </remarks>
-    private static ChartPlot Sized(ChartPlot plot, double scale)
-        => scale == 1.0 || !double.IsFinite(scale) || scale <= 0.0
-            ? plot
-            : plot with
+    private static ChartDrawing Zoomed(ChartDrawing drawing, DocRect box, double scale)
+    {
+        DocPoint At(DocPoint point)
+            => new(box.X + (point.X * scale), box.Y + (point.Y * scale));
+
+        DocRect Rect(DocRect rect)
+            => new(box.X + (rect.X * scale), box.Y + (rect.Y * scale),
+                   rect.Width * scale, rect.Height * scale);
+
+        IReadOnlyList<Length>? Dash(IReadOnlyList<Length>? dash)
+        {
+            if (dash is null) return null;
+
+            Length[] scaled = new Length[dash.Count];
+            for (int at = 0; at < dash.Count; at++) scaled[at] = dash[at] * scale;
+            return scaled;
+        }
+
+        GraphicsPath Path(GraphicsPath path)
+        {
+            GraphicsPath moved = new();
+            foreach (PathCommand command in path.Commands)
             {
-                // What was multiplied in, so the one measurement that is not proportional to the
-                // type size can be taken at the size the chart states: ChartPlot.TypeScale.
-                TypeScale = plot.TypeScale * scale,
-                TitleSize = plot.TitleSize * scale,
-                AxisTitleSize = plot.AxisTitleSize * scale,
-                LabelSize = plot.LabelSize * scale,
-                // The two sizes that are null when the file states none: scaling them has to
-                // preserve the null, or a chart that stated neither would come out of the zoom
-                // with both pinned to the axis labels' unzoomed size.
-                LegendSize = plot.LegendSize is { } legend ? legend * scale : null,
-                DataLabelSize = plot.DataLabelSize is { } data ? data * scale : null,
-            };
+                switch (command.Verb)
+                {
+                    case PathVerb.MoveTo: moved.MoveTo(At(command.Point)); break;
+                    case PathVerb.LineTo: moved.LineTo(At(command.Point)); break;
+                    case PathVerb.CubicTo:
+                        moved.CubicTo(At(command.Control1), At(command.Control2), At(command.Point));
+                        break;
+                    default: moved.Close(); break;
+                }
+            }
+
+            return moved;
+        }
+
+        List<ChartBox> boxes = new(drawing.Boxes.Count);
+        foreach (ChartBox filled in drawing.Boxes)
+            boxes.Add(filled with { Bounds = Rect(filled.Bounds), LineWidth = filled.LineWidth * scale });
+
+        List<ChartLine> lines = new(drawing.Lines.Count);
+        foreach (ChartLine line in drawing.Lines)
+        {
+            lines.Add(line with
+            {
+                From = At(line.From),
+                To = At(line.To),
+                Width = line.Width * scale,
+                DashPattern = Dash(line.DashPattern),
+            });
+        }
+
+        List<ChartLabel> labels = new(drawing.Labels.Count);
+        foreach (ChartLabel label in drawing.Labels)
+            labels.Add(label with { At = At(label.At), Size = label.Size * scale });
+
+        List<ChartShape> shapes = new(drawing.Shapes.Count);
+        foreach (ChartShape shape in drawing.Shapes)
+        {
+            shapes.Add(shape with
+            {
+                Path = Path(shape.Path),
+                LineWidth = shape.LineWidth * scale,
+                DashPattern = Dash(shape.DashPattern),
+            });
+        }
+
+        return new ChartDrawing(
+            Rect(drawing.PlotArea), boxes, lines, labels, shapes, Rect(drawing.DiagramArea));
+    }
 
     /// <summary>
     /// The pen a chart's line is drawn with.
