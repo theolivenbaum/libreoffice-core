@@ -73,8 +73,16 @@ public static partial class SlideTextLayout
     /// own for a rotated shape, the slide's for an upright one. The insets are applied here.
     /// </param>
     /// <param name="fonts">The face cache.</param>
+    /// <param name="markerPictures">
+    /// Where to put the picture bullets, when the caller draws them. A picture marker is not a
+    /// glyph run and cannot travel in the return value; passing null lays the text out exactly as
+    /// before and simply does not collect them, which is what a caller measuring a height wants.
+    /// </param>
     public static List<PlacedGlyphRun> Place(
-        SlideTextBody body, DocRect textRectangle, SlideFonts fonts)
+        SlideTextBody body,
+        DocRect textRectangle,
+        SlideFonts fonts,
+        List<PlacedPicture>? markerPictures = null)
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(fonts);
@@ -121,7 +129,11 @@ public static partial class SlideTextLayout
 
             for (int line = 0; line < lines.Count; line++)
             {
-                if (line == 0) EmitMarker(placed, block, lines[0], area.X, top, fonts, body.Device);
+                if (line == 0)
+                {
+                    EmitMarker(
+                        placed, markerPictures, block, lines[0], area.X, top, fonts, body.Device);
+                }
 
                 Emit(placed, block, lines[line], area.X, top, line == 0);
 
@@ -430,6 +442,7 @@ public static partial class SlideTextLayout
 
     private static void EmitMarker(
         List<PlacedGlyphRun> placed,
+        List<PlacedPicture>? markerPictures,
         Block block,
         PlacedLine line,
         Length areaLeft,
@@ -437,6 +450,12 @@ public static partial class SlideTextLayout
         SlideFonts fonts,
         MetricGrid device)
     {
+        if (MarkerPicture(block.Paragraph) is { } bitmap)
+        {
+            EmitMarkerPicture(markerPictures, block, line, areaLeft, top, bitmap);
+            return;
+        }
+
         if (Shaped(block.Paragraph, block.Scaling, fonts) is not
             { Face: { } face, Shaped: { } shaped } marked)
         {
@@ -476,6 +495,54 @@ public static partial class SlideTextLayout
             Build(shaped, marked.Text, size, marked.Reference ?? Reference(face),
                   new DocPoint(pen, baseline), Length.Zero),
             marker.Colour ?? first.Colour));
+    }
+
+    /// <summary>
+    /// Places a picture bullet in the box <c>ImpCalcBulletArea</c> computes for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The vertical is the same expression a character symbol takes and stops one step earlier: a
+    /// bitmap is drawn from the box's <em>top</em> at the graphic's own size —
+    /// <c>DrawBulletInfo(*pFmt-&gt;GetBrush()-&gt;GetGraphicObject(), aBulletPos,
+    /// pPara-&gt;GetBulletSize())</c> with <c>aBulletPos.Y = rStartPos.Y + aBulletArea.Top()</c>
+    /// (<c>editeng/source/outliner/outliner.cxx</c>:965-999) — where a character is drawn from
+    /// its bottom and then lifted by its descent. <c>SVX_NUM_BITMAP</c> is excluded from
+    /// <c>ImpCalcBulletArea</c>'s baseline branch (<c>:1470</c>), so the box is the centred one in
+    /// both cases.
+    /// </para>
+    /// <para>
+    /// It costs no glyph and no shaping, which is the whole reason it is a separate path: the
+    /// character route would recode the level's bullet slot, resolve a face for it and draw
+    /// whatever that face holds — on a deck whose level is a bitmap, a Private Use code point no
+    /// installed face has, at half again the text's size. See <see cref="SlideMarkerPicture"/>.
+    /// </para>
+    /// </remarks>
+    private static void EmitMarkerPicture(
+        List<PlacedPicture>? markerPictures,
+        Block block,
+        PlacedLine line,
+        Length areaLeft,
+        Length top,
+        SlideMarkerPicture picture)
+    {
+        if (markerPictures is null) return;
+        if (picture.Width <= Length.Zero || picture.Height <= Length.Zero) return;
+
+        Length pen = areaLeft + block.Paragraph.StartIndent + block.Paragraph.FirstLineIndent;
+
+        long height = line.Height.Mm100;
+        long text = line.TextHeight.Mm100;
+        long box = picture.Height.Mm100;
+        long boxTop = height - text + (text / 2) - (box / 2);
+
+        markerPictures.Add(new PlacedPicture(
+            picture.Image,
+            new DocRect(pen, top + Length.FromMm100(boxTop), picture.Width, picture.Height))
+        {
+            Vector = picture.Vector,
+            IsInline = true,
+        });
     }
 
     /// <summary>
@@ -811,14 +878,42 @@ public static partial class SlideTextLayout
     private static Length MarkerReach(
         SlideParagraph paragraph, Scaling scaling, SlideFonts fonts)
     {
-        if (Shaped(paragraph, scaling, fonts) is not { Shaped: { } shaped } marked)
+        Length width;
+
+        if (MarkerPicture(paragraph) is { } picture)
+        {
+            width = picture.Width;
+        }
+        else if (Shaped(paragraph, scaling, fonts) is { Shaped: { } shaped } marked)
+        {
+            width = shaped.Width(marked.Size);
+        }
+        else
+        {
             return Length.Zero;
+        }
 
         // Never negative: the marker's right edge only ever pushes the first line further right,
         // and a hanging indent wider than the marker leaves the line where the file put it.
-        Length reach = paragraph.FirstLineIndent + shaped.Width(marked.Size);
+        Length reach = paragraph.FirstLineIndent + width;
         return reach > Length.Zero ? reach : Length.Zero;
     }
+
+    /// <summary>
+    /// The picture a paragraph's marker is, when it has one and the paragraph draws it.
+    /// </summary>
+    /// <remarks>
+    /// The same two guards a character marker takes in <see cref="Shaped"/>: a paragraph with no
+    /// text draws no marker at all, and one with no runs has nothing to draw beside. The box a
+    /// paragraph <em>without</em> text still keeps is <see cref="BulletFloored"/>'s and asks the
+    /// marker directly.
+    /// </remarks>
+    private static SlideMarkerPicture? MarkerPicture(SlideParagraph paragraph)
+        => paragraph.Marker is { Picture: { } picture }
+           && paragraph.Text.Length > 0
+           && paragraph.Runs.Count > 0
+            ? picture
+            : null;
 
     /// <summary>
     /// The stretches of a paragraph that are fields, and so break between characters.
@@ -2016,14 +2111,26 @@ public static partial class SlideTextLayout
         // not, so this is a .ppt and ODF rule and the OOXML column cannot reach it.
         if (!paragraph.EmptyKeepsMarkerLevel) return line;
 
-        if (Shaped(paragraph, Scaling.None, fonts, requireText: false) is not
-            { Face: { } face } marked)
+        Length box;
+
+        // A picture bullet's box is `pFmt->GetGraphicSize()` rather than a face's ascent plus
+        // descent (`Outliner::ImplGetBulletSize`, `outliner.cxx`:1345-1350), and it is stated in
+        // absolute units at import — so no font is resolved for it and the fit does not scale it.
+        if (paragraph.Marker is { Picture: { } picture })
+        {
+            box = picture.Height;
+        }
+        else if (Shaped(paragraph, Scaling.None, fonts, requireText: false) is
+                 { Face: { } face } marked)
+        {
+            box = BulletBoxHeight(
+                LineSpacing.Resolve(face, device), paragraph.Runs[0], marked.Marker);
+        }
+        else
         {
             return line;
         }
 
-        Length box = BulletBoxHeight(
-            LineSpacing.Resolve(face, device), paragraph.Runs[0], marked.Marker);
         if (box <= line.Height) return line;
 
         // nDiff/2 is integer division of hundredths of a millimetre, and SetHeight's one-argument

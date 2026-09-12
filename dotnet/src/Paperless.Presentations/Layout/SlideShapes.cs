@@ -319,6 +319,22 @@ public sealed record PlacedText(
 {
     /// <summary>True when the runs are already in slide coordinates.</summary>
     public bool IsUpright => Transform.IsIdentity;
+
+    /// <summary>
+    /// The picture bullets the body's paragraphs are labelled with, in the runs' own coordinates.
+    /// </summary>
+    /// <remarks>
+    /// They travel beside the runs rather than in them because a picture bullet is not a glyph:
+    /// <c>Outliner::PaintBullet</c> hands a <c>SVX_NUM_BITMAP</c> label to
+    /// <c>processDrawBulletInfo</c> and everything else to <c>processDrawPortionInfo</c>
+    /// (<c>editeng/source/outliner/outliner.cxx</c>:902-1000), which is the same split. Null on
+    /// the overwhelming majority of bodies, which is why it is an init property rather than a
+    /// positional one.
+    /// </remarks>
+    public IReadOnlyList<PlacedPicture>? MarkerPictures { get; init; }
+
+    /// <summary>True when there is anything at all to draw.</summary>
+    public bool HasInk => Runs.Count > 0 || MarkerPictures is { Count: > 0 };
 }
 
 /// <summary>One glyph run and the colour it is drawn in.</summary>
