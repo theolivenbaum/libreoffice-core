@@ -49,6 +49,27 @@ A subagent that has never seen the document, has not read the round's brief, and
 forbidden from grepping the repo is the only reader in the loop whose agreement means
 anything.
 
+**In this container a round cannot do it — only the parent session can.** Two rounds reported,
+independently, that a subagent has no subagent tool here: it can be given an image but it cannot
+spawn the reader. So the delegation this section calls the only real control is not available to
+the agent that most needs it. The working arrangement is therefore: **a round names the page and
+says which of its conclusions rest on its own reading; the parent spawns the reviewer.** Do not
+let a round spend time rediscovering this.
+
+**A worked example, because the payoff is easy to disbelieve.** `Thailand17` page 11 had been
+worked by three rounds, and the last of them had closed its character-size half exactly the same
+day — 548 alphanumerics at 11.99 pt against the reference's 548. A reviewer given the composed
+pair and nothing else, not told what to look for, reported in its first paragraph that our table's
+strokes were two to three times heavier than the reference's. Measured out of the PDFs afterwards:
+**1.0 and 2.25 pt against 0.40 and 0.95**, same item counts, both black. Nobody had measured
+stroke width because nobody had a reason to; the rounds were counting characters and row heights.
+
+The same reading also *declined* to see the thing it was sent for — it put the row-height
+difference at "under 2 % of the table's height, spread over nine rows" and called it
+"indistinguishable rather than a difference". That was the correct answer, and it is worth as much
+as the finding: it says the seat behind that page is real but sub-visual, which is a fact about
+how to spend the next round.
+
 ```bash
 export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
 .claude/skills/page-vision/scripts/pair.sh "<doc>__xlsx" --worst --outdir /abs/pairs
