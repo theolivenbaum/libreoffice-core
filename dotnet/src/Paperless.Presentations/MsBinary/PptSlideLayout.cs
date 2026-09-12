@@ -701,7 +701,14 @@ internal sealed class PptSlideLayout
         PptPageEntry Entry,
         PptColourScheme Scheme,
         PptStyleSheet? Styles,
-        PptFieldValues Fields);
+        PptFieldValues Fields)
+    {
+        /// <summary>
+        /// Whether the shape being placed is a member of a group the reference turns into a
+        /// table. See <see cref="IsTableGroup"/>: a cell's text never autofits.
+        /// </summary>
+        public bool InTable { get; init; }
+    }
 
     /// <summary>
     /// What the running fields resolve to on a page.
@@ -825,10 +832,16 @@ internal sealed class PptSlideLayout
         {
             if (depth >= MaxGroupDepth) return;
 
+            // A group the reference replaces by a table hands its members' text to cells, and a
+            // cell keeps none of the item set that would have autofitted it.
+            Context inside = context.InTable || !IsTableGroup(shape)
+                ? context
+                : context with { InTable = true };
+
             AffineTransform inner = GroupSpace(shape, space);
             foreach (EscherShape child in shape.Children)
             {
-                Add(child, context, inner, shapes, depth + 1);
+                Add(child, inside, inner, shapes, depth + 1);
             }
 
             return;
@@ -1441,7 +1454,7 @@ internal sealed class PptSlideLayout
         VerticalText flow = Flow(shape);
         if (PptTextBody.Build(run, context.Styles, context.Scheme, _fontTable,
                               Insets(shape), Anchor(shape), Wraps(shape),
-                              Autofits(shape, run), _bulletPictures) is not { } body)
+                              Autofits(shape, run, context.InTable), _bulletPictures) is not { } body)
         {
             return null;
         }
@@ -1734,11 +1747,37 @@ internal sealed class PptSlideLayout
     /// the text overflows the shape, runs off the bottom of the slide and is clipped away by the
     /// page, losing 39 of 1395 words with the page count still exactly right.
     /// </para>
+    /// <para>
+    /// <strong>And a table cell never autofits, whatever kind of text it holds</strong> —
+    /// <paramref name="inTable"/>. A <c>.ppt</c> writes a table as a plain <em>group</em> of
+    /// rectangles, each of which is an ordinary Body-kind text shape and each of which this rule
+    /// would otherwise shrink on its own; the reference throws the group away and builds one
+    /// <c>SdrTableObj</c> from it (<c>svdfppt.cxx</c>:2913, <c>CreateTable</c> at :7569), copying
+    /// each rectangle's <c>OutlinerParaObject</c> into a cell and <em>nothing else of its item
+    /// set</em>. <c>ApplyCellAttributes</c> (:7412) carries the four text distances, the two
+    /// adjusts, the writing mode and the fill; <c>SDRATTR_TEXT_FITTOSIZE</c> is not among them,
+    /// and <c>svx/source/table</c> mentions autofit nowhere at all. So the fit the group's members
+    /// were given at :1099 is discarded on the way into the table.
+    /// </para>
+    /// <para>
+    /// <strong>Confirmed twice.</strong> In 26.2.4.2's own flat ODP of
+    /// <c>slides/ceiling-001/ppt/Thailand17.ppt</c> the deck's autofitted bodies export
+    /// <c>style:shrink-to-fit="true"</c> and every one of page 11's 54
+    /// <c>table:table-cell</c> styles states none, all 42 of its spans stating a flat
+    /// <c>fo:font-size="12pt"</c>; in its own PDF of the same file every one of the page's 77
+    /// body spans is drawn at 11.99 pt, where this tree drew the 35 spans whose cell wraps to two
+    /// lines at 11.00 — <c>round(12 × 0.925)</c>, <c>constScaleLevels</c>' second row.
+    /// </para>
     /// </remarks>
-    internal static bool Autofits(EscherShape shape, PptTextRun run)
+    /// <param name="shape">The shape carrying the text.</param>
+    /// <param name="run">Its text, whose <c>TextHeaderAtom</c> kind decides the rule.</param>
+    /// <param name="inTable">Whether the shape is a member of a group the reference tables.</param>
+    internal static bool Autofits(EscherShape shape, PptTextRun run, bool inTable = false)
     {
         ArgumentNullException.ThrowIfNull(shape);
         ArgumentNullException.ThrowIfNull(run);
+
+        if (inTable) return false;
 
         if (run.Kind is not (PptTextKind.Body or PptTextKind.HalfBody or PptTextKind.QuarterBody))
         {
@@ -1750,6 +1789,35 @@ internal sealed class PptSlideLayout
 
         return !growsToText && Wraps(shape);
     }
+
+    /// <summary>
+    /// Whether a group shape is really a table.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two properties are in the group descriptor's <em>tertiary</em> table,
+    /// <c>msofbtUDefProp</c>, and the reference reads them only from a shape holding no text of
+    /// its own (<c>svdfppt.cxx</c>:1202-1240): <c>DFF_Prop_tableProperties</c> with either low bit
+    /// set, and <c>DFF_Prop_tableRowProperties</c> present and non-empty. A group answering both
+    /// is replaced wholesale by an <c>SdrTableObj</c> at <c>:2913</c>.
+    /// </para>
+    /// <para>
+    /// This tree still draws the group as the rectangles it literally is — which is what the
+    /// reference's table decomposes back into — so the only consequence read here is the one that
+    /// moves the page: a cell's text is not autofitted. Its row heights are the members' own
+    /// anchors rather than the grid <c>CreateTableRows</c> derives, which is a separate and
+    /// smaller difference; see <c>probes/slides-bullet2-r112/results.md</c>.
+    /// </para>
+    /// <para>
+    /// Censused over the 51 <c>.ppt</c> of the corpus
+    /// (<c>probes/slides-bullet2-r112/tablecensus.py</c>): <strong>34 table groups in 10
+    /// documents, 1089 members, of which 391 in 5 documents hold Body-kind text</strong> and are
+    /// therefore the reach of the arm above.
+    /// </para>
+    /// </remarks>
+    internal static bool IsTableGroup(EscherShape group)
+        => (group.TertiaryProperties.Value(PptShapeGeometry.TableProperties, 0) & 3) != 0
+           && !group.TertiaryProperties.Data(PptShapeGeometry.TableRowProperties).IsEmpty;
 
     /// <summary>
     /// A shape's text, whether it holds the characters itself or refers to the slide list.
@@ -1773,10 +1841,19 @@ internal sealed class PptSlideLayout
 
             uint reference = DffRecordBuffer.ReadUInt32(_stream.Content(record));
 
-            // A shape that refers to the slide list still carries its own extensions, and they
-            // still apply to the text it points at.
+            // A shape that refers to the slide list still carries its own extensions and its own
+            // ruler, and both still apply to the text it points at. See `PptTextReader.RulerIn`:
+            // the reference remembers the ruler's offset before it patches the client textbox
+            // header over to the referenced text, and every ruler in the two decks this decides
+            // is in a textbox that refers out.
+            PptTextRuler? ruler = PptTextReader.RulerIn(_stream, start, end);
+
             return OutlineText(context.Entry, reference, context.Fields) is { } outline
-                ? outline with { Extended = extended ?? outline.Extended }
+                ? outline with
+                  {
+                      Extended = extended ?? outline.Extended,
+                      Ruler = ruler ?? outline.Ruler,
+                  }
                 : null;
         }
 

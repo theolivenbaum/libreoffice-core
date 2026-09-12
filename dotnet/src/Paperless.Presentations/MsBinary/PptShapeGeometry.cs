@@ -52,6 +52,28 @@ internal static class PptShapeGeometry
     /// <summary>The <see cref="FitTextToShape"/> bit meaning "grow the shape to its text".</summary>
     public const uint FitShapeToText = 2;
 
+    /// <summary>
+    /// The property a group shape carries when it is really a table —
+    /// <c>DFF_Prop_tableProperties</c>.
+    /// </summary>
+    /// <remarks>
+    /// It lives in the <em>tertiary</em> property table, <c>msofbtUDefProp</c>, and is read only
+    /// off a shape that holds no text of its own — a group's descriptor
+    /// (<c>filter/source/msfilter/svdfppt.cxx</c>:1202-1240). A low bit set is what the reference
+    /// tests (<c>nTableProperties &amp; 3</c>); it then wants
+    /// <see cref="TableRowProperties"/> beside it, and takes the group for a table only when both
+    /// arrive.
+    /// </remarks>
+    public const ushort TableProperties = 927;
+
+    /// <summary>The row heights beside <see cref="TableProperties"/>, as a complex value.</summary>
+    /// <remarks>
+    /// Six bytes of counts and then one <c>sal_uInt32</c> per row. The heights themselves are not
+    /// read here: what the group's members are drawn in is their own anchors, and the array only
+    /// has to be <em>present</em> for the reference to build a table.
+    /// </remarks>
+    public const ushort TableRowProperties = 928;
+
     /// <summary>How lines are joined; the property's own default is a mitre.</summary>
     public const ushort LineJoin = 470;
 
