@@ -381,9 +381,18 @@ public sealed class SheetCellFormats
         }
 
         /// <summary>Records the format everything else falls back to.</summary>
+        /// <remarks>
+        /// Pool index 0 — <see cref="SheetCellFormat.Default"/> — is a legitimate answer here and
+        /// not "no answer", which is why this does not carry the <c>index &lt;= 0</c> guard the
+        /// cell, row and column setters do. SpreadsheetML states the sheet default twice: once as
+        /// the workbook's <c>Normal</c> cell style and again, on a sheet that has one, as a
+        /// <c>&lt;col&gt;</c> spanning to the last column, and the second must be able to take the
+        /// plain default back off the first.
+        /// </remarks>
+        /// <param name="index">The pool index, from <see cref="Intern"/>.</param>
         public void SetSheetDefault(int index)
         {
-            if (index > 0) _sheet = index;
+            if (index >= 0) _sheet = index;
         }
 
         /// <summary>True when nothing but the default has been recorded.</summary>

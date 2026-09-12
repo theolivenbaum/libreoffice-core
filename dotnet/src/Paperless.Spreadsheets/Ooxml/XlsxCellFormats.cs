@@ -24,8 +24,9 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// to. See <see cref="Apply"/>.
 /// </param>
 /// <param name="StyleDefault">
-/// The <c>Normal</c> cell style's own format — Calc's <c>Default</c> cell style, and what an
-/// emptied cell falls back to. See <see cref="XlsxCellFormats.NormalStyleXf"/>.
+/// The <c>Normal</c> cell style's own format — Calc's <c>Default</c> cell style. What an emptied
+/// pivot cell falls back to, and what a cell that states no <c>s</c> in a row and column that
+/// state none resolves to. See <see cref="XlsxCellFormats.NormalStyleXf"/>.
 /// </param>
 internal sealed record XlsxCellFormatTable(
     IReadOnlyList<SheetCellFormat> Formats,
@@ -205,8 +206,22 @@ internal static class XlsxCellFormats
     /// sheet stating <c>s="0"</c> comes back Liberation Serif 18 red.
     /// </para>
     /// <para>
-    /// The same rule, measured the same way, already decides which number format an unstated cell
-    /// takes: see <c>XlsxStyles.DefaultFormatId</c> and <c>probes/numfmt-r68</c>.
+    /// The same rule, measured the same way, decides which number format an unstated cell takes
+    /// (<c>XlsxStyles.DefaultFormatId</c>, <c>probes/numfmt-r68</c>) and — since round 111 — which
+    /// font and alignment it takes (<see cref="XlsxSheetFormats"/>, <c>probes/sheet-default-r111</c>).
+    /// The three had to agree: a tree where a cell's number format came from the <c>Normal</c>
+    /// style and its font from <c>cellXfs[0]</c> would be wrong on a workbook separating them in a
+    /// way neither reading explains.
+    /// </para>
+    /// <para>
+    /// <strong>The corpus can separate them, unlike the pivot half.</strong> Of the 243
+    /// <c>.xlsx</c>/<c>.xlsm</c> of the sheets track carrying both tables, six state different
+    /// content in the two and three still differ once the <c>apply…</c> flags and the schema's own
+    /// alignment defaults are folded out: <c>jobs-bulletin-51-22-december-2025.xlsx</c> (a font
+    /// declaring no generic class against one declaring <c>swiss</c>),
+    /// <c>sectors-defense-and-aerospace.xlsx</c> and <c>Published_Issuances_2024.xlsx</c> (an
+    /// <c>&lt;alignment&gt;</c> on the <c>cellXfs</c> side only). 26.2.4.2's own <c>.fods</c> of
+    /// all three builds its <c>Default</c> cell style out of the <c>Normal</c> entry.
     /// </para>
     /// </remarks>
     /// <param name="styleSheet">The <c>styleSheet</c> root.</param>
