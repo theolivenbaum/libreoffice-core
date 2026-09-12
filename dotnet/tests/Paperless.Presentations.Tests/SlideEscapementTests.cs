@@ -170,4 +170,64 @@ public class SlideEscapementTests
 
         Baseline("baseline=\"30000\"").Points.ShouldBe(Baseline(string.Empty).Points, 0.01);
     }
+
+    /// <summary>Two paragraphs, the first of which may carry an ordinal.</summary>
+    private static XElement TwoParagraphs(string ordinalProperties) => XElement.Parse(
+        $"""
+         <a:txBody xmlns:a="{A}">
+           <a:bodyPr/>
+           <a:p>
+             <a:r><a:rPr lang="en-GB" sz="2400"/><a:t>5</a:t></a:r>
+             <a:r><a:rPr lang="en-GB" sz="2400" {ordinalProperties}/><a:t>th</a:t></a:r>
+           </a:p>
+           <a:p>
+             <a:r><a:rPr lang="en-GB" sz="2400"/><a:t>March</a:t></a:r>
+           </a:p>
+         </a:txBody>
+         """);
+
+    /// <summary>
+    /// A subscript makes its line taller by the whole of its drop, and a superscript of the same
+    /// size makes it no taller at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>RecalcFormatterFontMetrics</c> takes the largest ascent and the largest descent of a
+    /// line separately, and measures an escaped portion twice: once unescaped, once as
+    /// <c>metric x proportion / 100 +/- fontHeight x escapement / 100</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:3164-3183). For a subscript the second term is
+    /// a subtraction of a negative, so the descent grows to
+    /// <c>0.2 em x 0.58 + 0.25 em = 0.366 em</c> where an unescaped line's is <c>0.2 em</c>; for a
+    /// superscript the ascent's second answer, <c>1 em x 0.58 + 0.3 em = 0.88 em</c>, loses to the
+    /// unescaped <c>1 em</c> the same line already carries. The asymmetry is the assertion: a rule
+    /// that added the rise to both sides, or to neither, would fail one of these two.
+    /// </para>
+    /// <para>
+    /// Stated as the distance between the two full-size baselines, because that is the quantity
+    /// the line's height is. At 24 pt an em is 847 hundredths of a millimetre, so the plain pitch
+    /// is <c>fround(847 x 1.2) = 1016</c>, and the subscript's descent is
+    /// <c>169 x 58 / 100 + 847 x 25 / 100 = 98 + 211 = 309</c> against the plain 169 — a pitch of
+    /// <c>847 + 309 = 1156</c>, which is 3.97 pt more. See <c>SlideTextLayout.FixedCellBox</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ASubscriptMakesItsLineTallerAndASuperscriptDoesNot()
+    {
+        double Pitch(string properties)
+        {
+            List<PlacedGlyphRun> placed = SlideTextLayout.Place(
+                PptxTextBody.Read(TwoParagraphs(properties)), Area, new SlideFonts());
+
+            // Document order: the digit, the ordinal beside it, and the second paragraph. The
+            // ordinal sits off the baseline, so the pitch is taken between the two full-size runs.
+            placed.Count.ShouldBe(3);
+
+            return placed[2].Run.Origin.Y.Points - placed[0].Run.Origin.Y.Points;
+        }
+
+        double plain = Pitch(string.Empty);
+
+        Pitch("baseline=\"30000\"").ShouldBe(plain, 0.01);
+        Pitch("baseline=\"-25000\"").ShouldBe(plain + 3.97, 0.05);
+    }
 }
