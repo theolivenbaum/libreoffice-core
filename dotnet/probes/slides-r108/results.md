@@ -16,9 +16,10 @@ Two results.
 2. **The remaining eleven are three causes, separated by measurement rather than by argument.**
    Every one of the twelve was put through the same four-leg experiment — the reference reading
    the `.ppt`, the reference reading its own flat ODP of that `.ppt`, this tree reading the
-   `.ppt`, and this tree reading that same flat ODP. The twelve split **5 / 3 / 3** into an
-   import cause, a layout cause and a round trip that is not faithful and therefore says nothing;
-   the twelfth is the one this round fixed. `legs.txt` is that table.
+   `.ppt`, and this tree reading that same flat ODP. The twelve split **6 / 3 / 3** — an import
+   cause, a layout cause, and a round trip that is not faithful on the page and therefore says
+   nothing either way. One of the six imports is the page this round fixed, so the eleven that
+   remain are **5 / 3 / 3**. `legs.txt` is that table.
 
 ## Environment
 
@@ -77,11 +78,13 @@ W3_Case_Study_…_Ed                                          10    24.01     24
 ```
 
 **The brief's split was the wrong one, and this is the useful one.** Round 103 divided the
-residual by whether the alphanumeric counts match. That division does not survive: of the four
-same-alphanumeric pages left at head, two are LAYOUT and one is IMPORT and one is
-ODP-NOT-FAITHFUL, and of the five that differ in alphanumerics four are IMPORT and one is
+residual by whether the alphanumeric counts match. That division does not survive: of the **six**
+same-alphanumeric pages left at head, three are LAYOUT, one is IMPORT and two are
+ODP-NOT-FAITHFUL; of the **five** that differ in alphanumerics, four are IMPORT and one is
 ODP-NOT-FAITHFUL. Alphanumeric agreement is a property of the *text* and the causes divide by
-where in the pipeline the answer is decided.
+where in the pipeline the answer is decided — which is why the brief's "four differ in
+alphanumeric count, work the identical-text group" put the two halves of one cause on either side
+of the line.
 
 **Two cautions this table carries.**
 
@@ -290,9 +293,9 @@ such; table 2 is the one above.
 
 # 3. The other eleven, named
 
-## 3.1 IMPORT — four pages, and they are not one thing
+## 3.1 IMPORT — five pages, and they are not one thing
 
-`Thailand17` 8, `W3_Case_Study…` 10, `Fundamentals_Module_1_basics` 6 and
+`Thailand17` 8 and 11, `W3_Case_Study…` 10, `Fundamentals_Module_1_basics` 6 and
 `ws_prod-…-M.017-(French)-France` 16 all agree with the reference once handed its own ODP and
 disagree reading the `.ppt`. They are not one cause:
 
@@ -304,6 +307,10 @@ disagree reading the `.ppt`. They are not one cause:
   belong to the fit.
 * **`Fundamentals_Module_1_basics` 6**: 44 alphanumerics against our 87, and we draw 7.08 pt
   against 32. Same shape of problem, an order of magnitude worse.
+* **`Thailand17` 11** is the other way round — 548 alphanumerics against our 358, so here the
+  `.ppt` leg draws *less* than the reference and the flat ODP leg draws all 548 at 11.99, the
+  reference's size. Not obviously the same cause as page 8 of the same deck, and not established
+  either way.
 * **`ws_prod-…-M.017-(French)-France` 16 is a bullet the reference does not draw.** Reading the
   `.ppt` we give the first four paragraphs a bullet — an `OpenSymbol` glyph at **25.795 pt** beside
   17.008 pt text — and indent them behind it; 26.2.4.2 draws no bullet on those four and starts its
@@ -389,10 +396,11 @@ re-run this round, so 1101 is arithmetic rather than a measurement and is not qu
   ODP, so a single-variable series on the ODP itself — the same method round 107 used on the
   escapement — will separate the proportional line height from the interior empty paragraphs
   without touching the `.ppt` reader at all.
-* **The four IMPORT pages** are three separate questions and two of them (`Thailand17` 8 /
-  `W3_Case_Study` 10, and `Fundamentals_Module_1_basics` 6) are *not size questions*: we draw five
-  to eleven times the reference's alphanumerics on those pages. They should leave the O15 statistic
-  and become their own seat.
+* **The five IMPORT pages** are at least three separate questions, and three of them
+  (`Thailand17` 8, `W3_Case_Study` 10 and `Fundamentals_Module_1_basics` 6) are *not size
+  questions*: we draw two to five times the reference's alphanumerics on them. `Thailand17` 11
+  draws two thirds of them. All four should leave the O15 statistic and become their own seat;
+  only `ws_prod-…-France` 16, the oversized bullet, is a fit question.
 * **The 31 paragraphs `ulpct2.py` does not explain**, 26 of them in `EG1_dsrc tech.ppt`, where no
   candidate is admitted. The likeliest reading is that the document's pinned percentage set is
   incomplete — its text is 3.5 to 4.3 pt, where the master-unit truncation makes several
