@@ -1680,6 +1680,15 @@ reproducible-builds convention (seconds since the Unix epoch, read as UTC) in bo
 `/CreationDate` and the header fields, so with it set two runs are byte-equal with nothing masked
 at all. Leave it unset for ordinary rendering; a printout's date is meant to be today's.
 
+**The signature of a forgotten pin is a *total*, and it reads as catastrophe.** The figure above
+— 17 of 171 — is what a day's drift costs on a track where only some documents print a date.
+Forget the pin on a track where the difference is the PDF's own `/CreationDate` and *every*
+document moves: round 111's first, unpinned sweep of the chart track reported **176 of 176
+moved**, with every page count and every alphanumeric count identical on both sides; pinned, the
+same sweep reported **0 of 176**. So a reach figure equal to the whole set is not a finding, it
+is a missing `SOURCE_DATE_EPOCH` until proven otherwise — and the tell is exactly that pairing,
+everything moving while nothing the gate scores does.
+
 **`TODO.raster-ceiling.md` lists 37 pages the word gate cannot win.** LibreOffice rasterises
 an embedded object on those, so its PDF holds a picture where ours holds real searchable text —
 ours is the better output and `wc -w` scores it as failure. An embedded metafile is the
