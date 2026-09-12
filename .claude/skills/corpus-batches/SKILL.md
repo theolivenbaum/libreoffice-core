@@ -1408,3 +1408,43 @@ makes it dangerous.
 So after any restart, **rebuild both binaries before scoring anything**, and prefer a base you
 published yourself in this run over one you found on disk. If you must reuse one, check it: run
 a document you know the change moves and confirm the base binary does *not* move it.
+
+## The reference is reproducible, except on four documents — and you should know which
+
+Two full-corpus gates at different commits, same binary (26.2.4.2), same corpus, same
+`RENDER_TIMEOUT`, three workers each. The **reference** leg should be identical between them,
+because nothing about it changed. It very nearly is, and the exceptions are worth knowing by
+name rather than being rediscovered as a phantom regression:
+
+| | of 947 |
+|---|---|
+| reference renders whose extracted text is identical | **943** |
+| textually different | **4**, all `.xlsx` |
+| different in the *alphanumeric character* count (column 9) | **2** |
+| largest such difference | **3 characters** |
+
+The four are `alle einzeln`, `SIL_TDB648`, `PBN Matrix NAAs (V01)` and
+`ans_mappings_of_eccairs_terms`; the last two differ in their text layer without changing the
+character count at all. Banked as `probes/gate-r111/ref-reproducibility.tsv`.
+
+Two distinct causes, and only one of them is a scoring artefact:
+
+- **A font resolved differently between runs.** `alle einzeln` came back `Janßen,` in one run
+  and `Janssen,` in the other, twice — which is exactly its +2. That is the same class as the
+  five tarball font confounds already in `CLAUDE.md`, showing up as run-to-run rather than
+  machine-to-machine.
+- **The reference produced a genuinely different PDF.** `SIL_TDB648`'s file is about a
+  kilobyte smaller in one run, with `Primus`, `Epic`, `EGPWM` and `Threat` in a different
+  order and `MK V`/`MK VII` joined into `MK VMK VII`. Not extraction: content-stream ordering.
+
+**What this licenses and what it does not.** The temptation on discovering this is to say the
+gate has a ±3 character noise floor and stop trusting small deltas. That is wrong and it is
+the more expensive error, because it would discard real findings: **945 of 947 documents
+reproduce their character count exactly**, so a one-character improvement on any of them is a
+real one. What the measurement licenses is much narrower — on these four documents, and only
+these, a small delta must be confirmed by re-rendering the reference before it is attributed
+to a change in this tree.
+
+Both differences are far inside the gate's own max(2 %, 15) band, so no verdict was ever at
+risk in either direction. The finding is about attributing *sub-verdict* movement, which is
+what a confinement measures.
