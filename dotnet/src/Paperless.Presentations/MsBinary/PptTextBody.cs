@@ -224,7 +224,24 @@ internal static class PptTextBody
             ? properties.BulletOffset
             : run.Ruler?.BulletOffset(depth) ?? level.BulletOffset;
 
-        Length size = runs.Count > 0 ? runs[0].Size : Length.FromPoints(characters.FontHeight);
+        // A percentage paragraph space is resolved against the size of the paragraph's LAST
+        // portion, not its first and not its largest. `PPTParagraphObj::ApplyTo` reads the height
+        // off `m_PortionList.back()` before it converts the percentage to master units
+        // (`filter/source/msfilter/svdfppt.cxx`:6296-6306, this tree) --
+        //
+        //     m_PortionList.back()->GetAttrib(PPT_CharAttr_FontHeight, nFontHeight, ...);
+        //     if (static_cast<sal_Int16>(nUpperDist) > 0)
+        //         nUpperDist = -static_cast<sal_Int16>((nFontHeight * nUpperDist * 100) / 1000);
+        //
+        // -- so a bullet whose last words are set smaller than its first gets a proportionally
+        // smaller gap above it. Measured at 26.2.4.2 rather than only read: its own flat ODP of
+        // `gillikin_online_user_mtg_2010.ppt` gives page 2's five bullets `fo:margin-top` of
+        // 0.3 cm, 0.3, 0.318, 0.3 and 0.212 -- 20/80 of 34 pt, 34, **36** and **24**, which are
+        // the last portion of each paragraph, where the first portion of the third and fifth is
+        // 34 pt in both. Over the whole `.ppt` column this is the last portion 205 times out of
+        // 208 multi-size paragraphs against 25.5 % for the first and 39.4 % for the largest
+        // (`probes/slides-r108/ulpct2.py`).
+        Length size = runs.Count > 0 ? runs[^1].Size : Length.FromPoints(characters.FontHeight);
 
         return new SlideParagraph(
             text,
