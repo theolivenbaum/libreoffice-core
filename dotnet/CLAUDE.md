@@ -240,6 +240,38 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    measurably below 0.95 of the pitch and is not yet characterised, and **no corpus document states
    `c:layoutTarget val="inner"` at all**, which retires that lead for good.
 
+   ***Done, and it ships a dictionary — but it does NOT close `038`'s gate row, and r105's
+   arithmetic saying it would is a misreading.*** `hyph_en_US.dic` (106,414 bytes, BSD-style,
+   *"unlimited copying, redistribution and modification with this copyright and license
+   information"*) and `README_hyph_en_US.txt` are vendored into
+   `Paperless.Core/Globalization/Hyphenation` and copied beside the assembly like the bundled
+   faces; **`hyph_fr.dic` (LGPL-2.1+) and `hyph_es.dic` (GPL-3.0+/LGPL-3.0+/MPL-1.1+) are
+   deliberately not committed** and are supplied through `PAPERLESS_HYPHEN_DICTS` (a path list,
+   searched one level deep so a LibreOffice `share/extensions` resolves `dict-fr/hyph_fr.dic`) or
+   `Hyphenators.Register(language, stream)`; `=0` turns the lot off, which is the state a
+   deployment without the data is in. `IHyphenator` moved to `Paperless.Core.Globalization`
+   because `ChartAxisLabels` is in Core and Core may not reference `Paperless.Text`.
+
+   **Two rules to keep.** The leading limit EditEngine imposes is a **character count, not a
+   width**: `nMaxBreakPos - nWordStart - 1`, whose `+1` is commented *"Before the dickey letter"*
+   (`editeng/source/editeng/impedit3.cxx`:2143-2160), so one character's room is *reserved* for
+   the hyphen rather than the hyphen being measured, and measuring it admits breaks the reference
+   refuses. And **a turned label the reference outlines still costs us its characters**: we turn
+   `038`'s axis now and our column 9 is **1585 before and after**, because 26.2.4.2 reads 1449 by
+   drawing those labels as filled outlines. r105's *"the reference with its hyphenator off is
+   1585 too"* is an identity between the reference's own two states and says nothing about ours.
+   Closing that row is the shear rule's job, and outlining glyphs to green a text gate is not a
+   fix.
+
+   Reach, measured rather than censused: **3 renderings of 568 scored move, all chart-bearing,
+   all three better against 26.2.4.2 and none worse** (summed |ink|% 57.00 → 54.72 over r105's
+   eight candidates, one MAJOR page cleared), **0 gate verdicts**, **0 of 399 non-chart
+   documents**. Confirmed twice — the four hyphens 26.2.4.2 itself draws on corpus charts are
+   reproduced 4 of 4, and 22 authored one-word fixtures rendered with each renderer's dictionary
+   both on and off agree **19 of 22 against a base rate of 13**. Residual: `Service`, one word of
+   22, which this tree hyphenates and 26.2.4.2 does not; the leading room is refuted as the cause
+   and nothing replaces it. `probes/hyphen-r106/results.md`.
+
    ***The ODF twin of that document closed on a different attribute, and the `.pptx` is untouched.***
    `N2_E_Maestroni_Swarm_COP.odp` went from 340 alphanumeric characters clear of 26.2.4.2 to **84**
    when `OdfChartPlot` was taught to read **`text:line-break`**, which it had been passing as false
