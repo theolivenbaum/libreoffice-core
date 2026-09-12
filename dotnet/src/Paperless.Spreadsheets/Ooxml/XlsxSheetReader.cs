@@ -55,7 +55,6 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     private readonly XlsxFile _file = file;
     private readonly List<Diagnostic> _diagnostics = diagnostics;
     private readonly Dictionary<int, SharedFormula> _sharedFormulas = [];
-    private XlsxHiddenValues _hidden = XlsxHiddenValues.None;
     private XlsxPivotLabels _pivotLabels = XlsxPivotLabels.None;
     private bool _reportedTruncation;
 
@@ -72,7 +71,6 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
 
         _sharedFormulas.Clear();
         MergeMap merges = MergeMap.Read(worksheet);
-        _hidden = XlsxHiddenValues.Read(worksheet);
         _pivotLabels = XlsxPivotLabels.Read(_file, sheet, worksheet);
 
         List<ContentTableRow> rows = [];
@@ -402,11 +400,16 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
             Formula = ReadFormula(element, row, column),
         };
 
-        // A conditional format may replace a cell's value with an icon or a bar rather than
-        // decorating it. The cell keeps its value — charts and the sheet's own formulas still
-        // read it — and draws no text at all.
-        if (!_hidden.Hides(row, column) && !_pivotLabels.Blanks(row, column))
-            AddText(cell, display);
+        // **A cell an icon set or a data bar hides is hidden at PAINT time and not here.**
+        // `ScOutputData::DrawStrings` clears `bDoCell` after the row's height is settled
+        // (`sc/source/ui/view/output2.cxx`:1691-1698 in this tree), so the string still measures
+        // the row — and a cell whose pattern carries a conditional format is measured through
+        // the EditEngine branch, which is a line taller than the arithmetic one. Dropping the
+        // text here made the row shrink with it: on
+        // `tests/corpus/features/sheet-cf-icon-set-x14-custom.xlsx` the pitch was 13.78 pt
+        // against 26.2.4.2's own `style:row-height="0.2071in"`, 14.91. `SheetDecoration.HidesValue`
+        // is the drawing-time answer and `SpreadsheetPages.DrawCell` asks it.
+        if (!_pivotLabels.Blanks(row, column)) AddText(cell, display);
         return cell;
     }
 

@@ -181,8 +181,8 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
         // corpus's 644 worksheet shapes name a preset that is not `rect`. See
         // `SheetShapeInk`.
         SheetShapeInk.Draw(
-            sink, box, drawing.Fill, drawing.Gradient, drawing.Stroke, drawing.StrokeWidth,
-            drawing.Preset, drawing.Adjustments,
+            sink, box, drawing.Fill, drawing.Gradient, drawing.Texture, drawing.Stroke,
+            drawing.StrokeWidth, drawing.Preset, drawing.Adjustments,
             drawing.FlipHorizontal, drawing.FlipVertical, scale);
 
         // The vector before the raster, since a shape carrying both means the DrawingML `svgBlip`
@@ -246,7 +246,7 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
                 // The ink first and the picture over it, which is the order a leaf shape states
                 // them in: a `pic` with a fill behind it is a picture on a coloured ground.
                 SheetShapeInk.Draw(
-                    sink, where, part.Fill, part.Gradient, part.Stroke, part.StrokeWidth,
+                    sink, where, part.Fill, part.Gradient, null, part.Stroke, part.StrokeWidth,
                     part.Preset, part.Adjustments,
                     part.FlipHorizontal, part.FlipVertical, scale);
 

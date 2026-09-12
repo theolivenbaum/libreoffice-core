@@ -66,13 +66,26 @@ public static class EscherInk
     private const uint DefaultFillColour = 0x00FFFFFFu;
 
     /// <summary>A shape's resolved interior and outline.</summary>
-    /// <param name="Fill">The interior colour, or null when the shape is not filled.</param>
+    /// <param name="Fill">The interior colour, or null when the shape is not filled flat.</param>
     /// <param name="Stroke">The outline colour, or null when it has none.</param>
     /// <param name="StrokeWidth">How wide that outline is.</param>
     public readonly record struct Ink(Colour? Fill, Colour? Stroke, Length StrokeWidth)
     {
+        /// <summary>
+        /// True when the shape is filled with a bitmap rather than with a colour.
+        /// </summary>
+        /// <remarks>
+        /// <c>mso_fillPattern</c>, <c>mso_fillTexture</c> and <c>mso_fillPicture</c>, which are
+        /// the three fill types <c>ApplyFillAttributes</c> resolves to
+        /// <c>drawing::FillStyle_BITMAP</c> (<c>filter/source/msfilter/msdffimp.cxx</c>:1335-1339
+        /// in this tree). <see cref="Fill"/> is null for all three: their colour is inside the
+        /// tile and building it needs the blip store, which this class does not have. See
+        /// <see cref="EscherPatternFill"/>.
+        /// </remarks>
+        public bool BitmapFill { get; init; }
+
         /// <summary>True when there is something to paint.</summary>
-        public bool HasInk => Fill is not null || Stroke is not null;
+        public bool HasInk => Fill is not null || Stroke is not null || BitmapFill;
     }
 
     /// <summary>Reads a shape's fill and outline.</summary>
@@ -96,13 +109,20 @@ public static class EscherInk
 
         // Only the fill types that paint something. The reference's switch
         // (msdffimp.cxx:1330-1400) leaves eXFill at NONE for anything it does not name, which is
-        // `mso_fillBackground` and every value past it. A gradient or a bitmap fill is painted
-        // here as its foreground colour, which is one colour short of right and a great deal
-        // closer than nothing; 2 shapes in 1 corpus `.xls` state one.
+        // `mso_fillBackground` and every value past it. A gradient is still painted here as its
+        // foreground colour, which is one colour short of right and a great deal closer than
+        // nothing.
         uint fillType = properties.Value(EscherPropertyIds.FillType);
         if (fillType > LastPaintingFillType) filled = false;
 
-        Colour? fill = filled
+        // A pattern, a texture and a picture are the three the reference resolves to
+        // `FillStyle_BITMAP`, and their colour is inside the tile rather than in `fillColor`.
+        // Painting the foreground colour over the whole shape put a solid grey block where
+        // `apron-area.xls` states a hatch; the caller builds the tile through
+        // `EscherPatternFill` and this reports only that there is one to build.
+        bool bitmap = filled && fillType is >= FirstBitmapFillType and <= LastBitmapFillType;
+
+        Colour? fill = filled && !bitmap
             ? EscherColour.Resolve(
                 properties.Value(EscherPropertyIds.FillColour, DefaultFillColour),
                 Colour.White,
@@ -122,8 +142,15 @@ public static class EscherInk
             ? Length.Zero
             : Length.FromEmu(properties.Value(EscherPropertyIds.LineWidth, DefaultLineWidth));
 
-        return new Ink(fill, stroke, width);
+        return new Ink(fill, stroke, width) { BitmapFill = bitmap };
     }
+
+    /// <summary>The first <c>MSO_FILLTYPE</c> the reference paints as a bitmap.</summary>
+    /// <remarks><c>mso_fillPattern</c>; the next two are texture and picture.</remarks>
+    private const uint FirstBitmapFillType = 1;
+
+    /// <summary>The last of them, <c>mso_fillPicture</c>.</summary>
+    private const uint LastBitmapFillType = 3;
 
     /// <summary>The last <c>MSO_FILLTYPE</c> that paints anything.</summary>
     /// <remarks>

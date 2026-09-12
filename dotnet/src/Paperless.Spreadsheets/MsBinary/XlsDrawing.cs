@@ -452,6 +452,7 @@ internal sealed class XlsDrawingCollector(
                 // Escher states a shape *type* rather than a DrawingML preset name, so the ink is
                 // painted through the anchor's box; see `SheetShapeInk`, which falls back to it.
                 Fill = ink.Fill,
+                Texture = ink.BitmapFill ? TextureOf(shape, palette) : null,
                 Stroke = ink.Stroke,
                 StrokeWidth = ink.StrokeWidth,
 
@@ -555,6 +556,80 @@ internal sealed class XlsDrawingCollector(
 
         return new SheetPicture(RasterImage.Encoded(bytes, mediaType), null);
     }
+
+    /// <summary>
+    /// The tile a shape's pattern, texture or picture fill is painted with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The colours are resolved here rather than in <see cref="EscherPatternFill"/> because the
+    /// palette is the host's: <c>fillColor</c> and <c>fillBackColor</c> are ordinary
+    /// <c>MSO_CLR</c> values and go through <see cref="EscherColour"/> with the workbook's own
+    /// scheme, exactly as the fill and line colours beside them do. Both default to <b>white</b>,
+    /// which is <c>ApplyFillAttributes</c>' <c>Color aCol1( COL_WHITE ), aCol2( COL_WHITE )</c>
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1408-1414 in this tree) rather than the
+    /// property table's own defaults.
+    /// </para>
+    /// <para>
+    /// A texture states its tile in EMUs through <c>fillWidth</c> and <c>fillHeight</c>
+    /// (<c>:1444-1451</c>) and a pattern states none, so a pattern's tile is the bitmap's own
+    /// size at 96 dpi. A picture is stretched once, which <see cref="SheetShapeTexture"/> spells
+    /// as an empty tile.
+    /// </para>
+    /// <para>
+    /// A shape whose blip cannot be resolved gets no fill at all, which is what the reference
+    /// draws: <c>ApplyFillAttributes</c> puts <c>FillStyle_BITMAP</c> on the item set and then
+    /// only adds an <c>XFillBitmapItem</c> inside <c>if (IsProperty(DFF_Prop_fillBlip))</c>.
+    /// </para>
+    /// </remarks>
+    private SheetShapeTexture? TextureOf(EscherShape shape, XlsCellFormats? palette)
+    {
+        if (blips is not { Count: > 0 }) return null;
+
+        uint index = shape.Properties.Value(EscherPropertyIds.FillBlip);
+        if (index == 0 || !blips.TryGetValue((int)index, out EscherBlip blip)) return null;
+
+        Func<int, Colour?>? scheme = palette is null ? null : palette.SchemeColour;
+
+        Colour foreground = EscherColour.Resolve(
+            shape.Properties.Value(EscherPropertyIds.FillColour, White), Colour.White, scheme);
+
+        Colour background = EscherColour.Resolve(
+            shape.Properties.Value(EscherPropertyIds.FillBackColour, White), Colour.White, scheme);
+
+        if (EscherPatternFill.Tile(blip.Bytes.Span, foreground, background) is not { } tile)
+        {
+            return null;
+        }
+
+        uint kind = shape.Properties.Value(EscherPropertyIds.FillType);
+
+        DocSize extent = kind switch
+        {
+            PictureFill => default,
+            TextureFill when Stated(shape) is { } stated => stated,
+            _ => tile.IsDecoded ? EscherPatternFill.Extent(tile) : default,
+        };
+
+        return new SheetShapeTexture(tile, extent, EscherPatternFill.Opacity(shape.Properties));
+
+        static DocSize? Stated(EscherShape shape)
+        {
+            Length width = Length.FromEmu(shape.Properties.Value(EscherPropertyIds.FillWidth));
+            Length height = Length.FromEmu(shape.Properties.Value(EscherPropertyIds.FillHeight));
+
+            return width > Length.Zero && height > Length.Zero ? new DocSize(width, height) : null;
+        }
+    }
+
+    /// <summary>An <c>MSO_CLR</c> literal white, which both fill colours default to.</summary>
+    private const uint White = 0x00FFFFFFu;
+
+    /// <summary><c>mso_fillTexture</c>.</summary>
+    private const uint TextureFill = 2;
+
+    /// <summary><c>mso_fillPicture</c>.</summary>
+    private const uint PictureFill = 3;
 
     /// <summary>
     /// The media type of a raster a backend can decode, or null for anything else.

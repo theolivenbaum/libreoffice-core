@@ -301,6 +301,37 @@ public static class EscherPropertyIds
     public const ushort FillColour = 385;
 
     /// <summary>
+    /// How opaque the fill is, as a 16.16 fixed-point fraction of one.
+    /// </summary>
+    /// <remarks>
+    /// <c>DFF_Prop_fillOpacity</c>. <c>ApplyFillAttributes</c> turns it into an
+    /// <c>XFillTransparenceItem</c> for every fill style but a gradient
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1367-1376 in this tree).
+    /// </remarks>
+    public const ushort FillOpacity = 386;
+
+    /// <summary>
+    /// The second fill colour — the one a pattern's <em>black</em> pixels stand for.
+    /// </summary>
+    /// <remarks><c>DFF_Prop_fillBackColor</c>; white where the shape states none.</remarks>
+    public const ushort FillBackColour = 387;
+
+    /// <summary>
+    /// The blip a pattern, texture or picture fill draws.
+    /// </summary>
+    /// <remarks>
+    /// <c>DFF_Prop_fillBlip</c>. A one-based index into the drawing group's blip store, exactly
+    /// as <see cref="Picture"/> is; both are written with the property table's blip bit set.
+    /// </remarks>
+    public const ushort FillBlip = 390;
+
+    /// <summary>A texture tile's width in EMUs, <c>DFF_Prop_fillWidth</c>.</summary>
+    public const ushort FillWidth = 393;
+
+    /// <summary>A texture tile's height in EMUs, <c>DFF_Prop_fillHeight</c>.</summary>
+    public const ushort FillHeight = 394;
+
+    /// <summary>
     /// Whether the shape is filled at all — a <em>boolean</em> property, so read it with
     /// <see cref="EscherPropertyTable.Boolean"/> rather than <see cref="EscherPropertyTable.Value"/>.
     /// </summary>
