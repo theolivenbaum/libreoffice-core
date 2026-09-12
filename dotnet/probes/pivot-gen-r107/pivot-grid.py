@@ -1,99 +1,151 @@
 #!/usr/bin/env python3
 """Predict the border grid ScDPOutput generates for an OOXML pivot table.
 
-A direct transcription of sc/source/core/data/dpoutput.cxx's OutputBlockFrame,
-outputColumnHeaders, outputRowHeader and OutputDataArea, fed from the pivot table
-part's own laid-out axis (rowItems/colItems) instead of from a DP source.
+A line-by-line mirror of `XlsxPivotGrid` in `dotnet/src/Paperless.Spreadsheets/Ooxml`, which is
+itself a transcription of `sc/source/core/data/dpoutput.cxx`'s `CalcSizes`, `outputPageFields`,
+`outputColumnHeaders`, `outputRowHeader`, `HeaderCell` and `ScDPOutputImpl::OutputDataArea`, fed
+from the pivot part's own laid-out axis (`rowItems`/`colItems`) instead of from a DP source.
 
-Usage: pivot-grid.py <workbook.xlsx> [sheetIndexOrName]
-Prints one line per cell that gains a border:
-    <A1>  <left> <right> <top> <bottom>   widths in twips, 0 for none
+This file is the probe's copy, not the shipped code: it exists so the prediction can be scored
+against the reference's `.fods` without a C# harness. Where the two disagree the C# is the
+subject and this is the bug.
+
+Usage: pivot-grid.py <workbook.xlsx>
 """
-import sys, zipfile, re
+import sys, zipfile, re, os
 import xml.etree.ElementTree as ET
 
 MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-PR = 'http://schemas.openxmlformats.org/package/2006/relationships'
+REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 def m(t): return '{%s}%s' % (MAIN, t)
 
 INNER, OUTER = 20, 40
+INDENT_TWIPS = 195
+
+HASMEMBER, SUBTOTAL, CONTINUE = 1, 2, 4
+CATEGORY, TITLE, RESULT = 'Category', 'Title', 'Result'
+
 
 def colnum(s):
     n = 0
-    for ch in s: n = n * 26 + ord(ch) - 64
+    for ch in s:
+        n = n * 26 + ord(ch) - 64
     return n - 1
+
+
 def colname(c):
-    s = ''; c += 1
+    s = ''
+    c += 1
     while c:
-        c, r = divmod(c - 1, 26); s = chr(65 + r) + s
+        c, r = divmod(c - 1, 26)
+        s = chr(65 + r) + s
     return s
+
+
 def parse_ref(ref):
     a, _, b = ref.partition(':')
     b = b or a
-    ma = re.match(r'\$?([A-Z]+)\$?(\d+)', a); mb = re.match(r'\$?([A-Z]+)\$?(\d+)', b)
+    ma = re.match(r'\$?([A-Z]+)\$?(\d+)', a)
+    mb = re.match(r'\$?([A-Z]+)\$?(\d+)', b)
     return colnum(ma.group(1)), int(ma.group(2)) - 1, colnum(mb.group(1)), int(mb.group(2)) - 1
 
-HASMEMBER, SUBTOTAL, CONTINUE = 1, 2, 4
+
+def flag(el, name, default=True):
+    v = el.get(name)
+    if v is None:
+        return default
+    return v not in ('0', 'false')
+
+
+def children(parent, name):
+    return list(parent.findall(m(name))) if parent is not None else []
+
 
 class Grid:
-    """The four edges of every cell a frame call touches."""
-    def __init__(self): self.cells = {}
-    def set(self, r, c, side, w):
-        e = self.cells.setdefault((r, c), [0, 0, 0, 0])
-        e['lrtb'.index(side)] = w
+    def __init__(self):
+        self.cells = {}
+        self.styles = {}
+        self.indents = {}
+
+    def edge(self, r, c, side, w):
+        if r < 0 or c < 0:
+            return
+        self.cells.setdefault((r, c), [0, 0, 0, 0])['lrtb'.index(side)] = w
+
 
 class Out:
     def __init__(self, tsc, tsr, dsc, dsr, tec, ter):
-        self.tsc, self.tsr, self.dsc, self.dsr, self.tec, self.ter = tsc, tsr, dsc, dsr, tec, ter
-        self.needCol = {}; self.needRow = {}
-        self.cols = []; self.rows = []
+        self.tsc, self.tsr, self.dsc, self.dsr = tsc, tsr, dsc, dsr
+        self.tec, self.ter = tec, ter
+        self.cols, self.rows = [], []
+        self.colseen, self.rowseen = set(), set()
         self.g = Grid()
 
-    def AddRow(self, r):
-        if not self.needRow.get(r): self.needRow[r] = True; self.rows.append(r)
-    def AddCol(self, c):
-        if not self.needCol.get(c): self.needCol[c] = True; self.cols.append(c)
+    def add_row(self, r):
+        if r not in self.rowseen:
+            self.rowseen.add(r)
+            self.rows.append(r)
+
+    def add_col(self, c):
+        if c not in self.colseen:
+            self.colseen.add(c)
+            self.cols.append(c)
 
     def block(self, c0, r0, c1, r1, hori=False):
         """OutputBlockFrame, dpoutput.cxx:217."""
-        if c1 < c0 or r1 < r0: return
+        if c1 < c0 or r1 < r0:
+            return
         L = OUTER if c0 == self.tsc else INNER
         T = OUTER if r0 == self.tsr else INNER
         R = OUTER if c1 == self.tec else INNER
         B = OUTER if r1 == self.ter else INNER
         for r in range(r0, r1 + 1):
-            self.g.set(r, c0, 'l', L)
-            self.g.set(r, c1, 'r', R)
+            self.g.edge(r, c0, 'l', L)
+            self.g.edge(r, c1, 'r', R)
         for c in range(c0, c1 + 1):
-            self.g.set(r0, c, 't', T)
-            self.g.set(r1, c, 'b', B)
-        if hori:
-            for r in range(r0, r1 + 1):
-                for c in range(c0, c1 + 1):
-                    if r != r0: self.g.set(r, c, 't', INNER)
-                    if r != r1: self.g.set(r, c, 'b', INNER)
+            self.g.edge(r0, c, 't', T)
+            self.g.edge(r1, c, 'b', B)
+        if not hori:
+            return
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                if r != r0:
+                    self.g.edge(r, c, 't', INNER)
+                if r != r1:
+                    self.g.edge(r, c, 'b', INNER)
 
     def box(self, c, r, w):
-        """lcl_SetFrame, dpoutput.cxx:297 — all four edges of one cell."""
-        for s in 'lrtb': self.g.set(r, c, s, w)
+        """lcl_SetFrame, dpoutput.cxx:297."""
+        for s in 'lrtb':
+            self.g.edge(r, c, s, w)
+
+    def style(self, c0, r0, c1, r1, name):
+        """lcl_SetStyleById, dpoutput.cxx:264 — last writer wins."""
+        if c1 < c0 or r1 < r0:
+            return
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                self.g.styles[(r, c)] = name
 
     def data_area(self):
-        """OutputDataArea, dpoutput.cxx:127."""
-        self.AddRow(self.dsr); self.AddCol(self.dsc)
-        cols = sorted(self.cols + [self.tec + 1]); rows = sorted(self.rows + [self.ter + 1])
-        allRows = (self.ter - self.dsr + 2) == len(rows)
+        """ScDPOutputImpl::OutputDataArea, dpoutput.cxx:127."""
+        self.add_row(self.dsr)
+        self.add_col(self.dsc)
+        cols = sorted(self.cols + [self.tec + 1])
+        rows = sorted(self.rows + [self.ter + 1])
+        allrows = (self.ter - self.dsr + 2) == len(rows)
         for i in range(len(cols) - 1):
-            if not allRows:
-                if i < len(cols) - 2:
-                    for k in range(i % 2, len(rows) - 2, 2):
-                        self.block(cols[i], rows[k], cols[i + 1] - 1, rows[k + 1] - 1)
-                    if len(rows) >= 2:
-                        self.block(cols[i], rows[-2], cols[i + 1] - 1, rows[-1] - 1)
-                else:
-                    for k in range(len(rows) - 1):
-                        self.block(cols[i], rows[k], cols[i + 1] - 1, rows[k + 1] - 1)
-            else:
+            if allrows:
                 self.block(cols[i], rows[0], cols[i + 1] - 1, rows[-1] - 1, True)
+                continue
+            if i < len(cols) - 2:
+                for k in range(i % 2, len(rows) - 2, 2):
+                    self.block(cols[i], rows[k], cols[i + 1] - 1, rows[k + 1] - 1)
+                if len(rows) >= 2:
+                    self.block(cols[i], rows[-2], cols[i + 1] - 1, rows[-1] - 1)
+            else:
+                for k in range(len(rows) - 1):
+                    self.block(cols[i], rows[k], cols[i + 1] - 1, rows[k + 1] - 1)
         if self.tsc != self.dsc:
             if self.tsr != self.dsr:
                 self.block(self.tsc, self.tsr, self.dsc - 1, self.dsr - 1)
@@ -101,152 +153,224 @@ class Out:
         self.block(self.dsc, self.tsr, self.tec, self.dsr - 1)
 
 
-def axis_flags(items, nfields, count):
-    """MemberResult flags per (field, position) out of rowItems/colItems."""
-    flags = [[0] * count for _ in range(nfields)]
-    for n, it in enumerate(items):
-        if n >= count: break
-        rep = int(it.get('r', 0))
-        xs = it.findall(m('x'))
-        t = it.get('t', 'data')
-        depth = rep + max(len(xs), 1)
-        if t == 'data':
-            for f in range(min(rep, nfields)): flags[f][n] |= CONTINUE
-            for f in range(rep, min(depth, nfields)): flags[f][n] |= HASMEMBER
+def read_axis(items, fields, count):
+    """MemberResult flags per (field, position); ScDPResultMember::FillMemberResults."""
+    flags = [[0] * count for _ in range(max(fields, 0))]
+    for pos in range(min(count, len(items))):
+        it = items[pos]
+        repeated = max(0, min(int(it.get('r', 0)), fields))
+        stated = max(len(it.findall(m('x'))), 1)
+        depth = min(repeated + stated, fields)
+        subtotal = (it.get('t', 'data') != 'data')
+        inherited = min(repeated, max(depth - 1, 0)) if subtotal else repeated
+        for f in range(inherited):
+            flags[f][pos] |= CONTINUE
+        if subtotal:
+            if depth > 0:
+                flags[depth - 1][pos] |= HASMEMBER | SUBTOTAL
         else:
-            lvl = min(depth - 1, nfields - 1)
-            for f in range(min(rep, lvl)): flags[f][n] |= CONTINUE
-            if lvl >= 0: flags[lvl][n] |= HASMEMBER | SUBTOTAL
+            for f in range(repeated, depth):
+                flags[f][pos] |= HASMEMBER
     return flags
 
 
-def compact_flags(pivot):
-    """maRowCompactFlags: pivottablebuffer.cxx:296 — subtotalTop && outline && compact."""
-    fields = pivot.find(m('pivotFields'))
-    fields = list(fields) if fields is not None else []
-    rf = pivot.find(m('rowFields'))
-    out = []
-    for fld in (rf.findall(m('field')) if rf is not None else []):
-        x = int(fld.get('x', '-1'))
-        if x < 0 or x >= len(fields):
-            out.append(False)       # the data-layout dimension is never compact
+def generatable(root, worksheet_cache, fhr, fdr, fdc, rowfields, colcount, rowitems, colitems):
+    if not worksheet_cache:
+        return 'cache is not a worksheet range'
+    if not rowitems or not colitems:
+        return 'no rowItems or no colItems'
+    if fhr != 1:
+        return 'firstHeaderRow=%d' % fhr
+    if fdr != 1 + colcount:
+        return 'firstDataRow=%d, Calc computes %d' % (fdr, 1 + colcount)
+    if fdc != len(rowfields) or fdc == 0:
+        return 'firstDataCol=%d, %d row fields' % (fdc, len(rowfields))
+    datafields = len(children(root.find(m('dataFields')), 'dataField'))
+    if datafields <= 1 and any(int(f.get('x', '-1')) < 0 for f in rowfields):
+        return 'data-layout dimension on the row axis'
+    if len(rowfields) == 1:
+        return None
+    pivotfields = children(root.find(m('pivotFields')), 'pivotField')
+    for f in rowfields:
+        x = int(f.get('x', '-1'))
+        if x < 0 or x >= len(pivotfields):
             continue
-        pf = fields[x]
-        def b(a, d='1'): return pf.get(a, d) not in ('0', 'false')
-        out.append(b('subtotalTop') and b('outline') and b('compact'))
-    return out
+        pf = pivotfields[x]
+        if flag(pf, 'subtotalTop') and flag(pf, 'outline') and flag(pf, 'compact'):
+            return 'compact row field'
+    return None
 
 
-def generate(pivot, compact_row=None):
-    loc = pivot.find(m('location'))
-    tsc, tsr, tec, ter = parse_ref(loc.get('ref'))
-    firstHeaderRow = int(loc.get('firstHeaderRow', 1))
-    firstDataRow = int(loc.get('firstDataRow', 1))
-    firstDataCol = int(loc.get('firstDataCol', 0))
-    msr = tsr + firstHeaderRow
-    dsr = tsr + firstDataRow
-    dsc = tsc + firstDataCol
-    rowFields = pivot.find(m('rowFields'))
-    colFields = pivot.find(m('colFields'))
-    R = len(rowFields.findall(m('field'))) if rowFields is not None else 0
-    cf = colFields.findall(m('field')) if colFields is not None else []
-    C = len(cf)
-    # bColumnFieldIsDataOnly, dpoutput.cxx:1205 — one data field behind a bare data-layout
-    # placeholder leaves Calc with no column field at all.
-    df = pivot.find(m('dataFields'))
-    if C == 1 and int(cf[0].get('x', '0')) < 0 and (len(df) if df is not None else 0) <= 1:
+def generate(root, worksheet_cache=True):
+    """The grid, or (None, reason) when the pivot is one the reference would not lay out here."""
+    loc = root.find(m('location'))
+    if loc is None:
+        return None, 'no location'
+    tsc, tsr0, _, _ = parse_ref(loc.get('ref'))
+    fhr = int(loc.get('firstHeaderRow', 1))
+    fdr = int(loc.get('firstDataRow', 1))
+    fdc = int(loc.get('firstDataCol', 0))
+
+    rowfields = children(root.find(m('rowFields')), 'field')
+    colfields = children(root.find(m('colFields')), 'field')
+    rowitems = children(root.find(m('rowItems')), 'i')
+    colitems = children(root.find(m('colItems')), 'i')
+    datafields = children(root.find(m('dataFields')), 'dataField')
+
+    C = len(colfields)
+    if C == 1 and int(colfields[0].get('x', '0')) < 0 and len(datafields) <= 1:
         C = 0
-    rowItems = pivot.find(m('rowItems'))
-    colItems = pivot.find(m('colItems'))
-    if compact_row is None: compact_row = compact_flags(pivot)
-    # CalcSizes, dpoutput.cxx:912-921 — the table's last row and column come from the
-    # result's own extent, not from the stated ref, and the two disagree on
-    # DynamicBubbleChart, whose ref stops one column short of its data.
-    rowCount = len(rowItems) if rowItems is not None else 0
-    colCount = len(colItems) if colItems is not None else 0
-    ter = dsr + rowCount - 1 if rowCount else dsr
-    tec = dsc + colCount - 1 if colCount else dsc
+
+    why = generatable(root, worksheet_cache, fhr, fdr, fdc, rowfields, C, rowitems, colitems)
+    if why:
+        return None, why
+
+    show_drill = flag(root, 'showDrill', True)
+    npage = len(children(root.find(m('pageFields')), 'pageField'))
+    page_start = max(tsr0 - npage - 1, 0) if npage else tsr0
+    tsr = page_start + npage + 1 if npage else tsr0
+    msr = tsr + fhr
+    dsr = tsr + fdr
+    dsc = tsc + fdc
+    nrow, ncol = len(rowitems), len(colitems)
+    ter = dsr + nrow - 1 if nrow else dsr
+    tec = dsc + ncol - 1 if ncol else dsc
 
     o = Out(tsc, tsr, dsc, dsr, tec, ter)
-    rflags = axis_flags(list(rowItems) if rowItems is not None else [], R, rowCount)
-    cflags = axis_flags(list(colItems) if colItems is not None else [], C, colCount)
+    o.page_start, o.npage = page_start, npage
 
-    # page fields — outputPageFields, dpoutput.cxx:969
-    pf = pivot.find(m('pageFields'))
-    P = len(pf.findall(m('pageField'))) if pf is not None else 0
-    for n in range(P):
-        o.box(tsc + 1, tsr - P - 1 + n, INNER)
+    for f in range(npage):
+        o.box(tsc + 1, page_start + f, INNER)
 
-    # outputColumnHeaders, dpoutput.cxx:1002
-    hasCompactRow = bool(compact_row and any(compact_row))
+    cflags = read_axis(colitems, C, ncol)
     for f in range(C):
-        headerCol = dsc + f
-        if msr > tsr and (not hasCompactRow or C == 1):
-            o.box(headerCol, tsr, INNER)
-        rowPos = msr + f
-        for n in range(colCount):
-            colPos = dsc + n
+        if msr > tsr:
+            o.box(dsc + f, tsr, INNER)
+        rowpos = msr + f
+        for n in range(ncol):
+            colpos = dsc + n
             fl = cflags[f][n]
-            if (fl & HASMEMBER) and not (fl & SUBTOTAL):
-                end = n
-                while end + 1 < colCount and (cflags[f][end + 1] & CONTINUE): end += 1
-                endColPos = dsc + end
-                if f + 1 < C:
-                    if f + 2 == C:
-                        o.AddCol(colPos)
-                        if colPos + 1 == endColPos:
-                            o.block(colPos, rowPos, endColPos, rowPos + 1, True)
-                    else:
-                        o.block(colPos, rowPos, endColPos, rowPos)
-            elif fl & SUBTOTAL:
-                # HeaderCell, dpoutput.cxx:748 — a subtotal member frames its own strip
-                o.block(colPos, msr + f, colPos, dsr - 1)
-                o.AddCol(colPos)
+            if fl & SUBTOTAL:
+                o.block(colpos, msr + f, colpos, dsr - 1)
+                o.style(colpos, msr + f, colpos, dsr - 1, TITLE)
+                o.style(colpos, dsr, colpos, ter, RESULT)
+                o.add_col(colpos)
+                continue
+            if not (fl & HASMEMBER):
+                continue
+            end = n
+            while end + 1 < ncol and (cflags[f][end + 1] & CONTINUE):
+                end += 1
+            endpos = dsc + end
+            if f + 1 >= C:
+                o.style(colpos, rowpos, colpos, dsr - 1, CATEGORY)
+                continue
+            if f + 2 == C:
+                o.add_col(colpos)
+                if colpos + 1 == endpos:
+                    o.block(colpos, rowpos, endpos, rowpos + 1, True)
+            else:
+                o.block(colpos, rowpos, endpos, rowpos)
+            o.style(colpos, rowpos, endpos, dsr - 1, CATEGORY)
         if f == 0 and C == 1 and msr > tsr:
-            o.block(dsc, tsr, tec, rowPos - 1)
+            o.block(dsc, tsr, tec, msr - 1)
 
-    # outputRowHeader, dpoutput.cxx:1075
-    setBorder = [False] * rowCount
-    offset = 0
+    R = len(rowfields)
+    rflags = read_axis(rowitems, R, nrow)
+    framed = [False] * nrow
     for f in range(R):
-        compact = bool(compact_row[f]) if compact_row else False
-        if not hasCompactRow or R == 1:
-            o.box(tsc + f, dsr - 1, INNER)
-        colPos = tsc + offset
-        for n in range(rowCount):
-            rowPos = dsr + n
+        o.box(tsc + f, dsr - 1, INNER)
+        colpos = tsc + f
+        for n in range(nrow):
+            rowpos = dsr + n
             fl = rflags[f][n]
-            if (fl & HASMEMBER) and not (fl & SUBTOTAL):
-                if f + 1 < R:
-                    end = n
-                    while end + 1 < rowCount and (rflags[f][end + 1] & CONTINUE): end += 1
-                    endRowPos = dsr + end
-                    o.AddRow(rowPos)
-                    if not setBorder[n]:
-                        o.block(colPos, rowPos, tec, endRowPos); setBorder[n] = True
-                    o.block(colPos, rowPos, colPos, endRowPos)
-                    if f == R - 2:
-                        o.block(colPos + 1, rowPos, colPos + 1, endRowPos)
-            elif fl & SUBTOTAL:
-                # HeaderCell, dpoutput.cxx:748 — the subtotal's own row-header strip
-                o.block(tsc + offset, rowPos, dsc - 1, rowPos)
-                o.AddRow(rowPos)
-        if not compact: offset += 1
+            if fl & SUBTOTAL:
+                o.block(colpos, rowpos, dsc - 1, rowpos)
+                o.style(colpos, rowpos, dsc - 1, rowpos, TITLE)
+                o.style(dsc, rowpos, tec, rowpos, RESULT)
+                o.add_row(rowpos)
+                continue
+            if not (fl & HASMEMBER):
+                continue
+            if f + 1 >= R:
+                o.style(colpos, rowpos, dsc - 1, rowpos, CATEGORY)
+                continue
+            end = n
+            while end + 1 < nrow and (rflags[f][end + 1] & CONTINUE):
+                end += 1
+            endrow = dsr + end
+            o.add_row(rowpos)
+            if not framed[n]:
+                o.block(colpos, rowpos, tec, endrow)
+                framed[n] = True
+            o.block(colpos, rowpos, colpos, endrow)
+            if f == R - 2:
+                o.block(colpos + 1, rowpos, colpos + 1, endrow)
+            o.style(colpos, rowpos, dsc - 1, endrow, CATEGORY)
+            if show_drill:
+                o.g.indents[(rowpos, colpos)] = INDENT_TWIPS
 
     o.data_area()
-    return o
+    return o, None
+
+
+def worksheet_cached(z, part):
+    rp = os.path.join(os.path.dirname(part), '_rels', os.path.basename(part) + '.rels')
+    if rp not in z.namelist():
+        return False
+    for r in ET.fromstring(z.read(rp)):
+        if not r.get('Type', '').endswith('/pivotCacheDefinition'):
+            continue
+        if r.get('TargetMode') == 'External':
+            continue
+        raw = r.get('Target')
+        t = (raw.lstrip('/') if raw.startswith('/')
+             else os.path.normpath(os.path.join(os.path.dirname(part), raw))).replace('\\', '/')
+        if t not in z.namelist():
+            continue
+        src = ET.fromstring(z.read(t)).find(m('cacheSource'))
+        if src is not None and src.get('type') == 'worksheet':
+            return True
+    return False
+
+
+def pivots_by_sheet(z):
+    wb = ET.fromstring(z.read('xl/workbook.xml'))
+    rels = ET.fromstring(z.read('xl/_rels/workbook.xml.rels'))
+    target = {r.get('Id'): r.get('Target') for r in rels}
+    out = []
+    for sh in wb.find(m('sheets')):
+        t = target[sh.get('{%s}id' % REL)]
+        part = t.lstrip('/') if t.startswith('/') else ('xl/' + t if not t.startswith('xl/') else t)
+        rp = os.path.join(os.path.dirname(part), '_rels', os.path.basename(part) + '.rels')
+        pivots = []
+        if rp in z.namelist():
+            for r in ET.fromstring(z.read(rp)):
+                if not r.get('Type', '').endswith('/pivotTable'):
+                    continue
+                raw = r.get('Target')
+                pt = (raw.lstrip('/') if raw.startswith('/')
+                      else os.path.normpath(os.path.join(os.path.dirname(part), raw))).replace('\\', '/')
+                pivots.append((pt, ET.fromstring(z.read(pt)), worksheet_cached(z, pt)))
+        out.append((sh.get('name'), pivots))
+    return out
 
 
 def main():
     z = zipfile.ZipFile(sys.argv[1])
-    for name in z.namelist():
-        if re.match(r'xl/pivotTables/pivotTable\d+\.xml$', name):
-            pivot = ET.fromstring(z.read(name))
-            o = generate(pivot)
-            print('## %s' % name)
+    for sheet, pivots in pivots_by_sheet(z):
+        for part, root, cached in pivots:
+            o, why = generate(root, cached)
+            if o is None:
+                print('## %s / %s\tDECLINED: %s' % (sheet, part, why))
+                continue
+            print('## %s / %s' % (sheet, part))
             for (r, c), e in sorted(o.g.cells.items()):
                 if any(e):
-                    print('%s%d\t%d\t%d\t%d\t%d' % (colname(c), r + 1, e[0], e[1], e[2], e[3]))
+                    print('%s%d\t%d\t%d\t%d\t%d\t%s\t%s' % (
+                        colname(c), r + 1, e[0], e[1], e[2], e[3],
+                        o.g.styles.get((r, c), '-'), o.g.indents.get((r, c), 0)))
+
 
 if __name__ == '__main__':
     main()

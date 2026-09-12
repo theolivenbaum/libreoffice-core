@@ -33,11 +33,14 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// </para>
 /// <para>
 /// <strong>Checked against 26.2.4.2's own resolved view, not derived from it.</strong> The
-/// prediction is compared cell by cell against the <c>.fods</c> the reference writes for the
-/// same workbook: on <c>alle einzeln.xlsx</c> it reproduces all <strong>9092</strong> bordered
-/// cells and all <strong>30250</strong> stated edges exactly, and over the corpus's eight
-/// worksheet-sourced pivot-bearing workbooks it agrees on every edge of every pivot it accepts.
-/// See <c>dotnet/probes/pivot-gen-r107</c>.
+/// prediction is compared edge by edge, in both directions, against the <c>.fods</c> the
+/// reference writes for the same workbook — an edge the reference states and the prediction does
+/// not counts, which is what makes the score more than a precision. On <c>alle einzeln.xlsx</c>
+/// it reproduces all <strong>9092</strong> bordered cells and all <strong>30250</strong> stated
+/// edges exactly, with no edge missed and none invented; over the sixteen pivots it accepts in
+/// the corpus's eight worksheet-sourced pivot-bearing workbooks, <strong>31596</strong> edges,
+/// every generated cell style and every generated indent agree and nothing disagrees. See
+/// <c>dotnet/probes/pivot-gen-r107</c>.
 /// </para>
 /// <para>
 /// <strong>What it declines to generate, and why each test is there.</strong> Calc's own layout
@@ -67,7 +70,7 @@ internal sealed class XlsxPivotGrid
     /// The indent a row field that is not the innermost gives its member cell.
     /// </summary>
     /// <remarks>
-    /// <c>o3tl::convert(13 * level, px, twip)</c> at <c>dpoutput.cxx</c>:1138 — thirteen pixels
+    /// <c>o3tl::convert(13 * level, px, twip)</c> at <c>dpoutput.cxx</c>:1137 — thirteen pixels
     /// at 96 dpi is 195 twips, and the reference's own <c>.fods</c> writes it as
     /// <c>fo:margin-left="0.1354in"</c>. The level is zero for every non-compact field, so the
     /// whole of it here is the one step <c>nMinIndentLevel</c> adds while the drill-down buttons
@@ -214,13 +217,29 @@ internal sealed class XlsxPivotGrid
             return null;
         }
 
+        // `nMinIndentLevel = mbExpandCollapse ? 1 : 0`, dpoutput.cxx:1136, and
+        // `pSaveData->SetExpandCollapse(maDefModel.mbShowDrill)`,
+        // sc/source/filter/oox/pivottablebuffer.cxx:1366 — the whole of the indent a
+        // non-innermost row field gives its member is the drill-down step, so a pivot that
+        // states `showDrill="0"` has none. Measured: `DynamicBubbleChart.xlsx` states it and
+        // its five row fields, and the reference's own `.fods` of that workbook writes no
+        // `fo:margin-left="0.1354in"` anywhere.
+        bool showDrill = Xlsx.Flag(root, "showDrill", true);
+
+        // Excel's `ref` excludes the filter rows; Calc's does not. `PivotTable::finalizeImport`
+        // (`sc/source/filter/oox/pivottablebuffer.cxx`:1421-1426) puts the data pilot's own
+        // start `maPageFields.size() + 1` rows above the stated range — clamped at row one —
+        // and `CalcSizes` (`dpoutput.cxx`:892-907) then puts the table back that many rows
+        // below it, so the table lands on the stated range exactly unless the clamp bit.
+        int pageFields = Xlsx.Children(Xlsx.Child(root, "pageFields"), "pageField").Count();
+        int pageStartRow = pageFields > 0 ? Math.Max(area.FirstRow - pageFields - 1, 0) : area.FirstRow;
         int tabStartColumn = area.FirstColumn;
-        int tabStartRow = area.FirstRow;
+        int tabStartRow = pageFields > 0 ? pageStartRow + pageFields + 1 : area.FirstRow;
         int memberStartRow = tabStartRow + firstHeaderRow;
         int dataStartRow = tabStartRow + firstDataRow;
         int dataStartColumn = tabStartColumn + firstDataColumn;
 
-        // CalcSizes (dpoutput.cxx:912-921) takes the last row and column from the result's own
+        // CalcSizes (dpoutput.cxx:912-923) takes the last row and column from the result's own
         // extent, not from the stated range: DynamicBubbleChart's ref stops one column short of
         // the data it describes, and the reference's outer rule is on the column the data ends
         // in.
@@ -232,10 +251,11 @@ internal sealed class XlsxPivotGrid
         XlsxPivotGrid grid = new(
             tabStartColumn, tabStartRow, dataStartColumn, dataStartRow, tabEndColumn, tabEndRow);
 
-        grid.PageFields(root, tabStartColumn, tabStartRow);
+        grid.PageFields(pageFields, tabStartColumn, pageStartRow);
         grid.ColumnHeaders(columnFieldCount, ReadAxis(columnItems, columnFieldCount, columnCount),
             memberStartRow, columnCount);
-        grid.RowHeaders(rowFields.Count, ReadAxis(rowItems, rowFields.Count, rowCount), rowCount);
+        grid.RowHeaders(
+            rowFields.Count, ReadAxis(rowItems, rowFields.Count, rowCount), rowCount, showDrill);
         grid.DataArea();
         return grid;
     }
@@ -245,18 +265,40 @@ internal sealed class XlsxPivotGrid
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Each test is one line of <c>CalcSizes</c> (<c>dpoutput.cxx</c>:906-921) read as a
-    /// question about the stated geometry: <c>mnMemberStartRow = mnTabStartRow + mnHeaderSize</c>
-    /// with <c>mnHeaderSize</c> 1, <c>mnDataStartRow = mnMemberStartRow + mpColFields.size()</c>,
-    /// and <c>mnDataStartCol = mnMemberStartCol + GetColumnsForRowFields()</c> — which is one
-    /// column per row field where no row field is compact (<c>:857-868</c>).
+    /// Each test is one line of <c>CalcSizes</c> (<c>dpoutput.cxx</c>:871-923) read as a question
+    /// about the stated geometry: <c>mnMemberStartRow = mnTabStartRow + mnHeaderSize</c>,
+    /// <c>mnDataStartRow = mnMemberStartRow + mpColFields.size()</c> and
+    /// <c>mnDataStartCol = mnMemberStartCol + GetColumnsForRowFields()</c> (<c>:854-868</c>).
+    /// <c>mnHeaderSize</c> is <c>1</c> here. It is <c>0</c> when the header is hidden, which the
+    /// OOXML import ties to the stated first header row outright —
+    /// <c>mpDPObject-&gt;SetHideHeader(maLocationModel.mnFirstHeaderRow == 0)</c>
+    /// (<c>sc/source/filter/oox/pivottablebuffer.cxx</c>:1368) — and that case is declined
+    /// because it was tried and refuted: with <c>firstHeaderRow="0"</c> accepted,
+    /// <c>033_Event_planning_tracker</c> predicts 24 of its 131 edges right and states 56 the
+    /// reference does not, because the reference's table there ends a row above the range Excel
+    /// wrote and its top row takes an inner rule where a table's first row takes an outer one.
+    /// Where the reference's table actually starts is not settled. The third case,
+    /// <c>mnHeaderSize = 2</c> for a grid header layout (<c>:886</c>), cannot arise at all:
+    /// <c>SetHeaderLayout</c> is called only by the BIFF and ODF importers, never by
+    /// <c>sc/source/filter/oox</c>.
     /// </para>
     /// <para>
-    /// The compact case is declined rather than implemented because the two layouts are measured
-    /// to disagree where it arises: on <c>037_Personal_money_tracker</c>'s <c>Monthly summary</c>
-    /// the reference's regenerated output starts two rows above the cells Excel wrote, so there
-    /// is nothing for a grid at Excel's coordinates to be right about. Its other pivot, which is
-    /// not compact, agrees on every edge.
+    /// A compact row field shares its column with the field outside it, so
+    /// <c>GetColumnsForRowFields</c> returns fewer columns than there are fields and the stated
+    /// geometry is not Calc's — except where there is only one row field, when the count is
+    /// <c>0</c> non-compact fields plus one for <c>maRowCompactFlags.back()</c>, which is the
+    /// one column Excel also wrote. A single compact field is also the last field, so
+    /// <c>bLast</c> drops its indent (<c>:1135-1137</c>) and it takes <c>FieldCell</c> rather
+    /// than <c>MultiFieldCell</c> (<c>:1087-1090</c>): nothing about it differs from the
+    /// non-compact case. More than one, and the layout is declined.
+    /// </para>
+    /// <para>
+    /// The data-layout dimension on the row axis is declined outright. With one data field its
+    /// member result is empty, so <c>bSkip</c> drops the dimension (<c>:595-596</c>) and Calc
+    /// lays out one row-label column fewer than Excel wrote. No document in the corpus states
+    /// it — the census in <c>dotnet/probes/pivot-gen-r107</c> reports <c>rowDataPH=False</c> for
+    /// all twenty-eight pivots of the eleven pivot-bearing workbooks — so this is a refusal to
+    /// act where there is nothing to check the result against, not a modelled case.
     /// </para>
     /// </remarks>
     private static bool IsGeneratable(
@@ -270,10 +312,14 @@ internal sealed class XlsxPivotGrid
         if (firstDataRow != 1 + columnFieldCount) return false;
         if (firstDataColumn != rowFields.Count || firstDataColumn == 0) return false;
 
+        int dataFields = Xlsx.Children(Xlsx.Child(pivot.Root, "dataFields"), "dataField").Count();
+        if (dataFields <= 1 && rowFields.Exists(field => (Xlsx.Integer(field, "x") ?? -1) < 0))
+            return false;
+
         // maRowCompactFlags, pivottablebuffer.cxx:296 — subtotalTop && outline && compact, each
-        // defaulting to true. A compact row field shares its column with the one outside it, so
-        // the stated one-column-per-field geometry above would already have failed; this is the
-        // belt to that brace and the place the rule is named.
+        // defaulting to true.
+        if (rowFields.Count == 1) return true;
+
         List<XElement> pivotFields = [.. Xlsx.Children(Xlsx.Child(pivot.Root, "pivotFields"), "pivotField")];
         foreach (XElement field in rowFields)
         {
@@ -409,17 +455,17 @@ internal sealed class XlsxPivotGrid
     /// <c>outputPageFields</c>, <c>dpoutput.cxx</c>:969 — a hairline box round each filter value.
     /// </summary>
     /// <remarks>
-    /// The page fields sit above the table, one to a row, and their row is
-    /// <c>maStartPos.Row() + nField + (mbDoFilter ? 1 : 0)</c> where the table itself starts
-    /// <c>nPageSize = mpPageFields.size() + 1 + (mbDoFilter ? 1 : 0)</c> rows below
-    /// <c>maStartPos</c> (<c>:891-908</c>). The filter button cancels between the two, so the
-    /// row is <c>mnTabStartRow - pageFields - 1 + nField</c> whether or not there is one.
+    /// One page field to a row at <c>maStartPos.Row() + nField + (mbDoFilter ? 1 : 0)</c>, and
+    /// <c>mbDoFilter</c> is false for every OOXML pivot — <c>pSaveData-&gt;SetFilterButton(false)</c>
+    /// (<c>sc/source/filter/oox/pivottablebuffer.cxx</c>:1365), which
+    /// <c>ScDPObject::CreateOutput</c> reads back as <c>bFilterButton</c>
+    /// (<c>sc/source/core/data/dpobject.cxx</c>:531). The box is <c>lcl_SetFrame(…, 20)</c> on
+    /// the value cell beside the caption, and nothing at all on the caption.
     /// </remarks>
-    private void PageFields(XElement root, int tabStartColumn, int tabStartRow)
+    private void PageFields(int count, int tabStartColumn, int pageStartRow)
     {
-        int count = Xlsx.Children(Xlsx.Child(root, "pageFields"), "pageField").Count();
         for (int field = 0; field < count; field++)
-            Box(tabStartColumn + 1, tabStartRow - count - 1 + field, Inner);
+            Box(tabStartColumn + 1, pageStartRow + field, Inner);
     }
 
     /// <summary><c>outputColumnHeaders</c>, <c>dpoutput.cxx</c>:1002.</summary>
@@ -484,7 +530,7 @@ internal sealed class XlsxPivotGrid
     /// field: the outermost field that has a member on a row claims it, and the fields inside it
     /// only rule their own column.
     /// </remarks>
-    private void RowHeaders(int fields, Flags[][] flags, int count)
+    private void RowHeaders(int fields, Flags[][] flags, int count, bool showDrill)
     {
         bool[] framed = new bool[count];
 
@@ -530,7 +576,7 @@ internal sealed class XlsxPivotGrid
                 if (field == fields - 2) Block(columnPos + 1, rowPos, columnPos + 1, endRowPos);
 
                 Style(columnPos, rowPos, _dataStartColumn - 1, endRowPos, Generated.Category);
-                _indents[(rowPos, columnPos)] = IndentTwips;
+                if (showDrill) _indents[(rowPos, columnPos)] = IndentTwips;
             }
         }
     }
@@ -640,8 +686,18 @@ internal sealed class XlsxPivotGrid
     /// <remarks>
     /// Edge by edge rather than cell by cell, because that is what
     /// <c>ScAttrArray::ApplyFrame</c> does: a frame call writes the edges it names and leaves
-    /// the rest of the cell's border alone, so a pivot laid over cells that state borders of
-    /// their own keeps the ones no generated block touches.
+    /// the rest of the cell's border alone.
+    /// <para>
+    /// What the reference leaves alone is nothing, though. <c>PivotTable::finalizeImport</c>
+    /// clears the stated range first — <c>clearContents(VALUE | … | HARDATTR | STYLES | …)</c>,
+    /// <c>sc/source/filter/oox/pivottablebuffer.cxx</c>:1331-1336 — so a border the workbook
+    /// states inside a pivot's own range is gone before <c>ScDPOutput</c> runs, and the
+    /// reference's behaviour is replacement, not this merge. The two are not distinguished by
+    /// anything in the corpus: of the nineteen pivot ranges in the eight worksheet-sourced
+    /// pivot-bearing workbooks, <c>0</c> contain a cell whose <c>cellXfs</c> entry states any
+    /// border at all (<c>probes/pivot-gen-r107/statedborders.py</c>), against 15 of the 19 that
+    /// state an alignment. Merging is the narrower change of the two, so it is the one made.
+    /// </para>
     /// </remarks>
     private void MergeInto(SheetFormatting formatting)
     {

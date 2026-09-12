@@ -20,10 +20,17 @@ namespace Paperless.Spreadsheets.Layout;
 /// <para>
 /// A differential record for the same reason <see cref="SheetConditionalText"/> is one: the
 /// styles state three properties between them and are silent about everything else, so a null
-/// here is that silence. It is deliberately narrower than what the reference does — Calc's
-/// <c>DeleteAreaTab(…, InsertDeleteFlags::ALL)</c> discards the cells' own font, size and colour
-/// as well, and this keeps them. Measured on <c>alle einzeln.xlsx</c>, whose pivot cells state
-/// none of the three, the two are the same thing.
+/// here is that silence. It is deliberately narrower than what the reference does — Calc empties
+/// the output range first, <c>DeleteAreaTab(…, InsertDeleteFlags::ALL)</c> at
+/// <c>dpoutput.cxx</c>:1226 over the table and <c>clearContents(… HARDATTR | STYLES …)</c> at
+/// <c>sc/source/filter/oox/pivottablebuffer.cxx</c>:1336 over the whole stated range — so a font,
+/// an alignment or an indent the workbook puts on a pivot cell is gone in the reference and is
+/// kept here. On <c>alle einzeln.xlsx</c>, the document this was written for, that is nothing:
+/// its <c>Pivot</c> sheet's 9090 pivot cells state no border, no bold, no alignment and no indent
+/// between them (<c>probes/pivot-gen-r107/statedborders.py</c>). On four of the other five
+/// workbooks a grid is generated for it is not nothing — 38 aligned and 31 indented cells inside
+/// <c>049_Expenses_calculator</c>'s pivot, for one — and clearing them is left unmeasured and
+/// undone.
 /// </para>
 /// </remarks>
 public readonly record struct SheetPivotStyle
