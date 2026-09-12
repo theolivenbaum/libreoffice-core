@@ -306,7 +306,7 @@ public static class EscherPropertyIds
     /// <remarks>
     /// <c>DFF_Prop_fillOpacity</c>. <c>ApplyFillAttributes</c> turns it into an
     /// <c>XFillTransparenceItem</c> for every fill style but a gradient
-    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1364-1374 in this tree).
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1367-1376 in this tree).
     /// </remarks>
     public const ushort FillOpacity = 386;
 

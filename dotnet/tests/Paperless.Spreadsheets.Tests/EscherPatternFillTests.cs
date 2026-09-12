@@ -64,7 +64,7 @@ public sealed class EscherPatternFillTests
     {
         // 26.2.4.2's `Bitmap_20_4`, row for row: two greys, two whites, two greys, two whites —
         // the inverse of the `00110011` bits, because a *set* bit is the palette's black and
-        // `ApplyFillAttributes` writes `fillBackColor` there (`msdffimp.cxx`:1428-1434 in this
+        // `ApplyFillAttributes` writes `fillBackColor` there (`msdffimp.cxx`:1432-1435 in this
         // tree). `fillBackColor` is unstated on all four shapes and defaults to white.
         RasterImage tile = EscherPatternFill.Tile(Bmp(VerticalStripes), Grey, Colour.White)!;
 

@@ -21,7 +21,7 @@ namespace Paperless.MsBinary.Escher;
 /// </para>
 /// <para>
 /// <c>DffPropertyReader::ApplyFillAttributes</c> is the rule
-/// (<c>filter/source/msfilter/msdffimp.cxx</c>:1388-1441 <strong>in this tree</strong>, which
+/// (<c>filter/source/msfilter/msdffimp.cxx</c>:1401-1443 <strong>in this tree</strong>, which
 /// declares <c>27.2.0.0.alpha0+</c> and is not the 26.2.4.2 binary's source). It guards the
 /// recolouring on the bitmap being exactly eight by eight, tests each pixel against
 /// <c>Color(0)</c> — pure black — and writes <c>fillBackColor</c> there and <c>fillColor</c>
@@ -31,8 +31,8 @@ namespace Paperless.MsBinary.Escher;
 /// <para>
 /// <strong>Confirmed against 26.2.4.2's own resolved view rather than against this source.</strong>
 /// <c>apron-area.xls</c> converted to <c>fods</c> at that binary writes the four recoloured tiles
-/// out as <c>draw:fill-image</c> PNGs: the workbook's blips 4 and 6 are the bit patterns
-/// <c>00110011</c> and <c>00111110</c>, and the reference's own PNGs carry
+/// out as <c>draw:fill-image</c> PNGs: the workbook's blips 4 and 6 are an eight-row
+/// <c>00110011</c> and a 45° diagonal, and the reference's own PNGs carry
 /// <c>#969696</c>/<c>#808080</c> exactly where those bits are clear and <c>#ffffff</c> exactly
 /// where they are set — the stated <c>fillColor</c> and the defaulted <c>fillBackColor</c>, in
 /// that order.
@@ -153,7 +153,7 @@ public static class EscherPatternFill
     /// <remarks>
     /// A 16.16 fixed-point fraction, and <c>ApplyFillAttributes</c> turns it into an
     /// <c>XFillTransparenceItem</c> for every fill style but a gradient
-    /// (<c>msdffimp.cxx</c>:1364-1374 in this tree). All four of <c>apron-area.xls</c>'s pattern
+    /// (<c>msdffimp.cxx</c>:1367-1376 in this tree). All four of <c>apron-area.xls</c>'s pattern
     /// fills state one — 0.35, 0.4, 0.5 and 0.6 — and 26.2.4.2's <c>fods</c> writes the same four
     /// out as <c>draw:opacity</c>.
     /// </remarks>

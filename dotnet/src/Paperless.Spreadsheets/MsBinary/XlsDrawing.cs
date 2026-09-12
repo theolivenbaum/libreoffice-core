@@ -567,12 +567,12 @@ internal sealed class XlsDrawingCollector(
     /// <c>MSO_CLR</c> values and go through <see cref="EscherColour"/> with the workbook's own
     /// scheme, exactly as the fill and line colours beside them do. Both default to <b>white</b>,
     /// which is <c>ApplyFillAttributes</c>' <c>Color aCol1( COL_WHITE ), aCol2( COL_WHITE )</c>
-    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1406-1412 in this tree) rather than the
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1408-1414 in this tree) rather than the
     /// property table's own defaults.
     /// </para>
     /// <para>
     /// A texture states its tile in EMUs through <c>fillWidth</c> and <c>fillHeight</c>
-    /// (<c>:1443-1449</c>) and a pattern states none, so a pattern's tile is the bitmap's own
+    /// (<c>:1444-1451</c>) and a pattern states none, so a pattern's tile is the bitmap's own
     /// size at 96 dpi. A picture is stretched once, which <see cref="SheetShapeTexture"/> spells
     /// as an empty tile.
     /// </para>
