@@ -916,7 +916,7 @@ public static partial class SlideTextLayout
             runs.Add(new FormattedRun(run.Start, run.Length, face, escaped, Tracking: run.Tracking));
             styles.Add(new RunStyle(
                 run.Colour, reference, face, run.IsUnderlined, run.IsStruckThrough,
-                run.Escapement.RiseOf(size), size, run.IsShadowed));
+                run.Escapement.RiseOf(size), size, run.IsShadowed, run.Escapement));
         }
 
         if (first is null) return null;
@@ -1005,23 +1005,29 @@ public static partial class SlideTextLayout
                 continue;
             }
 
-            Length em = appended && paragraph.Text.Length > 0
-                ? EndSize(runs, styles)
-                : LargestSize(runs, styles, box.Line.Start, MeasuredEnd(measured.Text, box.Line));
-
             // An autofitted body that is not being scaled measures its lines at the *device's*
             // realisation of the em rather than at the em. See DeviceRealised.
-            if (body.AutoFit && scaling.Font is <= 0 or 1.0) em = DeviceRealised(em);
+            bool realised = body.AutoFit && scaling.Font is <= 0 or 1.0;
 
-            // The rule itself: one em of ascent, 1.2 em of box, then whatever the paragraph's own
-            // spacing does to it. A paragraph stating 150% gets 1.5 x 1.2 em, which is what
-            // EditEngine's proportional spacing applies to the height it just computed.
-            // Rounded to a whole hundredth of a millimetre, which is the unit EditEngine holds a
-            // line height in: SetHeight takes a sal_uInt16 of the outliner's own map unit, and for
-            // a draw object that unit is 1/100 mm. Keeping the exact EMU instead leaves a line
-            // height the reference cannot represent, and the error accumulates down the block.
-            Length natural = Length.FromMm100(
-                (long)Math.Floor((em.Mm100 * LineHeightFactor) + 0.5));
+            // One em of ascent and 1.2 em of box -- except where an escaped run makes the line
+            // taller than that, which is what `FixedCellBox` is for. The height is a whole
+            // hundredth of a millimetre, which is the unit EditEngine holds a line height in:
+            // SetHeight takes a sal_uInt16 of the outliner's own map unit, and for a draw object
+            // that unit is 1/100 mm. Keeping the exact EMU instead leaves a line height the
+            // reference cannot represent, and the error accumulates down the block.
+            Length em;
+            Length natural;
+
+            if (appended && paragraph.Text.Length > 0)
+            {
+                em = Realised(EndSize(runs, styles), realised);
+                natural = FixedCellHeight(em);
+            }
+            else
+            {
+                (em, natural) = FixedCellBox(
+                    runs, styles, box.Line.Start, MeasuredEnd(measured.Text, box.Line), realised);
+            }
 
             if (appended)
             {
@@ -1316,6 +1322,129 @@ public static partial class SlideTextLayout
         // on it: the first run's size, which is what the paragraph mark carries.
         return runs.Count > 0 ? Nominal(runs, styles, 0) : Length.FromPoints(18);
     }
+
+    /// <summary>
+    /// A line's ascent and its height under font-independent line spacing: one em of ascent and
+    /// 1.2 em of box for ordinary text, and more than that where an escaped run reaches further.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImpEditEngine::CreateLines</c> finishes a line by walking every portion of it through
+    /// <c>RecalcFormatterFontMetrics</c> and taking the largest ascent and the largest descent it
+    /// meets — separately (<c>editeng/source/editeng/impedit3.cxx</c>:1496-1519). Under
+    /// <c>IsFixedCellHeight()</c> that function answers <c>ascent = fontHeight</c> and
+    /// <c>descent = fround(1.2 × fontHeight) − fontHeight</c> (<c>:3138-3142</c>), so for text
+    /// carrying no escapement the sum is <c>fround(1.2 × em)</c> exactly and this is the rule
+    /// <see cref="LargestSize"/> plus <see cref="FixedCellHeight"/> already gave.
+    /// </para>
+    /// <para>
+    /// <strong>A raised or lowered run is measured twice and the larger answer wins each side</strong>
+    /// (<c>:3164-3183</c>). The function forces the proportion back to 100 before it takes the
+    /// metric, so an escaped portion contributes the <em>full</em> ascent like any other; then,
+    /// for a subscript, it re-derives the descent as
+    /// <c>descent × proportion / 100 − fontHeight × escapement / 100</c> — integer arithmetic in
+    /// hundredths of a millimetre, and the second term is a <em>subtraction of a negative</em>, so
+    /// a subscript's descent grows by the whole of its drop. A superscript does the same to the
+    /// ascent. Neither ever shrinks the line, because both are compared against the unescaped
+    /// value already accumulated.
+    /// </para>
+    /// <para>
+    /// <strong>What it costs is a line a quarter of an em taller wherever a subscript appears,
+    /// and on an autofitted body that is a whole <c>constScaleLevels</c> row.</strong> At 28 pt —
+    /// 988 hundredths of a millimetre — the plain descent is <c>fround(988 × 1.2) − 988 = 198</c>
+    /// and a <c>-25% 58%</c> subscript's is <c>198 × 58 / 100 + 988 × 25 / 100 = 114 + 247 = 361</c>,
+    /// so the line is 1349 rather than 1186.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 by variant rather than derived, and it is the drop that
+    /// does it rather than the shrink.</strong> <c>pods05.ppt</c> page 32 holds an autofitted box
+    /// whose runs carry <c>style:text-position="-25% 58%"</c> subscripts; the reference draws that
+    /// page's dominant text at 9 pt where this tree drew 11. Take 26.2.4.2's own flat ODP of the
+    /// deck and render it straight back through the same binary and page 32 still comes out at
+    /// 9 pt, so the round trip is faithful there. Change <em>only</em> the offset, to
+    /// <c>0% 58%</c> — the same shrunken size, no drop — and the same binary draws it at
+    /// <strong>11 pt, this tree's answer</strong>. Change only the proportion instead, to
+    /// <c>-25% 100%</c>, and it stays at 9: the drop alone moves the row, and the shrink on its
+    /// own does not move it far enough to cross one. <c>probes/slides-r107/results.md</c> §2.
+    /// </para>
+    /// </remarks>
+    private static (Length Ascent, Length Height) FixedCellBox(
+        List<FormattedRun> runs, List<RunStyle> styles, int start, int end, bool realised)
+    {
+        long ascent = 0;
+        long descent = 0;
+        bool measured = false;
+
+        // A line consisting of nothing but its own hard break measures zero, and EditEngine then
+        // falls back to `ImplCalculateFontIndependentLineSpacing` of the break character's own
+        // font with no escapement anywhere in it (`impedit3.cxx`:1480-1491). That is the
+        // `start == end` case, so it deliberately passes `escaped` false below.
+        bool wholeLine = start != end;
+
+        for (int i = 0; i < runs.Count; i++)
+        {
+            FormattedRun run = runs[i];
+            bool touches = run.Start < end && start < run.End;
+            bool contains = start == end && run.Covers(start);
+            if (!touches && !contains) continue;
+
+            measured = true;
+            Accumulate(i, wholeLine);
+        }
+
+        if (!measured)
+        {
+            // An empty paragraph still occupies a line, and it is as tall as the text that would
+            // go on it: the first run's size, which is what the paragraph mark carries.
+            if (runs.Count > 0)
+            {
+                Accumulate(0, false);
+            }
+            else
+            {
+                Length fallback = Realised(Length.FromPoints(18), realised);
+                ascent = fallback.Mm100;
+                descent = FixedCellHeight(fallback).Mm100 - ascent;
+            }
+        }
+
+        return (Length.FromMm100(ascent), Length.FromMm100(ascent + descent));
+
+        void Accumulate(int index, bool escaped)
+        {
+            long height = Realised(Nominal(runs, styles, index), realised).Mm100;
+            long own = height;
+            long below = FixedCellHeight(Length.FromMm100(height)).Mm100 - height;
+
+            SlideEscapement escapement =
+                escaped && index < styles.Count ? styles[index].Escapement : default;
+
+            if (escapement.Percent != 0)
+            {
+                // `DFLT_ESC_PROP` is what an unstated proportion means, and zero is how this tree
+                // spells "no escapement at all" -- neither reaches here with a non-zero percent.
+                long proportion = escapement.Proportion is 0 or 100 ? 100 : escapement.Proportion;
+                long rise = height * escapement.Percent / 100;
+
+                if (escapement.Percent > 0) own = Math.Max(own, (own * proportion / 100) + rise);
+                else below = Math.Max(below, (below * proportion / 100) - rise);
+            }
+
+            ascent = Math.Max(ascent, own);
+            descent = Math.Max(descent, below);
+        }
+    }
+
+    /// <summary>The box a font-independent line of this em size occupies: <c>fround(1.2 em)</c>.</summary>
+    /// <remarks>
+    /// <c>ImplCalculateFontIndependentLineSpacing</c>, <c>impedit3.cxx</c>:501-505, whose own
+    /// constant is <c>12.0 / 10.0</c> and whose rounding is <c>basegfx::fround</c>.
+    /// </remarks>
+    private static Length FixedCellHeight(Length em)
+        => Length.FromMm100((long)Math.Floor((em.Mm100 * LineHeightFactor) + 0.5));
+
+    /// <summary>The em size, through the device's grid when the caller asks for it.</summary>
+    private static Length Realised(Length em, bool realised) => realised ? DeviceRealised(em) : em;
 
     /// <summary>
     /// Where a line's <em>height</em> measurement stops: its <see cref="TextLine.End"/>, less the
@@ -2212,6 +2341,11 @@ public static partial class SlideTextLayout
     /// decorations rather than with the measured run, because the shadow is drawn from the same
     /// glyphs at an offset and so moves no line break.
     /// </param>
+    /// <param name="Escapement">
+    /// The whole escapement, offset and proportion together, because the height a line takes needs
+    /// both and neither <see cref="Rise"/> nor <see cref="NominalSize"/> carries the pair. See
+    /// <see cref="FixedCellBox"/>.
+    /// </param>
     private readonly record struct RunStyle(
         Colour Colour,
         FontReference? Font,
@@ -2220,7 +2354,8 @@ public static partial class SlideTextLayout
         bool IsStruckThrough = false,
         Length Rise = default,
         Length NominalSize = default,
-        bool IsShadowed = false);
+        bool IsShadowed = false,
+        SlideEscapement Escapement = default);
 
     /// <summary>One paragraph, measured and broken.</summary>
     private sealed record Block(
