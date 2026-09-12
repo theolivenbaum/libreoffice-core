@@ -1409,42 +1409,56 @@ So after any restart, **rebuild both binaries before scoring anything**, and pre
 published yourself in this run over one you found on disk. If you must reuse one, check it: run
 a document you know the change moves and confirm the base binary does *not* move it.
 
-## The reference is reproducible, except on four documents — and you should know which
+## The reference is not reproducible on a few documents, and the few are not a fixed list
 
-Two full-corpus gates at different commits, same binary (26.2.4.2), same corpus, same
-`RENDER_TIMEOUT`, three workers each. The **reference** leg should be identical between them,
-because nothing about it changed. It very nearly is, and the exceptions are worth knowing by
-name rather than being rediscovered as a phantom regression:
+Three full-corpus gates at different commits, same binary (26.2.4.2), same corpus, same
+`RENDER_TIMEOUT`, three workers, all within one UTC day. The **reference** leg should be identical
+between them, because nothing about it changed.
 
-| | of 947 |
-|---|---|
-| reference renders whose extracted text is identical | **943** |
-| textually different | **4**, all `.xlsx` |
-| different in the *alphanumeric character* count (column 9) | **2** |
-| largest such difference | **3 characters** |
+Two consecutive pairs were censused, and this is the whole of the result:
 
-The four are `alle einzeln`, `SIL_TDB648`, `PBN Matrix NAAs (V01)` and
-`ans_mappings_of_eccairs_terms`; the last two differ in their text layer without changing the
-character count at all. Banked as `probes/gate-r111/ref-reproducibility.tsv`.
+| | pair 1 (r109→r111) | pair 2 (r111→r112) |
+|---|---|---|
+| reference renders compared | 947 | 947 |
+| textually different | **4** | **4** |
+| different in the character count (column 9) | 2 | 2 |
+| largest such difference | 3 | **74** |
 
-Two distinct causes, and only one of them is a scoring artefact:
+**The four are not the same four.** Union over both pairs is **five**:
 
-- **A font resolved differently between runs.** `alle einzeln` came back `Janßen,` in one run
-  and `Janssen,` in the other, twice — which is exactly its +2. That is the same class as the
-  five tarball font confounds already in `CLAUDE.md`, showing up as run-to-run rather than
-  machine-to-machine.
-- **The reference produced a genuinely different PDF.** `SIL_TDB648`'s file is about a
-  kilobyte smaller in one run, with `Primus`, `Epic`, `EGPWM` and `Threat` in a different
-  order and `MK V`/`MK VII` joined into `MK VMK VII`. Not extraction: content-stream ordering.
+- `SIL_TDB648` — both pairs, oscillating between exactly two counts, 30896 ↔ 30899.
+- `PBN Matrix NAAs (V01)` — both pairs, text layer differs, character count unchanged.
+- `ans_mappings_of_eccairs_terms` — both pairs, same shape.
+- `alle einzeln` — **pair 1 only**, +2: it wrote `Janßen,` in one run and `Janssen,` in the other,
+  twice. A font resolving differently between runs, the same class as the tarball confounds.
+- `047_Date_tracker_Gantt_chart` — **pair 2 only**, +74, with the PDF itself 105167 against 105422
+  bytes and `pdftotext` emitting `addadd`/`thisthis` in one run and clean text in the other.
 
-**What this licenses and what it does not.** The temptation on discovering this is to say the
-gate has a ±3 character noise floor and stop trusting small deltas. That is wrong and it is
-the more expensive error, because it would discard real findings: **945 of 947 documents
-reproduce their character count exactly**, so a one-character improvement on any of them is a
-real one. What the measurement licenses is much narrower — on these four documents, and only
-these, a small delta must be confirmed by re-rendering the reference before it is attributed
-to a change in this tree.
+`probes/gate-r111/ref-reproducibility.tsv` and `…-pair2.tsv`.
 
-Both differences are far inside the gate's own max(2 %, 15) band, so no verdict was ever at
-risk in either direction. The finding is about attributing *sub-verdict* movement, which is
-what a confinement measures.
+### A verdict can be at risk, and the first write-up of this said it could not
+
+`047`'s **74 exceeds its own gate band.** The band is `d > ref*0.02 && d > 15`, so on a reference
+of 3367–3441 characters it is 67.3–68.8, and the reference moved further than that on its own.
+Nothing actually changed verdict, because that document already fails on pages (5/8) — which is
+luck, not a property of the gate. The earlier claim here that "no verdict was ever at risk" held
+only for the two documents pair 1 happened to catch.
+
+It carries 27 `TODAY()`, but both runs were the same UTC day, so the volatile-date confound is not
+the explanation.
+
+### What this licenses, and what it still does not
+
+The tempting overreaction is to declare a corpus-wide noise floor and stop trusting small deltas.
+That remains wrong and remains the more expensive error: **at least 942 of 947 reproduce their
+character count exactly in any given pair**, so a one-character improvement on an ordinary
+document is real, and discarding small deltas everywhere would throw away findings.
+
+The narrower and correct rule is about *procedure* rather than about a list:
+
+- **A per-document delta is trustworthy only once the reference has been rendered twice for that
+  document.** The five above are a lower bound from three runs, not a checklist to consult.
+- A round crediting itself for a change on one document should render the reference twice before
+  believing the number. A confinement over a whole track is much safer, because a handful of
+  unstable documents cannot move a track total far — but a single-document claim is exposed.
+
