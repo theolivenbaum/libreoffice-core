@@ -1,26 +1,46 @@
-# What a pivot cell keeps, what the reference puts back, and the census that said nil
+# The pivot's own `<format>` records, which r108 censused as nil and which decide four properties
 
 Round 108 seated O45 on five properties a pivot cell keeps and the reference throws away, and on
-one approximation: the clearing falls back to `cellXfs[0]` where the reference falls back to the
-`Normal` `cellStyleXf`. This round censuses the four unmeasured properties, checks the clearing
-against 26.2.4.2's own output rather than against the C++ alone, settles the default-style half
-with an authored workbook — and **retracts one of r108's own censuses**, which is what changes
-the shape of the seat.
+one approximation. This round censuses the four unmeasured properties, **retracts one of r108's
+censuses**, implements the half that retraction exposed, and settles the approximation with an
+authored workbook.
 
 **The headline.** The reference does not only empty the range. `ScDPOutput::Output` ends with
 `maFormatOutput.apply` (`dpoutput.cxx`:1190), which lays the pivot's own `<format>`/`dxf` records
-back over the generated styles — and r108's census of those records as **nil** was an instrument
-artefact. There are **286 of them across 12 of the corpus's 28 pivot parts**. So clearing a
-property is only half a rule, and whether clearing it *alone* moves towards the reference has to
-be measured property by property. Measured against 26.2.4.2's own resolved view of 9878 cells:
-the **colour**, yes; the **font identity** and the **size**, no — clearing them is 85 and 89 cells
-worse, because the `dxf` records put back what the workbook's own cells happen to state; the
-**fill** and the **border**, nothing to clear, the corpus states neither where anything is
-generated.
+over the generated styles — and r108's census of those records as **nil** was an instrument
+artefact. There are **286 of them across 12 of the corpus's 28 pivot parts**.
 
-So this round lands the colour and the `Normal`-`cellStyleXf` correction, declines the other four
-with a number each, and hands on a `<format>`/`dxf` seat that is now sized rather than believed
-empty.
+**So clearing is not half a rule that can be shipped on its own, and the first cut of this round
+shipping it was wrong.** Scored by *value* against 26.2.4.2's own resolved view of the 9878 cells
+of the corpus's nineteen generatable pivot rectangles, clearing alone is **worse than merging** for
+the size (9783 against 9872) and for the colour (9873 against 9876) — the two together are what
+match:
+
+| property | merge (what r108 shipped) | clear alone | clear + `dxf` |
+| --- | ---: | ---: | ---: |
+| face | 9877 | 9878 | **9878** |
+| size | 9872 | 9783 | **9878** |
+| colour | 9876 | 9873 | **9878** |
+| fill | 9806 | 9752 | **9869** |
+
+So this round reads the records. The nine cells still wrong are one workbook's field-button row and
+corner cell, and every one is an under-application.
+
+**What that is worth on the page: `033_Event_planning_tracker` goes from 11.27 to 0.15 of summed
+unsigned ink and its MAJOR page clears** — the black band over 17.4 % of it, which r108 recorded as
+a fill of unknown origin, is a `dxf` whose `<patternFill>` states a background and no pattern type.
+Over the eleven pivot-bearing documents, 21.01 → **9.56**, four renderings moving and 303 of the
+307 sheets documents byte-identical.
+
+**And the colour margin the first cut of this round shipped on does not survive a value
+comparison.** `clearfour.py` scored the boolean *does this property differ from the document's
+default*, on which clearing the colour reads as 9873 against 9804 — a 69-cell gain. Compared as
+*values*, with a theme colour resolved through the workbook's own theme and tint, merging is 9876
+and clearing 9873: **clearing the colour alone is a net loss of three cells, not a gain of
+sixty-nine.** The 69 were `033_Event_planning_tracker` body cells where the reference draws the
+automatic colour over a black `dxf` fill that neither model painted, so they took no ink at all.
+The boolean instrument counted them and the ink measurement disagreed with it — 21.01 → 21.14 —
+and the ink was right.
 
 ---
 
@@ -97,94 +117,98 @@ what each script counted.*
 
 ---
 
-## (2) The reference's own answer, cell for cell — and it does not say "clear"
+## (2) The reference's own answer, cell for cell and value by value
 
-The C++ says the range is emptied. What 26.2.4.2 *does* is a separate measurement, and it is the
-one that decides. `clearfour.py` scores two models against the reference's own resolved view of
-every cell of every generatable pivot rectangle, taken from `soffice --convert-to fods`:
+Three models, scored against 26.2.4.2's own resolved view of every cell of every generatable
+pivot rectangle, taken from `soffice --convert-to fods`:
 
-- **merge** — the cell keeps what the workbook states, which is what this tree shipped;
-- **clear** — the cell is taken back to the document's own default.
+- **merge** — the cell keeps what the workbook states, which is what this tree shipped before;
+- **clear** — the cell is taken back to the document's `Normal` cell style and nothing else;
+- **clear + dxf** — cleared, then the pivot's own `<format>` records laid over it, which is the
+  reference's own rule.
 
-The comparison is the boolean *does this property differ from the document's default* on both
-sides — from `cellXfs[0]` on ours and from the `Default` cell style of the reference's `.fods` on
-the reference's — so no theme colour has to be resolved through two pipelines to be compared, and
-it is exactly the question the two models disagree about.
+`check-dxf.py` compares **values**, not "differs from the default": a theme colour is resolved
+through the workbook's own theme and tint and compared as a hex string, a size as points, a face
+as the family the reference's own `<style:font-face>` names. Where the reference writes
+`style:use-window-font-color="true"` the colour it draws is the automatic one, which the `.fods`
+does not state — 72 cells, all `033`'s — and those are excluded from the colour column rather than
+counted for whichever model happens to agree.
 
-| property | cells | merge agrees | clear agrees |
-| --- | ---: | ---: | ---: |
-| colour | 9878 | 9804 | **9873** |
-| face | 9878 | 9877 | **9878** |
-| declared class | 9878 | **9835** | 9750 |
-| **font identity** (face and class together) | 9878 | **9835** | 9750 |
-| size | 9878 | **9872** | 9783 |
-| fill | 9878 | 9789 | 9789 |
+| property | cells | merge | clear | clear + dxf |
+| --- | ---: | ---: | ---: | ---: |
+| face | 9878 | 9877 | 9878 | **9878** |
+| size | 9878 | 9872 | 9783 | **9878** |
+| colour | 9878 | 9876 | 9873 | **9878** |
+| fill | 9878 | 9806 | 9752 | **9869** |
 
-The face and its declared class are scored jointly as well as separately because they are one
-property to resolve: a face named without the generic class that qualifies it is a different font
-to fall back from, and `XlsxCellFormats.Apply` already says so for a rich-text run. Taken jointly,
-clearing the font identity is **85 cells worse** than leaving it alone.
+Per document, every one of the nineteen ranges is exact under clear+dxf except
+`049_Expenses_calculator`, which is 45 of 54 on the fill: its field-button row `B3:G3`, its corner
+`B4`, its grand-total column header `G4` and its grand-total row label `B11` take a fill the model
+does not place. All nine are under-applications — the model paints nothing where the reference
+paints `#F9FAF5`. `check-dxf.txt`.
 
-*One piece of instrument noise in the class column, which does not move the comparison.* The
-reference declares a second `<style:font-face>` for a family whenever two styles disagree about
-its generic class — `Consolas` swiss and `Consolas1` modern in `033`, `Gill Sans MT` swiss and
-`Gill Sans MT1` with no generic at all in `049` — so `049` reads as four cells whose class differs
-from its default when nothing in the workbook says so. Those four are wrong under *both* models
-and cancel out of merge against clear. The 85 is `033`'s, and `033`'s is a class its own cells
-state.
+### The null that proves the clearing is total
 
-Read out:
+`033_Event_planning_tracker` with its `<formats>` element deleted and **nothing else changed**,
+converted by 26.2.4.2: all ninety-one cells of `B5:N11` come back at the `Default` cell style — no
+face, no size, no colour, no fill — with only the generated bold on the grand-total row. With the
+element in place the same ninety-one carry a 12 pt `Consolas`-modern on a black ground.
 
-- **colour** — clearing is right on 69 more cells than merging.
-- **font identity** — clearing is wrong on 128 and merging on 43.
-- **size** — clearing is wrong on **95** and merging on 6.
-- **fill** — the two models are the same model here, because no cell states a fill. Both are wrong
-  on the same 89 cells of `033`, where the reference paints a **black** background that comes
-  entirely from the `dxf` path. That is the *"a fill or background shading the reference has and we
-  do not covers 17.4 % of the page"* r108 recorded against `033`'s page 3 and left unexplained.
+That is a single-variable experiment on a real corpus workbook, and it is worth more than the
+authored fixture in §4: it says the clearing removes **every** property this round censused, and
+that everything the reference draws over a pivot afterwards is either one of the four generated
+styles or a `dxf`.
 
-**Everything clearing loses is `033_Event_planning_tracker`.** Its `dxf` records restore a 12 pt
-`Consolas`-modern on 89 of its 91 cells, and its own cells happen to state the same 12 pt
-`Consolas`-modern. Reproducing that by *not* clearing is an accident. It is an accident that
-agrees with the reference 85 more times than clearing does, and no free parameter separates the
-two, so the font identity and the size wait for the `dxf` half.
+**Banked**: `check-dxf.py`, `check-dxf.txt`, `dxf-model.py`, `clearfour.py` (the earlier boolean
+instrument, kept because §0 quotes it), `fods-face.py`.
 
-**And the colour's own margin is smaller than 9873 against 9804.** 73 of the 74 cells clearing wins
-are `033` body cells carrying `style:use-window-font-color="true"` over the black `dxf` fill: the
-reference is drawing *white on a dark ground*, and neither model draws the white or the fill. What
-clearing genuinely fixes is one cell — `037`'s `B19`, a pivot corner cell the workbook leaves in
-14 pt Times New Roman in an accent colour where the reference draws 11 pt Calibri black. What it
-genuinely breaks is five cells of `033`'s row-label column, `B6:B10`, where a `dxf` states the
-black this tree was reproducing. Both numbers are here rather than only the 69.
+## (3) What is implemented, and three places the C++ tree is not the binary
 
-**Banked**: `clearfour.py`, `clearfour.txt`, `fods-face.py`.
+`XlsxPivotFormats` is `FormatOutput` — the `dxfs` table, the `<pivotArea>` and its references, the
+line matcher, and the placement — and `XlsxPivotGrid` calls it after the generated styles, which is
+where `maFormatOutput.apply` sits. `SheetPivotStyle` gains `Dxf`, applied last, so a record's
+weight beats the generated `Pivot Table Result` bold; a record's fill goes into the sheet's
+decoration beside the generated borders.
 
----
+**The clearing is now total for all five**: the face, its declared generic class, the size and
+the colour come from the `Normal` `cellStyleXf`, `SheetFormatting.ClearBackgrounds` takes the fill
+off the rectangle, and the records put back whatever they state.
 
-## (3) What is implemented
+*The fill half of the clearing was found by the fixture rather than by the corpus, which is the
+whole reason to author one.* The census says **no** cell of the corpus's nineteen generatable
+ranges states a fill, so nothing real could show it; the authored workbook states one on every
+cell of its pivot, 26.2.4.2 removes it, and this tree kept it. The first cut of that fixture could
+not have shown it either — its `dxf` fill and its cells' own fill were both yellow, so the two
+candidate sources agreed by accident. They are different colours now.
 
-**The colour is cleared. The face, the declared class, the size, the fill and the border are not.**
-Each of those five has a number above and the numbers point the same way: clearing a property the
-`dxf` path restores moves away from the reference, and clearing one the corpus never states moves
-nothing.
+**Three arms of the C++ tree read here are not in 26.2.4.2, and each was settled by applying one
+format at a time to `033` and reading the reference's own `.fods`** — 84 records, one file each:
 
-`SheetPivotStyle` gains `Cleared`, the whole format the emptied rectangle falls back to, and takes
-the colour from it. The three existing members — weight, horizontal alignment, indent — are
-unchanged and still a differential the generated style may overwrite. `Cleared` carries the whole
-format rather than one more nullable field precisely because which of its properties are taken is
-a measurement that will move when the `dxf` records are read.
+| the tree | 26.2.4.2 | how it was settled |
+| --- | --- | --- |
+| `tryHandleGrandTotals` (`PivotTableFormatOutput.cxx`:582) sends a `grandRow="1"` record to the grand-total row alone | no short circuit: such a record is matched like any other | `033`'s four `grandRow` **data** records each paint the whole data area — `#9` and `#22` white over `C6:N11`, `#29` black — and its `grandRow` **label** records paint nothing at all, which is what ordinary matching gives a label with no references. Four records, four predictions, and the grand-total path predicts none of them. |
+| an `<alignment>` in a `dxf` reaches the cell | it reaches nothing | `033` states nine, three of which match its whole data area; the reference's automatic style for those cells carries no `fo:text-align` and no `fo:margin-left`. Which is why r108's 0 disagreements over 9970 cells on the justification and the indent still stand. |
+| `PivotAreaType` is parsed | and never used | `PivotTableFormat::finalizeImport` reads `dataOnly`, `labelOnly`, `outline`, `grandRow`, `grandCol`, `offset`, `fieldPosition` and the references, and nothing else — so `type="all"`, `type="button"` and `type="origin"` behave as `normal`. |
 
-**And the base moved, which is the other half of what ships.** `XlsxPivotGrid.Apply` now takes
-`XlsxCellFormatTable.StyleDefault` — the `Normal` `cellStyleXf` — where it took
-`SheetCellFormats.SheetDefault`. Those are not the same thing twice over: `SheetDefault` is
-`cellXfs[0]` *or*, where the sheet states a `<col>` spanning to the last column, that column's
-format (`XlsxSheetFormats.cs`:60-68), and `033` and `035` both state one. The weight, the
-alignment and the indent the clearing puts back come from this base too, so the correction is not
-confined to the colour even though the colour is the only property newly taken from it — on this
-corpus the two bases happen to agree on all three of those, which is why §6's movers are a colour
-story.
+**Two rules of the matcher that decide whole documents and are not what the markup looks like it
+says.** A format's kind is Data when `dataOnly` — whose default is **true** — else Label when
+`labelOnly`, else None, and a None record applies nothing at all because `applyMatchedLines` has an
+arm for Label and an arm for Data and no third one; six of `033`'s eighty-four are inert that way.
+And a record with **no references matches every line** through the broad path, so a bare
+`<pivotArea outline="0"/>` paints the whole data area — which is how one record blackens
+`033`.
 
----
+**And the `dxf` fill rule is the one that produces the black.** A `<patternFill>` stating a
+`bgColor` and **no** `patternType` becomes a *solid* fill whose colour is the *pattern* colour, and
+an unstated pattern colour is automatic, which resolves against the window **text** colour: black.
+The same file also states `patternType="none"` beside a `bgColor`, which applies nothing.
+`Fill::finalizeImport`'s `mbDxf` arm, `stylesbuffer.cxx`:1988-2009.
+
+**What is still not modelled, each with its reason.** A record's `offset` (no corpus pivot states
+one), its `fieldPosition`, a `dxf`'s `<alignment>` (measured above as reaching nothing), a `dxf`'s
+`<border>` (nil on this corpus) and its `<numFmt>` (a separate question from formatting). The
+subtotal-reference arm is transcribed but untested: no corpus pivot states a
+`defaultSubtotal` reference either.
 
 ## (4) The default-style half, settled by an authored workbook
 
@@ -210,13 +234,16 @@ cell stating `cellXfs[1]`), and `Plain` — the same block three times with `cel
 | `Plain` `A1:C4` (`s="1"`) | Liberation Mono 8 bold green on yellow — untouched |
 | `Plain` `A13:C16` (no `s`) | the `Normal` style |
 
-So **the clearing falls back to the `Normal` `cellStyleXf`, not to `cellXfs[0]`**, and the size is
-cleared too when no `<format>` record puts one back — a second, independent confirmation of §2's
-diagnosis.
+So **the clearing falls back to the `Normal` `cellStyleXf`, not to `cellXfs[0]`**, and every one
+of the four properties is cleared when no `<format>` record puts one back — which is §2's null
+again, on an authored file where the whole state can be stated rather than inferred.
 
 `XlsxCellFormatTable` now carries `StyleDefault`, the `Normal` `cellStyleXf` resolved through the
 same `Resolve` the cell formats go through, and `XlsxPivotGrid.Apply` takes it instead of
-`SheetCellFormats.SheetDefault`. `XlsxCellFormats.NormalStyleXf` is the `builtinId="0"` lookup,
+`SheetCellFormats.SheetDefault` — which is not the same entry twice over, because `SheetDefault` is
+`cellXfs[0]` *or*, where the sheet states a `<col>` spanning to the last column, that column's
+format (`XlsxSheetFormats.cs`:60-68). `033` and `035` both state one, at 11 pt where their
+`cellXfs[0]` is 10. `XlsxCellFormats.NormalStyleXf` is the `builtinId="0"` lookup,
 the same rule `XlsxStyles.DefaultFormatId` already applies to number formats and `probes/numfmt-r68`
 already probed for them.
 
@@ -227,7 +254,24 @@ it was counting `table:data-pilot-table` in the output — 0 against the 8 that 
 fixture produces. The fixture that ships is r108's `make-fixture.py` with `styles.xml` and the sheet
 list changed, so it is a modification of a file already known to import.
 
-**Banked**: `make-default-fixture.py`, `fods-face.py`.
+**And a second fixture beside it, for the other half.** `regression/pivot-format-records.xlsx` is
+this file with a `<formats>` element added and nothing else changed — five records, one per arm —
+so the two are a single-variable experiment on the whole subsystem. 26.2.4.2's own `.fods` of it:
+
+| cells | resolved to |
+| --- | --- |
+| `A1`, `B1` — the corner and the first data field's header | the `Normal` style, Liberation Sans 11 black, **no fill** although the cells state `#ffff00` |
+| `C1` | red, from a label record with one reference on the data dimension naming index 1 |
+| `B2:C4`, the data area | Liberation Mono 8 pt **bold** on `#00b050` |
+| `A4` | bold and otherwise the `Normal` style — the generated grand-total `Title` |
+| anywhere | never the 18 pt Liberation Serif one of the five records states |
+
+Five records, five predictions, five confirmations — including the two arms that separate
+26.2.4.2 from the C++ tree read here: the bold comes from a `grandRow="1"` record that lands on
+the whole data area, and the 18 pt from a `dataOnly="0"` record with no `labelOnly`, which is
+inert.
+
+**Banked**: `make-default-fixture.py`, `make-format-fixture.py`, `fods-face.py`.
 
 ---
 
@@ -254,24 +298,22 @@ change to six real renderings and belongs to a seat that sweeps for it.
 
 ---
 
-## (6) Reach, measured honestly
+## (6) Reach
 
 **Confinement.** All **307** sheets-track documents rendered at both binaries with
 `SOURCE_DATE_EPOCH` fixed, `%%EOF` checked before hashing, each render deleted as it went:
-**0 failures, 0 truncations, and 3 documents moved** — `033_Event_planning_tracker`,
-`035_Project_plan_for_law_firms` and `037_Personal_money_tracker`. The other **304 are
-byte-identical**, the 64 `.xls` among them as the control, since the change is inside
-`XlsxPivotGrid` and `XlsxCellFormats` which only the OOXML spreadsheet path enters.
-`sheets-sweep-r110.tsv`.
+**0 failures, 0 truncations, and 4 documents moved** — `033_Event_planning_tracker`,
+`035_Project_plan_for_law_firms`, `037_Personal_money_tracker` and `049_Expenses_calculator`. The
+other **303 are byte-identical**, the 64 `.xls` among them as the control, since the change is
+inside `XlsxPivotFormats`, `XlsxPivotGrid` and `XlsxCellFormats`, which only the OOXML spreadsheet
+path enters. `sheets-sweep-r110.tsv`.
 
-*That sweep measured a wider variant than ships.* It was run against a build that cleared the
-font identity as well as the colour; the shipped build clears a strict subset of the same cells,
-so a document byte-identical there is byte-identical here. The eleven pivot-bearing documents were
-re-swept against the shipped build to get the mover list exactly:
-`pivot-sweep-shipped.tsv`, same three.
+Four of the seven generatable ranges carrying `<format>` records move and three do not, and the
+three are explained rather than missed: `DynamicBubbleChart` and `007_Contextures_chart_sample`
+state one record each and it is an alignment `dxf`, which reaches nothing.
 
-**Page counts and alphanumeric characters** — the two checks `batch-check.sh` makes in that order,
-taken against the banked 26.2.4.2 reference in `/home/user/gate-orig-r83/ref` rather than
+**Page counts and alphanumeric characters** — the two checks `batch-check.sh` makes, in that
+order, taken against the banked 26.2.4.2 reference in `/home/user/gate-orig-r83/ref` rather than
 re-rendering it. Column 9's `glyphs`, not the token count:
 
 | document | ref pages / glyphs | base | head |
@@ -288,62 +330,50 @@ re-rendering it. Column 9's `glyphs`, not the token count:
 | `026_Monthly_cash_flow_statement` | 11 / 7852 | 11 / 7864 | 11 / 7864 |
 | `053_Personal_asset_inventory` | 2 / 226 | 4 / 257 | 4 / 257 |
 
-**Not one page count and not one alphanumeric count moves**, which is what a colour change should
-do and is stated here rather than left to be assumed. `reach-r110.tsv`.
+**Not one page count and not one alphanumeric count moves**, which is what a formatting change
+should do and is stated rather than assumed — and it is why **no gate verdict can move on this
+round in either direction**. `reach-r110.tsv`.
 
-**And the ink is worse.** Summed unsigned `|ink|%` against the same banked reference, both legs
-rendered in one run:
+**What does move is the ink, and it is the largest figure this seat has produced.** Summed
+unsigned `|ink|%` against the same banked reference, both legs rendered in one run:
 
 | document | base | head | Δ |
 | --- | ---: | ---: | ---: |
-| `033_Event_planning_tracker` | 11.27 | 11.40 | **+0.13** |
-| `037_Personal_money_tracker` | 1.25 | 1.26 | +0.01 |
-| `035_Project_plan_for_law_firms` | 1.13 | **1.12** | −0.01 |
-| the other eight | | | 0.00 |
-| **total** | **21.01** | **21.14** | **+0.13** |
+| `033_Event_planning_tracker` | 11.27 | **0.15** | **−11.12** |
+| `049_Expenses_calculator` | 0.92 | **0.62** | −0.30 |
+| `035_Project_plan_for_law_firms` | 1.13 | 1.11 | −0.02 |
+| `037_Personal_money_tracker` | 1.25 | 1.24 | −0.01 |
+| the other seven | | | 0.00 |
+| **total** | **21.01** | **9.56** | **−11.45** |
 
-No MAJOR verdict moves, at 4 before and 4 after. `ink-r110.tsv`.
+**And one MAJOR verdict clears**, 4 → 3: `033`'s page 3, which r108 recorded as *"a fill or
+background shading the reference has and we do not covers 17.4 % of that page"* and left
+unexplained. It is the `dxf` fill, and that page is now at 0.15 of summed unsigned ink over the
+document's three. `ink-r110.tsv`.
 
-**Why it is shipped anyway, and the number that argues against it.** The +0.13 is `033`, where
-the reference paints a black `dxf` fill and draws its body text in the automatic colour — white —
-and neither the old behaviour nor the new one draws either. The old behaviour's near-black text
-scores marginally better against white-on-black than the new grey does. What the change actually
-fixes is `037`'s corner cell, and what it actually breaks is `033`'s five row-label cells; both
-are the same missing feature, the `dxf` records. Against that, the rule itself is not inferred —
-the authored fixture in §4 shows 26.2.4.2 clearing the colour outright — and the cell-for-cell
-score against the reference's own resolved view is better by every aggregation. This is r108's
-own trade, on the same documents, at the same order of magnitude: it shipped a clearing that cost
-0.09 for a cell score of 179 against 0. One line of `SheetPivotStyle.Over` reverses it if the next
-seat weighs it the other way.
-
-**One thing the sweep found that the census had missed, and it is worth carrying.**
-`035_Project_plan_for_law_firms` moved although its census row was zero on all five properties.
-Two reasons, both instructive. Its pivot cells state `Cambria` `family="1"` where its default
-states `Cambria` `family="2"` — the same name, a different declared generic class, which the first
-census compared away; that is why the class is its own column now. And the base this tree cleared
-*to* was not `cellXfs[0]` at all on that sheet: `XlsxSheetFormats` promotes a `<col>` spanning to
-the last column into the sheet default (`XlsxSheetFormats.cs`:60-68), and `033` and `035` both
-state one — an 11 pt face where `cellXfs[0]` is 10 pt. So the shipped change moves the base twice
-over, from the full-width column's format to the `Normal` `cellStyleXf`, and the reference's own
-`.fods` agrees with the second: those cells resolve to `Default`.
+*Read against the first cut of this round, which cleared the colour alone and shipped it on a
+cell-for-cell score: that was **+0.13** of ink, and the instrument it was shipped on — a boolean
+"does this property differ from the default" — is the one the ink disagreed with. Both halves
+together are −11.45. A property cleared without the half that puts it back is not half a fix.*
 
 ---
 
 ## Tests
 
-Every project was run on its own so a truncated run cannot hide as a pass, and the totals below
-are read out of those runs' own output.
+Every project was run on its own so a truncated run cannot hide as a pass.
 
 Ten non-fidelity projects — Containers 109, Core 560, Markup 259, OpenDocument 160,
-Presentations 1107, Rendering 164, Spreadsheets 1337, Text 728, Vector 309, WordProcessing 1938 —
-**6671 passed, 0 failed**.
+Presentations 1107, Rendering 164, Spreadsheets **1342**, Text 728, Vector 309,
+WordProcessing 1938 — **6676 passed, 0 failed, 0 skipped**.
 
-**`Paperless.WordProcessing.Tests` had to be run twice, and the first run is exactly the trap
-`CLAUDE.md` records.** Under a load average of 40 — three other rounds were building and sweeping
-on this host — it printed `Catastrophic failure: Test process crashed with exit code 137` and then
-`Passed! - Failed: 0, Passed: 1935, Total: 1935`. A green line with **three fewer tests than the
-project has**. Re-run alone it is 1938 of 1938. Nothing in this round can reach the words track;
-the count is what caught it, not the colour.
+*`Paperless.Vector.Tests` reported 1 failed of 309 on one run and 309 of 309 on the two after it,
+with nothing in this round able to reach that project; the failing run was concurrent with another
+session's whole-suite run on the same host. It is the invented-failure-under-load case
+`CLAUDE.md` records, and it is written down rather than left out.*
+
+*The Spreadsheets figure is this branch's base of 1333 plus this round's nine. It is **not** the
+1337 the merged HEAD reports, which is the same 1333 plus `agent/chartinner`'s four — two totals
+agreeing is not two trees agreeing.*
 
 `Paperless.Fidelity.Tests`: **Failed: 10, Passed: 542, Total: 552** — the known ten and no
 eleventh: `PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt` on
@@ -352,73 +382,65 @@ eleventh: `PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt` o
 `list-label-overrun.doc`/`.fodt`/`.docx`/`.odt`,
 `SheetDrawingComparisonTests.APictureIsDrawnWhereLibreOfficeDrawsIt` on `sheet-rich-text.xlsx`,
 and `JustificationShrinkComparisonTests.TheParagraphBreaksWhereLibreOfficeBreaksIt` on
-`justify-shrink-2013.docx`. `tests-fidelity.log`.
+`justify-shrink-2013.docx`.
 
-**`SheetPivotDefaultStyleTests` is four tests over `regression/pivot-default-style.xlsx`, and
-exactly one of them fails at the base — which is the honest count and is stated as such.** With
-`XlsxPivotGrid.cs`, `XlsxCellFormats.cs`, `XlsxReader.cs` and `SheetPivotStyle.cs` taken back to
-`a311b00e2`, `AnEmptiedPivotCellTakesTheNormalCellStylesColour` fails and the other three pass.
-That is by design rather than by accident: the change is one property, so one test can pin it,
-and the other three are the controls that make the first one mean something —
-`ACellStatingTheDefaultCellFormatIsNotTheNormalStyle` shows the fixture really does state two
-different formats where a base tree resolves the `s="0"` one correctly,
-`OnlyTheColourIsClearedAndTheReferenceClearsTheWholeFont` records the two properties deliberately
-left alone, and `TheGrandTotalRowIsStillBoldAndTheRowsAboveAreNot` shows the generated styles
-still land on top of the new base. The failing one discriminates all three candidates at once: the
-cleared colour is black (the `Normal` style), not red (`cellXfs[0]`) and not green (the cell's
-own).
+**Nine new tests over the two authored fixtures, and six of the nine fail at `a311b00e2`.**
+`SheetPivotDefaultStyleTests` is four and `SheetPivotFormatRecordsTests` five; with
+`SheetPivotStyle.cs`, `SheetDecoration.cs`, `XlsxCellFormats.cs`, `XlsxPivotGrid.cs` and
+`XlsxReader.cs` taken back to the base and `XlsxPivotFormats.cs` removed, the six that fail are
+the clearing of the face and the size, the clearing of the colour, the broad-match record, the
+`dxf` fill, the label record, and the cleared base under the records. The three that pass are the
+controls that must hold either way: a cell stating `cellXfs[0]` outside the pivot, the inert
+record reaching nothing, and the generated grand-total bold.
 
 `SheetPivotPackedTests` and `SheetPivotGridTests`, r107's and r108's fifteen, are unchanged and
-still pass: their fixture's `Normal` `cellStyleXf` and `cellXfs[0]` carry the same font, which is
-exactly why it could not settle the question this round's fixture settles.
+still pass.
 
 ---
 
 ## (7) What is left, and what it is worth
 
-- **The pivot's `<format>`/`dxf` records are the seat this round hands on, and it is now sized
-  rather than believed empty.** 286 records across 12 of 28 pivot parts; 7 of those parts are in
-  the 19 the grid is generated for. On the corpus their visible effect is concentrated in one
-  document — `033_Event_planning_tracker`, where they paint a black background over 89 cells of
-  the pivot body, restore a 12 pt `Consolas`-modern over all of it and put a black back on the
-  five row-label cells — and that black background is `033`'s page-3 residual, 17.4 % of the page,
-  which r108 recorded as unexplained. `037_Personal_money_tracker` is the only other one whose
-  records show at all, and they are three cells of font size. `049`, `035`, `026`, `053`, `007`
-  and `DynamicBubbleChart` state 179 records between them and 26.2.4.2's own `.fods` shows not one
-  of them changing anything, so a first implementation has a large null to check against as well
-  as a target — which is the part of this that a matcher can most easily get wrong in the
-  permissive direction. What it costs is
-  `FormatOutput`'s matcher: `sc/source/core/data/PivotTableFormatOutput.cxx`, `findMatchingLines`
-  over each `<format>`'s `pivotArea` references, with grand-total and label/data special cases.
-  That is a seat, not a corner of one.
-- **Landing it flips three decisions in this round**, and each is a one-line change with its
-  number recorded here: the font identity and the size become worth clearing (9750 and 9783
-  today, both of which should reach 9878 once the records are read), and the fill becomes worth
-  modelling.
+- **Nine cells of `049_Expenses_calculator`.** Its field-button row, its corner cell, its
+  grand-total column header and its grand-total row label take a `#F9FAF5` fill the matcher does
+  not place. Removing the label-axis guard — `bMatchRows = (eType != Label) || bHasRowReferences`,
+  `PivotTableFormatOutput.cxx`:678-681 — recovers two of the nine and costs **27** on `033`, so the
+  guard is in 26.2.4.2 and the remaining seven are something else. The button row is not reachable
+  by `applyMatchedLines` at all, which places a column label at `nColumnHeaderStartRow + n` and
+  never at the table's own first row.
+- **The `<alignment>`, `<border>` and `<numFmt>` halves of a `dxf`**, each measured as nil or as
+  reaching nothing (§3).
+- **A record's `offset`, its `fieldPosition`, and the subtotal-reference arm.** No corpus pivot
+  states any of the three, so the transcription of the first two is absent and the third is
+  written and unwitnessed.
 - **The sheet default itself is still `cellXfs[0]`,** where 26.2.4.2 uses the `Normal`
-  `cellStyleXf` for a cell stating no `s`. §5 sizes it at 6 of 242 corpus workbooks.
+  `cellStyleXf` for a cell stating no `s`. §5 sizes it at 6 of 242 corpus workbooks — not nil, so
+  it needs a sweep of its own.
 - **`053_Personal_asset_inventory` still cannot be scored.** 4 pages against the reference's 2 at
-  base and at head, so `pdf-image-diff.py` reports none and its `0.00` is an absence of
-  measurement. Its one pivot is externally cached and nothing is generated for it either way.
-- **The border stays nil** and this round did not re-measure it; r108's `statedborders.py` is the
-  census and this round's `statedface.py` agrees on the same rectangles.
-
----
+  base and at head, so `pdf-image-diff.py` reports none.
 
 ## Citations, re-checked by hand
 
 Every `file:line` was re-opened in `/home/user/libreoffice-core`. **That tree is not the reference
 binary's source** — `configure.ac` declares 27.2.0.0.alpha0+, the binary is 26.2.4.2, and the
-checkout is one bulk import — so each is *this tree*, and the arm that measures the actual
-reference is the `--convert-to fods` oracle throughout.
+checkout is one bulk import — so each is *this tree*, and on this subsystem the two are measurably
+different in three places (§3). The arm that measures the actual reference is the
+`--convert-to fods` oracle throughout.
 
 | Citation | What it should be | Verified |
 | --- | --- | --- |
 | `pivottablebuffer.cxx`:1322-1338 | `PivotTable::finalizeImport`, the `clearContents(… HARDATTR \| STYLES …)` over the stated range | yes |
 | `pivottablebuffer.cxx`:1415-1417 | the `maFormats` loop that finalizes each `PivotTableFormat` | yes |
+| `PivotTableFormat.cxx` (whole file) | `finalizeImport` reads `dataOnly`, `labelOnly`, `outline`, `grandRow`, `grandCol`, `offset`, `fieldPosition` and the references — and never `meType` | yes |
 | `dpoutput.cxx`:1190 | `maFormatOutput.apply(*mpDocument)`, the last statement of `outputDataResults` | yes |
 | `dpoutput.cxx`:1193-1226 | `ScDPOutput::Output` — `CalcSizes`, `maFormatOutput.prepare`, then `DeleteAreaTab(…, ALL)` | yes |
-| `PivotTableFormatOutput.cxx`:657 | `FormatOutput::apply`, and the grand-total / label / data arms under it | yes |
+| `PivotTableFormatOutput.cxx`:171-200 | `prepare`, and `nMaxNumberOfIndices` assigned rather than maxed | yes |
+| `PivotTableFormatOutput.cxx`:322-416 | `findMatchingLines`, its two passes and the broad fallback | yes |
+| `PivotTableFormatOutput.cxx`:582 | `tryHandleGrandTotals` — present here, absent from 26.2.4.2's behaviour | yes |
+| `PivotTableFormatOutput.cxx`:657 | `FormatOutput::apply` | yes |
+| `PivotTableFormatOutput.cxx`:678-681 | the label axis guard, which 26.2.4.2 *does* have | yes |
+| `PivotTableFormatOutput.cxx`:685-688 | `nColumnHeaderStartRow` | yes |
+| `stylesbuffer.cxx`:1978-2009 | `Fill::finalizeImport`, its `mbDxf` arm and the `XML_none` early out | yes |
+| `stylesbuffer.cxx`:1740-1762, 1866-1892 | `PatternFillModel`'s dxf defaults; `fgColor` is the pattern colour and `bgColor` the fill colour | yes |
 | `workbookhelper.cxx`:727-747 | `finalizeWorkbookImport` runs `getPivotTables().finalizeImport()` **after** every sheet | yes |
-| `workbookfragment.cxx`:556-571 | `importSheetFragments` then `finalizeWorkbookImport`, which is why the clearing sees the applied formats | yes |
+| `workbookfragment.cxx`:556-571 | `importSheetFragments` then `finalizeWorkbookImport` | yes |
 | `XlsxSheetFormats.cs`:52, :60-68 | `SetSheetDefault(pooled[0])`, and a full-width `<col>` overriding it | yes |

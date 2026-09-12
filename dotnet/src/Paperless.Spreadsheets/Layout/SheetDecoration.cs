@@ -291,6 +291,49 @@ public sealed class SheetFormatting
         _blocks.Add(firstRow, lastRow, firstColumn, lastColumn, Math.Max(0, format));
     }
 
+    /// <summary>
+    /// Takes the background off every cell of a rectangle, leaving its borders alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What <c>clearContents(… HARDATTR | STYLES …)</c> and <c>DeleteAreaTab(…, ALL)</c> do to a
+    /// pivot table's output range before <c>ScDPOutput</c> writes into it. A fill is the one
+    /// thing the clearing removes that is not a property of the text, so it cannot travel on
+    /// <see cref="SheetPivotStyle"/> and needs a seat here.
+    /// </para>
+    /// <para>
+    /// It reads what a cell <em>states</em> rather than <see cref="At"/>, so a conditional format
+    /// evaluated over the same cell is not baked into it — a conditional fill is a later layer
+    /// and the clearing happens at import, before any rule is evaluated. And it writes only where
+    /// there is something to remove, so a pivot over a plainly-formatted rectangle costs a lookup
+    /// per cell and no storage at all: measured over the corpus's nineteen generatable pivot
+    /// rectangles, <strong>not one of their 9878 cells states a fill</strong>
+    /// (<c>probes/pivot-fmt-r110/statedface.py</c>), so this is nil-reach there and is here
+    /// because an authored fixture shows 26.2.4.2 doing it.
+    /// </para>
+    /// </remarks>
+    /// <param name="firstRow">The first row, inclusive.</param>
+    /// <param name="lastRow">The last row, inclusive.</param>
+    /// <param name="firstColumn">The first column, inclusive.</param>
+    /// <param name="lastColumn">The last column, inclusive.</param>
+    public void ClearBackgrounds(int firstRow, int lastRow, int firstColumn, int lastColumn)
+    {
+        for (int row = Math.Max(firstRow, 0); row <= lastRow; row++)
+        {
+            for (int column = Math.Max(firstColumn, 0); column <= lastColumn; column++)
+            {
+                SheetCellDecoration stated = Stated(row, column);
+                if (stated.Background is null) continue;
+
+                // Written straight into the per-cell store rather than through
+                // `SetCell`, which drops a zero handle until something wider has been set —
+                // right for a reader that would otherwise store a zero per cell, and wrong here,
+                // where the zero has to *replace* what the cell already states.
+                _cells[(row, column)] = Intern(stated with { Background = null });
+            }
+        }
+    }
+
     /// <summary>Sets the format a whole row applies to the cells that state none.</summary>
     /// <param name="row">The zero-based row.</param>
     /// <param name="format">A handle from <see cref="Intern"/>, or zero for "explicitly plain".</param>

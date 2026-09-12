@@ -39,9 +39,9 @@ namespace Paperless.Spreadsheets.Tests;
 /// Liberation Serif 18 red, so the reading is not a reading of the instrument.
 /// </para>
 /// <para>
-/// This tree takes only the <em>colour</em> from that fallback and
-/// <see cref="OnlyTheColourIsClearedAndTheReferenceClearsTheWholeFont"/> says why, with the
-/// cell-for-cell score for each of the five properties.
+/// Nothing puts any of it back here, because this fixture states no <c>&lt;formats&gt;</c>: on a
+/// pivot that does state them, <c>XlsxPivotFormats</c> puts a face, a size, a colour and a fill
+/// back over exactly this base.
 /// </para>
 /// </remarks>
 public sealed class SheetPivotDefaultStyleTests
@@ -63,40 +63,38 @@ public sealed class SheetPivotDefaultStyleTests
         => pages.Sheets[sheet].Formats.At(row, column);
 
     /// <summary>
-    /// The cleared cells take the <c>Normal</c> style's <em>colour</em> — and this is the test
-    /// that says the face, the declared class and the size are deliberately left alone.
+    /// The cleared cells take the <c>Normal</c> style's face and size, not <c>cellXfs[0]</c>'s
+    /// and not their own.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// 26.2.4.2 resolves all twelve cells of this fixture to Liberation Sans 11 pt black, so the
-    /// reference clears the whole font and not just its colour. This tree clears only the colour,
-    /// because clearing is only half of what the reference does: <c>ScDPOutput::Output</c> ends
-    /// with <c>maFormatOutput.apply</c> (<c>dpoutput.cxx</c>:1190), which lays the pivot's own
-    /// <c>&lt;format&gt;</c>/<c>dxf</c> records back over the generated styles, and this tree
-    /// reads none of them. Those records are not rare — 286 across 12 of the corpus's 28 pivot
-    /// parts (<c>probes/pivot-fmt-r110/format-census.py</c>).
-    /// </para>
-    /// <para>
-    /// Scored against 26.2.4.2's own resolved view of the 9878 cells of the corpus's 19
-    /// generatable pivot ranges (<c>probes/pivot-fmt-r110/clearfour.py</c>): clearing the colour
-    /// agrees on 9873 against merging's 9804, but clearing the font identity agrees on 9750
-    /// against 9835 and clearing the size on 9783 against 9872 — because
-    /// <c>033_Event_planning_tracker</c>'s <c>dxf</c> records restore a 12 pt Consolas-modern
-    /// that its own cells also state. So the assertions below are the shipped behaviour, not the
-    /// reference's, and they are here so that whoever lands the <c>dxf</c> half changes them on
-    /// purpose.
-    /// </para>
+    /// 26.2.4.2 resolves all twelve to Liberation Sans 11 pt. This fixture states no
+    /// <c>&lt;formats&gt;</c>, so nothing puts anything back over the clearing and the cleared
+    /// base is the whole answer. A pivot that <em>does</em> state them keeps whatever they put
+    /// back, which is <c>XlsxPivotFormats</c>' business rather than this fixture's.
     /// </remarks>
     [Fact]
-    public void OnlyTheColourIsClearedAndTheReferenceClearsTheWholeFont()
+    public void AnEmptiedPivotCellTakesTheNormalCellStylesFaceAndSize()
     {
         SpreadsheetPages pages = Pages();
-        SheetCellFormat format = Format(pages, Cleared, 1, 1);
+        List<string> wrong = [];
 
-        format.FontFamily
-            .ShouldBe("Liberation Mono", "the cell's own face survives here; 26.2.4.2 gives Liberation Sans");
-        format.FontSize
-            .ShouldBe(Length.FromPoints(8), "and its own size; 26.2.4.2 gives 11 pt");
+        for (int row = 0; row < 4; row++)
+        {
+            for (int column = 0; column < 3; column++)
+            {
+                SheetCellFormat format = Format(pages, Cleared, row, column);
+                if (format.FontFamily != "Liberation Sans"
+                    || format.FontSize != Length.FromPoints(11))
+                {
+                    wrong.Add($"{(char)('A' + column)}{row + 1}: {format.FontFamily} {format.FontSize}");
+                }
+            }
+        }
+
+        wrong.ShouldBeEmpty(
+            "26.2.4.2 gives all twelve Liberation Sans 11 — the Normal cellStyleXf's font, where "
+            + "cellXfs[0] states Liberation Serif 18 and the cells themselves state Liberation "
+            + "Mono 8");
     }
 
     /// <summary>And its colour, by the same reading.</summary>

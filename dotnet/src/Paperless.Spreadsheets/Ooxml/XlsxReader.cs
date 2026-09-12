@@ -92,6 +92,11 @@ public static class XlsxReader
             // index. See XlsxChartRanges.
             XlsxChartRanges ranges = new(file, reader);
 
+            // The `dxfs` a pivot table's own `<format>` records index, read once for the workbook
+            // rather than once per sheet. See XlsxPivotFormats.
+            IReadOnlyList<XlsxPivotFormats.Difference> pivotDifferences = XlsxPivotFormats.Read(
+                file.StyleSheet, XlsxPalette.Read(file.StyleSheet, file.ThemeRoot));
+
             foreach (XlsxSheetEntry entry in file.Sheets)
             {
                 ContentSection section = new()
@@ -132,7 +137,8 @@ public static class XlsxReader
                 // read out of it. See XlsxPivotGrid.
                 (formatting, formats) =
                     XlsxPivotGrid.Apply(
-                        file.LoadPivotTables(entry), formatting, formats, cellFormats.StyleDefault);
+                        file.LoadPivotTables(entry), formatting, formats, cellFormats.StyleDefault,
+                        pivotDifferences);
 
                 // A shown cell comment is an object on the internal layer, which Calc prints
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and

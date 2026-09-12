@@ -176,25 +176,84 @@ internal sealed class XlsxPivotGrid
     /// different entry — <c>XlsxCellFormats.NormalStyleXf</c> records the probe workbook that
     /// separates them and what 26.2.4.2 answered on it.
     /// </param>
+    /// <param name="differences">
+    /// The workbook's <c>dxfs</c>, which the pivot's own <c>&lt;format&gt;</c> records index. They
+    /// are applied last, after the generated styles, exactly as <c>maFormatOutput.apply</c> is the
+    /// last statement of <c>ScDPOutput::Output</c> — see <see cref="XlsxPivotFormats"/>.
+    /// </param>
     public static (SheetFormatting Formatting, SheetCellFormats Formats) Apply(
         IReadOnlyList<XlsxPivotTable> pivots, SheetFormatting formatting, SheetCellFormats formats,
-        SheetCellFormat cleared)
+        SheetCellFormat cleared, IReadOnlyList<XlsxPivotFormats.Difference> differences)
     {
         ArgumentNullException.ThrowIfNull(pivots);
         ArgumentNullException.ThrowIfNull(formatting);
         ArgumentNullException.ThrowIfNull(formats);
         ArgumentNullException.ThrowIfNull(cleared);
+        ArgumentNullException.ThrowIfNull(differences);
 
         Dictionary<(int Row, int Column), SheetPivotStyle> styles = [];
         foreach (XlsxPivotTable pivot in pivots)
         {
             if (Build(pivot) is not { } grid) continue;
             if (ReferenceEquals(formatting, SheetFormatting.Empty)) formatting = new SheetFormatting();
+            formatting.ClearBackgrounds(
+                grid._clearedFirstRow, grid._clearedLastRow,
+                grid._clearedFirstColumn, grid._clearedLastColumn);
             grid.MergeInto(formatting);
             grid.CollectStyles(styles, cleared);
+            grid.LayFormatsOver(pivot.Root, differences, styles, formatting);
         }
 
         return (formatting, formats.WithPivotStyles(styles));
+    }
+
+    /// <summary>
+    /// Lays the pivot's own <c>&lt;format&gt;</c> records over the generated styles.
+    /// </summary>
+    /// <remarks>
+    /// Last, because that is where <c>maFormatOutput.apply</c> sits (<c>dpoutput.cxx</c>:1190),
+    /// and cell by cell in document order, because <c>ApplyPattern</c> merges each record's own
+    /// items into whatever is already there rather than replacing the lot.
+    /// </remarks>
+    private void LayFormatsOver(
+        XElement root,
+        IReadOnlyList<XlsxPivotFormats.Difference> differences,
+        Dictionary<(int Row, int Column), SheetPivotStyle> styles,
+        SheetFormatting formatting)
+    {
+        if (differences.Count == 0) return;
+
+        XlsxPivotFormats.Apply(
+            root, differences,
+            new XlsxPivotFormats.Geometry(_tabStartColumn, _dataStartColumn, _dataStartRow),
+            (column, row, difference) =>
+            {
+                if (row < _clearedFirstRow || row > _clearedLastRow) return;
+                if (column < _clearedFirstColumn || column > _clearedLastColumn) return;
+
+                if (!difference.Text.IsNone && styles.TryGetValue((row, column), out SheetPivotStyle style))
+                {
+                    SheetPivotDxf over = style.Dxf;
+                    styles[(row, column)] = style with
+                    {
+                        Dxf = new SheetPivotDxf
+                        {
+                            FontFamily = difference.Text.FontFamily ?? over.FontFamily,
+                            DeclaredFontClass = difference.Text.FontFamily is not null
+                                ? difference.Text.DeclaredFontClass
+                                : over.DeclaredFontClass,
+                            FontSize = difference.Text.FontSize ?? over.FontSize,
+                            Colour = difference.Text.Colour ?? over.Colour,
+                            FontWeight = difference.Text.FontWeight ?? over.FontWeight,
+                        },
+                    };
+                }
+
+                if (difference.Fill is not { } fill) return;
+                SheetCellDecoration stated = formatting.At(row, column);
+                if (stated.Background == fill) return;
+                formatting.SetCell(row, column, formatting.Intern(stated with { Background = fill }));
+            });
     }
 
     /// <summary>
@@ -756,12 +815,12 @@ internal sealed class XlsxPivotGrid
         // its pivot resolve their left justification and indent that way and no cell of the
         // range states an `s` of its own, and the reference keeps all 47.
         //
-        // `Cleared` carries the whole base format rather than one more nullable field, because
-        // which of its properties are taken is a measurement that moves: today only the colour
-        // is, and `SheetPivotStyle`'s remarks give the cell-for-cell score for each of the five
-        // and say why the font identity and the size are not — the reference clears them and
-        // then puts them back through the pivot's own `dxf` records, which this tree does not
-        // read.
+        // `Cleared` carries the whole base format rather than four more nullable fields, because
+        // the face, the declared class, the size and the colour are all taken from it whole; the
+        // three below are a differential the generated style may overwrite, and `Dxf` is a fifth
+        // laid over everything by `LayFormatsOver`. `SheetPivotStyle`'s remarks give the
+        // cell-for-cell score for each property, and the null experiment that says the clearing
+        // reaches all four.
         SheetPivotStyle bare = new()
         {
             FontWeight = cleared.FontWeight,
