@@ -170,12 +170,20 @@ internal sealed class XlsxPivotGrid
     /// <param name="pivots">The sheet's pivot table parts, with their cache source kinds.</param>
     /// <param name="formatting">The decoration the generated borders are merged into.</param>
     /// <param name="formats">The text formats the generated styles are laid over.</param>
+    /// <param name="cleared">
+    /// The format an emptied cell falls back to: the <c>Normal</c> <c>cellStyleXf</c>, which is
+    /// Calc's <c>Default</c> cell style. Not the sheet's default <c>cellXf</c>, which is a
+    /// different entry — <c>XlsxCellFormats.NormalStyleXf</c> records the probe workbook that
+    /// separates them and what 26.2.4.2 answered on it.
+    /// </param>
     public static (SheetFormatting Formatting, SheetCellFormats Formats) Apply(
-        IReadOnlyList<XlsxPivotTable> pivots, SheetFormatting formatting, SheetCellFormats formats)
+        IReadOnlyList<XlsxPivotTable> pivots, SheetFormatting formatting, SheetCellFormats formats,
+        SheetCellFormat cleared)
     {
         ArgumentNullException.ThrowIfNull(pivots);
         ArgumentNullException.ThrowIfNull(formatting);
         ArgumentNullException.ThrowIfNull(formats);
+        ArgumentNullException.ThrowIfNull(cleared);
 
         Dictionary<(int Row, int Column), SheetPivotStyle> styles = [];
         foreach (XlsxPivotTable pivot in pivots)
@@ -183,7 +191,7 @@ internal sealed class XlsxPivotGrid
             if (Build(pivot) is not { } grid) continue;
             if (ReferenceEquals(formatting, SheetFormatting.Empty)) formatting = new SheetFormatting();
             grid.MergeInto(formatting);
-            grid.CollectStyles(styles, formats.SheetDefault);
+            grid.CollectStyles(styles, cleared);
         }
 
         return (formatting, formats.WithPivotStyles(styles));
@@ -740,19 +748,26 @@ internal sealed class XlsxPivotGrid
     private void CollectStyles(
         Dictionary<(int Row, int Column), SheetPivotStyle> into, SheetCellFormat cleared)
     {
-        // Every cell of the emptied rectangle states the three properties outright, so the
-        // overlay replaces what the workbook put on a pivot cell rather than merging with it —
-        // which is what the two clearing calls above do. What it replaces them with is the
-        // sheet's own default format and not nothing: `clearContents` takes a cell back to the
-        // Default cell style, and a workbook whose default `cellXf` states an alignment or an
-        // indent still states it afterwards. `049_Expenses_calculator` is that workbook — 47
-        // cells of its pivot resolve their left justification and indent through `cellXfs[0]`
-        // and no cell of the range states an `s` of its own, and the reference keeps all 47.
+        // Every cell of the emptied rectangle states these properties outright, so the overlay
+        // replaces what the workbook put on a pivot cell rather than merging with it — which is
+        // what the two clearing calls above do. What it replaces them with is the Default cell
+        // style and not nothing, and a workbook whose Default states an alignment or an indent
+        // still states it afterwards. `049_Expenses_calculator` is that workbook — 47 cells of
+        // its pivot resolve their left justification and indent that way and no cell of the
+        // range states an `s` of its own, and the reference keeps all 47.
+        //
+        // `Cleared` carries the whole base format rather than one more nullable field, because
+        // which of its properties are taken is a measurement that moves: today only the colour
+        // is, and `SheetPivotStyle`'s remarks give the cell-for-cell score for each of the five
+        // and say why the font identity and the size are not — the reference clears them and
+        // then puts them back through the pivot's own `dxf` records, which this tree does not
+        // read.
         SheetPivotStyle bare = new()
         {
             FontWeight = cleared.FontWeight,
             Horizontal = cleared.Horizontal,
             Indent = cleared.Indent,
+            Cleared = cleared,
         };
 
         for (int row = _clearedFirstRow; row <= _clearedLastRow; row++)

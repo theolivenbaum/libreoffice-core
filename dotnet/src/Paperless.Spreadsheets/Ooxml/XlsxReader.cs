@@ -131,7 +131,8 @@ public static class XlsxReader
                 // no cell of the workbook, so it is laid over the stated decoration rather than
                 // read out of it. See XlsxPivotGrid.
                 (formatting, formats) =
-                    XlsxPivotGrid.Apply(file.LoadPivotTables(entry), formatting, formats);
+                    XlsxPivotGrid.Apply(
+                        file.LoadPivotTables(entry), formatting, formats, cellFormats.StyleDefault);
 
                 // A shown cell comment is an object on the internal layer, which Calc prints
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
