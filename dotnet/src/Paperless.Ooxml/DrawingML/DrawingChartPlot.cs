@@ -927,6 +927,24 @@ public static class DrawingChartPlot
     /// two different routes — the first because it is a <c>c:dateAx</c>, the second because
     /// "Netherlands" is one word too wide for its slot.
     /// </para>
+    /// <para>
+    /// <strong>A <c>c:valAx</c> gets none of it either, and for a second reason.</strong> Those
+    /// three lines are inside <c>switch (aScaleData.AxisType) case CATEGORY: case SERIES: case
+    /// DATE:</c> (<c>axisconverter.cxx:324-326</c>), and a <c>c:valAx</c> is set to
+    /// <c>AxisType::REALNUMBER</c> or <c>PERCENT</c> — on the X axis at <c>:306</c> and on the Y
+    /// axis at <c>:311</c> — so it never enters that case at all and keeps the same model defaults
+    /// a date axis keeps. A <c>c:serAx</c> is <c>AxisType::SERIES</c> and <em>does</em> enter it,
+    /// so it is set like a category axis. <strong>Wrapping off is what lets a value axis turn 45°
+    /// instead of thinning</strong>: <c>canAutoAdjustLabelPlacement</c> refuses while
+    /// <c>m_bLineBreakAllowed</c> is true (<c>VCartesianAxis.cxx:539-556</c>), so an axis carrying
+    /// it can only raise its rhythm. Measured on
+    /// <c>027_Simple_personal_cash_flow_statement</c> page 6, whose savings chart runs its money
+    /// axis along the bottom: 26.2.4.2 draws its eight labels turned and this tree drew four
+    /// upright, having dropped the other four to the rhythm. It is also the arm chart2 would
+    /// refuse anyway — <c>isBreakOfLabelsAllowed</c> opens with <em>"no break for value
+    /// axis"</em>, <c>!m_bUseTextLabels</c> (<c>:522-524</c>) — so no OOXML value axis wraps under
+    /// either rule, and this only settles what happens when its labels collide.
+    /// </para>
     /// </remarks>
     private static ChartAxisText AxisTextOf(XElement? axis)
     {
@@ -939,13 +957,16 @@ public static class DrawingChartPlot
 
         rotation -= 360.0 * Math.Floor(rotation / 360.0);
 
-        bool date = axis is not null && Is(axis, "dateAx");
+        // Only the axes chart2 gives `AxisType::CATEGORY` or `SERIES` and that are not a
+        // `c:dateAx` reach the three lines above; everything else — a date axis, a value axis,
+        // and a chart with no such element at all — keeps chart2's own model defaults.
+        bool converted = axis is not null && (Is(axis, "catAx") || Is(axis, "serAx"));
 
         return new ChartAxisText(
             rotation * Math.PI / 180.0,
-            OverlapAllowed: !date && stated is 0,
-            LineBreakAllowed: !date && rotation is 0.0 or 90.0 or 270.0,
-            Stagger: date ? ChartLabelStagger.Auto : ChartLabelStagger.SideBySide);
+            OverlapAllowed: converted && stated is 0,
+            LineBreakAllowed: converted && rotation is 0.0 or 90.0 or 270.0,
+            Stagger: converted ? ChartLabelStagger.SideBySide : ChartLabelStagger.Auto);
     }
 
     /// <summary>

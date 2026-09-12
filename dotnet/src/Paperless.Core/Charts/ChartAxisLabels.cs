@@ -537,6 +537,65 @@ public static class ChartAxisLabels
     /// <see cref="WrapFraction"/>. What the one-word case cannot show is the collision on its
     /// own, which is why that round had to alternate two label widths.
     /// </para>
+    /// <para>
+    /// <strong>0.95 is the room, and it is now measured directly rather than inferred from when
+    /// the axis turns.</strong> A label made of several short words can never break inside a word,
+    /// so the axis never restarts and the label is simply drawn wrapped — and <em>which words land
+    /// on which line</em> is the room, read straight out of the reference's own PDF with no
+    /// threshold model in between. On <c>ooo</c>-free runs of Carlito at 11 pt
+    /// (<c>probes/chart-wrap-r111</c> §1), four composition transitions swept continuously by the
+    /// chart frame's width:
+    /// </para>
+    /// <list type="table">
+    /// <item><description>line 1 takes a third token between pitch 52.003 and 52.464, needing
+    /// 49.438 pt → the room is in [0.9423, 0.9507) of the pitch.</description></item>
+    /// <item><description>line 1 takes a fourth between 73.178 and 73.632, needing 69.713 →
+    /// [0.9468, 0.9527).</description></item>
+    /// <item><description>line 2 takes a third word between 61.074 and 61.528, needing 58.282 →
+    /// [0.9472, 0.9543).</description></item>
+    /// <item><description>the same at <strong>eight</strong> categories rather than five, between
+    /// 51.972 and 52.154 → [0.9479, 0.9512), so the room does not move with the category
+    /// count.</description></item>
+    /// </list>
+    /// <para>
+    /// They intersect at <strong>[0.9472, 0.9507)</strong> and 0.95 is inside, with no free
+    /// parameter beyond the advance.
+    /// </para>
+    /// <para>
+    /// <strong>What is NOT the room is the two-word restart, and round 110's "the wrap restarts at
+    /// 0.875 of the pitch" is a statement about a different quantity.</strong> On a two-word label
+    /// 26.2.4.2 restarts — turns the axis — while the label's widest word still fits that 0.95
+    /// room, and the boundary is not a fraction of the pitch at all. Measured on the same
+    /// instrument, all at 11 pt, the threshold pitch at which a widest word of 47.285 pt stops
+    /// restarting the axis (<c>probes/chart-wrap-r111</c> §2):
+    /// </para>
+    /// <list type="table">
+    /// <item><description><strong>It moves with the width of the label's OTHER words</strong>, at
+    /// eight prefix widths from 10.327 to 35.596 pt: 53.2→55.9 pt of pitch, a slope in
+    /// (0.0949, 0.1147) pt of pitch per pt of prefix.</description></item>
+    /// <item><description><strong>Width, not character count</strong>: <c>iiii</c> (4 characters,
+    /// 10.327 pt) sits with <c>oo</c> (2 characters, 11.865 pt) and nowhere near <c>oooo</c>; a
+    /// per-character rule predicts 54.58 against a measured (52.912, 53.517].</description></item>
+    /// <item><description><strong>Position-blind</strong>: a prefix of two words of the same total
+    /// behaves as one (<c>ooo ooo</c>, (55.936, 56.541], against <c>oooooo</c>'s
+    /// (55.634, 55.936]), and a word added <em>after</em> the long one counts too.</description></item>
+    /// <item><description><strong>And it moves with the number of categories, which no property of
+    /// the label and the pitch can do.</strong> The same label at eight categories restarts at
+    /// (52.444, 52.721] where five categories give (53.819, 54.122]; a second pair, at a pitch of
+    /// 33, splits (32.879, 33.162] against (33.658, 33.953]. Both are ~2.4 % of the
+    /// pitch.</description></item>
+    /// </list>
+    /// <para>
+    /// So the restart is decided against a geometry that is <em>not</em> the one 26.2.4.2 draws,
+    /// and it is not implemented here: every form that fits needs three fitted terms and still
+    /// misses the category count. A plot-squeeze account — the labels measured unwrapped
+    /// (<c>createMaximumLabels</c>) overflowing the plot and shrinking the pitch the decision is
+    /// taken at — has the right sign and the right category dependence and is <strong>refuted by
+    /// the four transitions above</strong>: their label is 110 pt unwrapped against a 52 pt pitch,
+    /// far more overflow than any two-word case here, and their room is still exactly 0.95.
+    /// It is not hyphenation either (r110 §4.2, and a run of one letter has no hyphenation point
+    /// to take). Carried as open.
+    /// </para>
     /// </para>
     /// <list type="table">
     /// <item><description><c>Middle Column</c> among twelve categories at 10 pt in Liberation
