@@ -1392,3 +1392,19 @@ only `Failed:`.
 The single check that catches all three is the same one: **know what N should be for every
 project and compare it.** A project that is missing from the output entirely is the loudest
 signal of the three and the easiest to scroll past.
+
+## A killed round leaves a published binary that may contain the change you are measuring
+
+When a container restart kills a round mid-flight, its scratch directory survives — including
+any `cli-base` it had published to score against. **That directory is not necessarily the base.**
+A round resumed after a restart found its inherited `cli-base` already contained the pivot code
+it was about to measure; every before/after figure taken against it would have been
+base-against-base, and would have shown a clean nil reach for a change that in fact moves
+225.44 of ink to 0.07.
+
+It reads as the most reassuring possible result — *no regressions anywhere* — which is what
+makes it dangerous.
+
+So after any restart, **rebuild both binaries before scoring anything**, and prefer a base you
+published yourself in this run over one you found on disk. If you must reuse one, check it: run
+a document you know the change moves and confirm the base binary does *not* move it.
