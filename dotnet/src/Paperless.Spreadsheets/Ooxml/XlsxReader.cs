@@ -127,6 +127,12 @@ public static class XlsxReader
                     out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText);
                 formats = formats.WithConditionalText(conditionalText);
 
+                // A pivot table's frame is generated when the table is imported and is stated by
+                // no cell of the workbook, so it is laid over the stated decoration rather than
+                // read out of it. See XlsxPivotGrid.
+                (formatting, formats) =
+                    XlsxPivotGrid.Apply(file.LoadPivotTables(entry), formatting, formats);
+
                 // A shown cell comment is an object on the internal layer, which Calc prints
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
                 // cover whatever they overlap.
