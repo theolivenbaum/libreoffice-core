@@ -140,8 +140,10 @@ public sealed class SheetPivotGridTests
     /// <remarks>
     /// This is <c>HeaderCell</c>'s own frame (<c>dpoutput.cxx</c>:788), which
     /// <c>outputRowHeader</c> never draws: a subtotal member takes the <c>AddRow</c> branch there
-    /// and nothing else. Without it the eighteen edges on this fixture's three subtotal rows are
-    /// absent, and on <c>alle einzeln.xlsx</c> exactly eighteen of its 30250 edges were.
+    /// and nothing else. Measured by taking the call out of the predictor in
+    /// <c>probes/pivot-gen-r107/pivot-grid.py</c>: without it this fixture loses 10 of its 99
+    /// stated edges and <c>alle einzeln.xlsx</c> 30 of its 30250, all of them absent rather than
+    /// drawn at the wrong width.
     /// </remarks>
     [Fact]
     public void ASubtotalRowIsFramedAcrossTheRowHeaders()
@@ -239,7 +241,7 @@ public sealed class SheetPivotGridTests
     /// 195 twips, which the reference's own <c>.fods</c> of this fixture writes as
     /// <c>fo:margin-left="0.1354in"</c> on exactly two cells — the two places the outer field's
     /// members start. The innermost field takes none, because <c>bLast</c> drops
-    /// <c>nMinIndentLevel</c> out of the sum (<c>dpoutput.cxx</c>:1135-1138).
+    /// <c>nMinIndentLevel</c> out of the sum (<c>dpoutput.cxx</c>:1135-1137).
     /// </remarks>
     [Fact]
     public void AnOuterRowFieldsMemberIsIndented()

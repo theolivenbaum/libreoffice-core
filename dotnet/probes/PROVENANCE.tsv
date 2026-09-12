@@ -1999,3 +1999,17 @@ dotnet/probes/chart-hyph-r105/ref45.py	2026-09-11	current	26.2.4.2	present	curre
 dotnet/probes/chart-hyph-r105/ref-45deg-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
 dotnet/probes/chart-hyph-r105/hyphenator-off.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
 dotnet/probes/chart-hyph-r105/control-en-GB.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/pivot-gen-r107/check-grid.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/fods-borders.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/make-fixture.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/pivot-census.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/pivot-census.txt	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/pivot-grid.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/pivot-reach.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/oracle-check.txt	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/results.md	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/score.sh	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/statedborders.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/sweep.sh	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/sheets-sweep-r107.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md
+dotnet/probes/pivot-gen-r107/tests.log	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/pivot-gen-r107/results.md

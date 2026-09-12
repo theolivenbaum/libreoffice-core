@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """Author the smallest workbook that exercises the generated pivot grid.
 
-Two row fields, one data field, one subtotal per outer member and a grand total — the four
-shapes `ScDPOutput` frames differently. Written by hand rather than by a spreadsheet
-application so that every number the test asserts can be traced to one element of the file.
+Two row fields and two data fields, with a subtotal under each outer member and a grand total —
+the four shapes `ScDPOutput` frames differently: a member's block, a nested member's own column,
+a subtotal's strip across the row headers, and the table's outer edge. Two data fields rather
+than one so the pivot keeps a column field: with one, the bare data-layout placeholder in
+`colFields` leaves Calc with no column field at all (`dpoutput.cxx`:1205) and Excel's layout and
+Calc's differ by a row.
+
+Written by hand rather than by a spreadsheet application so that every number the test asserts
+can be traced to one element of the file. `styles.xml` states a single border and it is empty
+and a single `cellXf` with no weight, alignment or indent, so nothing the test expects is
+reachable from the file. Byte-for-byte reproducible: re-running this over
+`tests/corpus/features/sheet-pivot-grid.xlsx` produces the same parts with the same contents.
 
     make-fixture.py <out.xlsx>
 """

@@ -37,9 +37,9 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// reference writes for the same workbook — an edge the reference states and the prediction does
 /// not counts, which is what makes the score more than a precision. On <c>alle einzeln.xlsx</c>
 /// it reproduces all <strong>9092</strong> bordered cells and all <strong>30250</strong> stated
-/// edges exactly, with no edge missed and none invented; over the sixteen pivots it accepts in
-/// the corpus's eight worksheet-sourced pivot-bearing workbooks, <strong>31596</strong> edges,
-/// every generated cell style and every generated indent agree and nothing disagrees. See
+/// edges exactly, with no edge missed and none invented; over all sixteen pivots it accepts —
+/// in six of the corpus's eight worksheet-sourced pivot-bearing workbooks — <strong>31596</strong>
+/// edges, 6324 generated cell styles and every generated indent agree and nothing disagrees. See
 /// <c>dotnet/probes/pivot-gen-r107</c>.
 /// </para>
 /// <para>
@@ -51,8 +51,8 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// only when the cache is a worksheet range. A pivot over an external connection is not imported
 /// as a data pilot at all, so the reference generates nothing for it: measured, the three
 /// corpus workbooks whose caches are all <c>type="external"</c> produce <c>0</c>
-/// <c>table:data-pilot-table</c> elements between them where the other eight produce one per
-/// pivot.
+/// <c>table:data-pilot-table</c> elements for their nine pivot parts, where the other eight
+/// produce exactly one for each of their nineteen.
 /// </para>
 /// </remarks>
 internal sealed class XlsxPivotGrid

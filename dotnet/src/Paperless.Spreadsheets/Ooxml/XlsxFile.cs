@@ -271,11 +271,15 @@ public sealed class XlsxFile : IDisposable
     /// Whether a pivot table's cache reads a range of this workbook.
     /// </summary>
     /// <remarks>
-    /// <c>PivotCache::importPivotCacheDefinition</c> keeps only a worksheet source
-    /// (<c>sc/source/filter/oox/pivotcachebuffer.cxx</c>, in the C++ tree read here): a cache
-    /// over an external connection reaches no <c>ScDPObject</c>, so the reference draws no pivot
-    /// output for it. Measured on the corpus, the three workbooks whose caches are all
-    /// <c>type="external"</c> write <c>0</c> <c>table:data-pilot-table</c> elements between them.
+    /// <c>PivotCache::finalizeImport</c> keeps only a worksheet source —
+    /// <c>// currently, we only support worksheet data sources</c>, and the <c>XML_external</c>,
+    /// <c>XML_consolidation</c> and <c>XML_scenario</c> arms of its switch are empty
+    /// (<c>sc/source/filter/oox/pivotcachebuffer.cxx</c>:1093-1114, in the C++ tree read here) —
+    /// so a cache over an external connection reaches no <c>ScDPObject</c> and the reference
+    /// draws no pivot output for it. Measured on the corpus's eleven pivot-bearing workbooks:
+    /// the three whose caches are all <c>type="external"</c> write <c>0</c>
+    /// <c>table:data-pilot-table</c> elements for their 9 pivot parts, and the other eight write
+    /// exactly one for each of their 19.
     /// </remarks>
     private bool HasWorksheetCache(string partName)
     {
