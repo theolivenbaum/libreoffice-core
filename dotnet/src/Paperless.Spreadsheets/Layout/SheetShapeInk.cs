@@ -51,6 +51,7 @@ internal static class SheetShapeInk
     /// <param name="box">Where the shape lands on the page, already scaled.</param>
     /// <param name="fill">The flat interior colour, or null.</param>
     /// <param name="gradient">The interior ramp, or null; placed against <paramref name="box"/>.</param>
+    /// <param name="texture">The interior tile, or null; also placed against <paramref name="box"/>.</param>
     /// <param name="stroke">The outline colour, or null.</param>
     /// <param name="width">How wide to stroke it; zero for a hairline.</param>
     /// <param name="preset">The preset whose outline to paint through, or null for the box.</param>
@@ -63,6 +64,7 @@ internal static class SheetShapeInk
         DocRect box,
         Colour? fill,
         GradientDescription? gradient,
+        SheetShapeTexture? texture,
         Colour? stroke,
         Length width,
         string? preset,
@@ -73,13 +75,14 @@ internal static class SheetShapeInk
     {
         ArgumentNullException.ThrowIfNull(sink);
 
-        if (fill is null && gradient is null && stroke is null) return;
+        if (fill is null && gradient is null && texture is null && stroke is null) return;
         if (box.Width <= Length.Zero || box.Height <= Length.Zero) return;
 
         (GraphicsPath filled, GraphicsPath stroked) =
             Outlines(box, preset, adjustments, flipHorizontal, flipVertical);
 
         if (gradient is { } ramp) sink.FillPath(filled, ramp.Paint(box));
+        else if (texture is { } tiled) sink.FillPath(filled, Tiled(tiled, box, scale));
         else if (fill is { } colour) sink.FillPath(filled, Paint.Solid(colour));
 
         if (stroke is not { } line) return;
@@ -90,6 +93,31 @@ internal static class SheetShapeInk
 
         sink.StrokePath(
             stroked, new Stroke(Paint.Solid(line), pen > Length.Zero ? pen : HairlineWidth));
+    }
+
+    /// <summary>The paint a <see cref="SheetShapeTexture"/> describes, placed on its box.</summary>
+    /// <remarks>
+    /// The tile grid is anchored on the shape's own origin rather than on the page's, which is
+    /// what a fill measured in the object's coordinates means and what the reference draws: two
+    /// identical shapes at different offsets show the pattern in the same place relative to their
+    /// own edges.
+    /// </remarks>
+    private static BitmapPaint Tiled(SheetShapeTexture texture, DocRect box, double scale)
+    {
+        bool stretch = texture.Tile.Width <= Length.Zero || texture.Tile.Height <= Length.Zero;
+
+        DocSize tile = new(
+            Length.FromEmu((long)Math.Round(texture.Tile.Width.Emu * scale)),
+            Length.FromEmu((long)Math.Round(texture.Tile.Height.Emu * scale)));
+
+        return new BitmapPaint(
+            texture.Image,
+            stretch ? box.Size : tile,
+            box.Origin,
+            stretch)
+        {
+            Opacity = texture.Opacity,
+        };
     }
 
     /// <summary>
