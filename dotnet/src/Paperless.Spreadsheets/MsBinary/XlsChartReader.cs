@@ -30,6 +30,16 @@ internal static class BiffChartRecords
     public const ushort LabelRange = 0x1020;
     public const ushort DateRange = 0x1062;
     public const ushort AxisLine = 0x1021;
+
+    /// <summary>
+    /// <c>CHTICK</c> — an axis' tick marks, its label position and their colour.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_ID_CHTICK</c>. <c>XclImpChTick::ReadChTick</c>
+    /// (<c>sc/source/filter/excel/xichart.cxx</c>:3194-3218, this tree) reads the major and minor
+    /// tick types and the label position as three bytes.
+    /// </remarks>
+    public const ushort Tick = 0x101E;
     public const ushort DefaultText = 0x1024;
     public const ushort Text = 0x1025;
     public const ushort Font = 0x1026;
@@ -133,6 +143,38 @@ internal sealed class XlsChartBuilder
     private int _axis = -1;
     private bool _valueGrid;
     private bool _categoryGrid;
+
+    /// <summary>
+    /// What each axis' <c>CHTICK</c> says its major tick marks are, by axes set and axis.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclChTick</c>'s own constructor defaults <c>mnMajor</c> to
+    /// <c>EXC_CHTICK_INSIDE | EXC_CHTICK_OUTSIDE</c> (<c>sc/source/filter/excel/xlchart.cxx</c>:304-313)
+    /// and <c>XclImpChAxis::Finalize</c> makes a default object for an axis that states no record
+    /// (<c>xichart.cxx</c>:3303-3304), so a BIFF axis with no <c>CHTICK</c> is crossed rather than
+    /// outward. Before this the reader stated nothing and every BIFF axis took
+    /// <see cref="ChartPlot"/>'s OOXML default of an outward tick.
+    /// </remarks>
+    private readonly ChartTickMark[,] _ticks =
+    {
+        { ChartTickMark.Cross, ChartTickMark.Cross },
+        { ChartTickMark.Cross, ChartTickMark.Cross },
+    };
+
+    /// <summary>Which line of the open <c>CHAXIS</c> the next <c>CHLINEFORMAT</c> describes.</summary>
+    /// <remarks>
+    /// A <c>CHAXIS</c> group states its axis line, its major grid and its minor grid as a
+    /// <c>CHAXISLINE</c> naming which one, each followed by the <c>CHLINEFORMAT</c> that formats
+    /// it (<c>XclImpChAxis::ReadSubRecord</c>, <c>xichart.cxx</c>:3266-3300). Without the pairing
+    /// a line format read inside an axis cannot be told from the next one.
+    /// </remarks>
+    private int _axisLineTarget = NoAxisLine;
+
+    /// <summary>The colour of each axes set's axis lines, by axes set and axis, or none.</summary>
+    private readonly BiffChartColour?[,] _axisLineColours = new BiffChartColour?[2, 2];
+
+    /// <summary>The colour of each axes set's major gridlines, by axes set and axis, or none.</summary>
+    private readonly BiffChartColour?[,] _gridColours = new BiffChartColour?[2, 2];
 
     /// <summary>
     /// The <c>ifmt</c> each axes set's value axis states through its own <c>CHFORMAT</c>, or none.
@@ -402,10 +444,16 @@ internal sealed class XlsChartBuilder
 
             case BiffChartRecords.Axis:
                 _axis = stream.ReadUInt16();
+                _axisLineTarget = NoAxisLine;
                 break;
 
             case BiffChartRecords.AxisLine when Inside(BiffChartRecords.Axis):
-                if (stream.ReadUInt16() == MajorGridLine) MarkGrid();
+                _axisLineTarget = stream.ReadUInt16();
+                if (_axisLineTarget == MajorGridLine) MarkGrid();
+                break;
+
+            case BiffChartRecords.Tick when Inside(BiffChartRecords.Axis):
+                ReadTick(stream);
                 break;
 
             case BiffChartRecords.NumberFormat when Inside(BiffChartRecords.Axis) && _axis == AxisY:
@@ -617,8 +665,18 @@ internal sealed class XlsChartBuilder
             SecondaryValueFormat = secondary
                 ? ValueFormatOf(SecondaryAxesSet, sourceFormats, formats)
                 : null,
-            ValueGrid = _valueGrid ? new ChartGrid(GridColour) : null,
-            CategoryGrid = _categoryGrid ? new ChartGrid(GridColour) : null,
+            ValueGrid = _valueGrid
+                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisY, fonts))
+                : null,
+            CategoryGrid = _categoryGrid
+                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisX, fonts))
+                : null,
+            ValueAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisY, fonts)),
+            CategoryAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisX, fonts)),
+            SecondaryAxisLine = new ChartGrid(AxisLineColour(SecondaryAxesSet, AxisY, fonts)),
+            ValueTicks = _ticks[PrimaryAxesSet, AxisY],
+            CategoryTicks = _ticks[PrimaryAxesSet, AxisX],
+            SecondaryTicks = _ticks[SecondaryAxesSet, AxisY],
             Legend = _hasLegend ? ChartLegendPosition.Right : ChartLegendPosition.None,
             TextFamily = FamilyOf(fonts),
             Background = _background?.Resolve(fonts),
@@ -950,11 +1008,18 @@ internal sealed class XlsChartBuilder
     /// Reads one <c>CHLINEFORMAT</c>, which is what gives a series its outline.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>XclImpChLineFormat::ReadChLineFormat</c> (<c>xichart.cxx:453-465</c>): an <c>RGB</c>, a
-    /// pattern, a weight, flags, and the BIFF8 palette index. Only a series' line is taken —
-    /// the axis lines and the frames' borders already have their own rules and are drawn without
-    /// consulting the file, so reading them here would change what they look like without
-    /// completing them.
+    /// pattern, a weight, flags, and the BIFF8 palette index.
+    /// </para>
+    /// <para>
+    /// Two things take one: a series' outline, and — since the format follows the
+    /// <c>CHAXISLINE</c> that names which line of the axis it is — the axis line and the major
+    /// gridline. An <em>automatic</em> format states nothing and falls back to
+    /// <c>GetPalette().GetColor(EXC_COLOR_CHWINDOWTEXT)</c>, which
+    /// <c>sc/source/filter/excel/xlstyle.cxx</c>:150 resolves to black; only a stated one is
+    /// recorded here.
+    /// </para>
     /// </remarks>
     private void ReadLineFormat(BiffRecordReader stream)
     {
@@ -967,11 +1032,54 @@ internal sealed class XlsChartBuilder
             ? stream.ReadUInt16()
             : NoPaletteIndex;
 
-        if ((flags & AutomaticFormat) != 0 || pattern == LineNone) return;
+        int target = _axisLineTarget;
+        _axisLineTarget = NoAxisLine;
+
+        if ((flags & AutomaticFormat) != 0 || pattern == LineNone)
+        {
+            return;
+        }
+
+        if (target != NoAxisLine && Inside(BiffChartRecords.Axis) && Indexable())
+        {
+            if (target == AxisLineItself) _axisLineColours[_axesSet, _axis] = new(rgb, index);
+            else if (target == MajorGridLine) _gridColours[_axesSet, _axis] = new(rgb, index);
+            return;
+        }
+
         if (!InSeriesFormat() || _series.Count == 0) return;
 
         _series[^1].Line = new BiffChartColour(rgb, index);
     }
+
+    /// <summary>Reads one <c>CHTICK</c> into the open axis' major tick mark.</summary>
+    /// <remarks>
+    /// The first byte is the major tick type and <c>lclGetApiTickmarks</c>
+    /// (<c>xichart.cxx</c>:3166-3172) reads it as two flags — <c>EXC_CHTICK_INSIDE</c> 0x01 and
+    /// <c>EXC_CHTICK_OUTSIDE</c> 0x02 — so 0 is no tick at all and 3 is a crossed one. Measured
+    /// at the reference: 26.2.4.2 resolves every one of
+    /// <c>EHEST-Pre-departure-checklist-Rev.-1-06-12-2016.xls</c>'s eighteen chart axes to
+    /// <c>chart:tick-marks-major-inner="false" chart:tick-marks-major-outer="false"</c> in its own
+    /// <c>--convert-to fods</c> output, and draws no tick mark anywhere on those charts.
+    /// </remarks>
+    private void ReadTick(BiffRecordReader stream)
+    {
+        if (stream.RecordLeft < 1 || !Indexable()) return;
+
+        byte major = stream.ReadBytes(1)[0];
+
+        _ticks[_axesSet, _axis] = (major & (TickInside | TickOutside)) switch
+        {
+            TickInside | TickOutside => ChartTickMark.Cross,
+            TickInside => ChartTickMark.Inner,
+            TickOutside => ChartTickMark.Outer,
+            _ => ChartTickMark.None,
+        };
+    }
+
+    /// <summary>Whether the open axes set and axis are both a primary or secondary X or Y.</summary>
+    private bool Indexable()
+        => _axesSet is PrimaryAxesSet or SecondaryAxesSet && _axis is AxisX or AxisY;
 
     /// <summary>
     /// Reads one <c>CHESCHERFORMAT</c>, whose fill supersedes any <c>CHAREAFORMAT</c> beside it.
@@ -1606,7 +1714,16 @@ internal sealed class XlsChartBuilder
     /// <summary><c>EXC_CHFRAMEPOS_PARENT</c>, <c>xlchart.hxx</c>:643.</summary>
     private const ushort FramePosParent = 2;
 
+    /// <summary><c>EXC_CHAXISLINE_AXISLINE</c> and <c>_MAJORGRID</c>, <c>xlchart.hxx</c>.</summary>
+    private const ushort AxisLineItself = 0;
     private const ushort MajorGridLine = 1;
+
+    /// <summary>No <c>CHAXISLINE</c> is waiting for its format.</summary>
+    private const int NoAxisLine = -1;
+
+    /// <summary><c>EXC_CHTICK_INSIDE</c> and <c>EXC_CHTICK_OUTSIDE</c>, <c>xlchart.hxx</c>:403-404.</summary>
+    private const byte TickInside = 0x01;
+    private const byte TickOutside = 0x02;
 
     private const ushort BarHorizontal = 0x0001;
     private const ushort BarStacked = 0x0002;
@@ -1649,6 +1766,14 @@ internal sealed class XlsChartBuilder
     /// as a palette index; reading it is recorded in the module's TODO.
     /// </remarks>
     private static readonly Colour GridColour = Colour.Black;
+
+    /// <summary>The colour one axis' major gridline is stroked in.</summary>
+    private Colour GridLineColour(int axesSet, int axis, XlsCellFormats? fonts)
+        => _gridColours[axesSet, axis]?.Resolve(fonts) ?? GridColour;
+
+    /// <summary>The colour one axis' own line is stroked in.</summary>
+    private Colour AxisLineColour(int axesSet, int axis, XlsCellFormats? fonts)
+        => _axisLineColours[axesSet, axis]?.Resolve(fonts) ?? GridColour;
 
     /// <summary>The model's own defaults, for the fields a substream may state nothing about.</summary>
     private static readonly ChartPlot DefaultPlot = new();
