@@ -1999,3 +1999,16 @@ dotnet/probes/chart-hyph-r105/ref45.py	2026-09-11	current	26.2.4.2	present	curre
 dotnet/probes/chart-hyph-r105/ref-45deg-census.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
 dotnet/probes/chart-hyph-r105/hyphenator-off.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
 dotnet/probes/chart-hyph-r105/control-en-GB.tsv	2026-09-11	current	26.2.4.2	present	current	dotnet/probes/chart-hyph-r105/results.md
+dotnet/probes/hyphen-r106/results.md	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/hyphen-r106/sweep.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/movers.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/score-movers.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/word-sweep.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/leading-sweep.py	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/hyphenator-off.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/hyphenator-on.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/eight-scored.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/word-grid.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/hyphen-r106/word-agreement-off.txt	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/leading-sweep.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md
+dotnet/probes/hyphen-r106/base-binary-control.tsv	2026-09-12	current	26.2.4.2	present	current	dotnet/probes/hyphen-r106/results.md

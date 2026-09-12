@@ -1,4 +1,5 @@
 using Paperless.Core.Geometry;
+using Paperless.Core.Globalization;
 using Paperless.Core.Units;
 
 namespace Paperless.Core.Charts;
@@ -203,6 +204,20 @@ public static class ChartAxisLabels
     /// unbroken. Ignored on a horizontal axis, whose limit is <see cref="WrapFraction"/> of one
     /// tick's worth of axis.
     /// </param>
+    /// <param name="hyphenator">
+    /// What decides where a word may be broken inside itself. Null takes
+    /// <see cref="Hyphenators.For"/>'s answer for the default language, which is what a chart
+    /// gets in production; pass <see cref="Hyphenators.None"/> for the no-dictionary state.
+    /// <para>
+    /// <strong>It reaches the arrangement rather than only the drawing, and that is the whole of
+    /// this seat.</strong> <c>PropertyMapper::getTextLabelMultiPropertyLists</c> sets
+    /// <c>ParaIsHyphenation</c> true inside the same <c>if (nLimitedSpace &gt; 0)</c> that sets
+    /// <c>TextMaximumFrameWidth</c> and nowhere else, and <c>DrawModelWrapper</c> installs
+    /// <c>LinguMgr::GetHyphenator()</c> on the chart's outliner — so a label's second line may
+    /// begin inside a word that the first line took a hyphenated piece of, which is exactly what
+    /// <see cref="Wraps"/> is looking for.
+    /// </para>
+    /// </param>
     public static ChartAxisLabelLayout Resolve(
         IReadOnlyList<string?> texts,
         IReadOnlyList<Length> centres,
@@ -211,10 +226,13 @@ public static class ChartAxisLabels
         ChartText measurer,
         bool bold = false,
         ChartAxisDirection direction = ChartAxisDirection.Horizontal,
-        Length room = default)
+        Length room = default,
+        IHyphenator? hyphenator = null)
     {
         ArgumentNullException.ThrowIfNull(texts);
         ArgumentNullException.ThrowIfNull(centres);
+
+        hyphenator ??= Hyphenators.For(null);
 
         bool vertical = direction == ChartAxisDirection.Vertical;
 
@@ -248,7 +266,7 @@ public static class ChartAxisLabels
             // turns line breaking *on*: canAutoAdjustLabelPlacement refuses while it is on, so
             // the wrap is the only route from "labels collide" to "labels are turned 45°".
             if (lineBreak && !stated.OverlapAllowed && rotation == 0.0
-                && Wraps(texts, count, limit, size, measurer, bold))
+                && Wraps(texts, count, limit, size, measurer, bold, hyphenator))
             {
                 lineBreak = false;
                 continue;
@@ -488,7 +506,8 @@ public static class ChartAxisLabels
         Length limit,
         Length size,
         ChartText measurer,
-        bool bold)
+        bool bold,
+        IHyphenator? hyphenator)
     {
         if (limit <= Length.Zero) return false;
 
@@ -502,6 +521,106 @@ public static class ChartAxisLabels
 
             foreach (string word in Words(text))
                 if (measurer.Measure(word, size, bold).Width > limit) return true;
+
+            if (hyphenator is not null && Hyphenates(text, limit, size, measurer, bold, hyphenator))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the hyphenating fill would start one of a label's lines inside a word.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is the arm of <c>lcl_hasWordBreak</c> that a width rule cannot reach.</strong>
+    /// The test above asks whether any single word is wider than the slot, which is one way for a
+    /// line to begin mid-word and the only one available without a dictionary. The other is
+    /// hyphenation: with a pattern file loaded the outliner puts as much of the next word on the
+    /// current line as a hyphen allows, and the line after it then begins in the middle of that
+    /// word — which <c>lcl_hasWordBreak</c> (<c>VCartesianAxis.cxx:369-404</c>) reports, and
+    /// which clears <c>m_bLineBreakAllowed</c> and restarts the axis at <c>:888-905</c>. Every
+    /// label of <c>038_Competitive_Advantage_Card</c> is two words that fit their slot one to a
+    /// line; the reference turns that axis 45 degrees and it is this that makes it.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on the reference with the words held fixed and only the dictionary
+    /// varied</strong> (<c>probes/chart-hyph-r105</c> §1.1): tagging that witness' labels
+    /// <c>en-US</c>, <c>en-GB</c>, <c>fr-FR</c>, <c>es-ES</c> or nothing at all — the four locales
+    /// LibreOffice 26.2.4.2 ships patterns for — turns the axis, and <c>de-DE</c>, <c>ru-RU</c> or
+    /// <c>zxx</c> wraps it upright. The control is the same sentence with an unhyphenatable second
+    /// word, <c>Cost Stretched</c>, which wraps under all eight.
+    /// </para>
+    /// <para>
+    /// <strong>The limit on how much of the word may stay is a CHARACTER COUNT, not a width, and
+    /// measuring the hyphen instead is wrong in the permissive direction.</strong>
+    /// <c>ImpBreakLine</c> walks the line's own <c>CharPosArray</c> to <c>nMaxBreakPos</c>, the
+    /// first character of the line that does not fit, and asks the hyphenator for a point at most
+    /// <c>nMaxBreakPos - nWordStart - 1</c> characters into the word —
+    /// <c>editeng/source/editeng/impedit3.cxx</c>:2143-2165, whose <c>+1</c> is commented
+    /// <em>"Before the dickey letter"</em> and reserves one character's room for the hyphen
+    /// rather than measuring one. <c>Hyphenator::hyphenate</c> then enforces it as
+    /// <c>i &lt; Leading</c> (<c>hyphenimp.cxx</c>:445). A hyphen is narrower than the letter it
+    /// stands in for, so asking whether <c>Cost Ser-</c> fits admits breaks the reference
+    /// refuses: <c>Cost Service</c> is the measured case, and it is the one word of twenty-two
+    /// that the width form got wrong (§2 of <c>probes/hyphen-r106</c>). Read out of a tree that
+    /// is 27.2 alpha rather than the 26.2.4.2 reference binary, and confirmed against that binary
+    /// on the twenty-two authored fixtures rather than taken on trust.
+    /// </para>
+    /// <para>
+    /// The fill is the greedy one <see cref="Wrap"/> already models, over blank-separated words,
+    /// and only the boolean is wanted — so once a hyphenated break is found there is no need to
+    /// carry the broken text, and where none is found nothing was hyphenated and
+    /// <see cref="Wrap"/>'s plain answer stands unchanged. That is why the drawn text is untouched
+    /// by this: a label that hyphenates never reaches the drawing, because line breaking is turned
+    /// off and the arrangement starts again.
+    /// </para>
+    /// </remarks>
+    private static bool Hyphenates(
+        string text, Length limit, Length size, ChartText measurer, bool bold,
+        IHyphenator hyphenator)
+    {
+        string[] words = text.Split(' ');
+        if (words.Length < 2) return false;
+
+        string line = string.Empty;
+
+        foreach (string word in words)
+        {
+            string candidate = line.Length == 0 ? word : line + " " + word;
+
+            if (line.Length == 0 || measurer.Measure(candidate, size, bold).Width <= limit)
+            {
+                line = candidate;
+                continue;
+            }
+
+            // `nWordLen > 3` (impedit3.cxx:2152): a word of three characters or fewer is not
+            // offered to the hyphenator at all, whatever its patterns say.
+            if (word.Length <= 3)
+            {
+                line = word;
+                continue;
+            }
+
+            // How many of the word's characters fit after what is already on the line. The
+            // comparison is strict because CharPosArray holds each character's end and the walk
+            // is `< nRemainingWidth`.
+            int fits = 0;
+            while (fits < word.Length
+                   && measurer.Measure(line + " " + word[..(fits + 1)], size, bold).Width < limit)
+            {
+                fits++;
+            }
+
+            // One character of that room belongs to the hyphen, so the piece that stays behind is
+            // at most `fits - 1` characters long. A point inside that leaves the next line
+            // starting in the middle of the word, which is the break the reference restarts on.
+            foreach (int point in hyphenator.FindHyphenationPoints(word, Hyphenators.DefaultLanguage))
+                if (point >= 2 && point <= fits - 1) return true;
+
+            line = word;
         }
 
         return false;

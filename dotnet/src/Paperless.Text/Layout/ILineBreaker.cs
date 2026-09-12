@@ -35,19 +35,9 @@ public interface ILineBreaker
     IReadOnlyList<int> FindMandatoryBreaks(ReadOnlySpan<char> text, string? language = null);
 }
 
-/// <summary>Splits words for hyphenation.</summary>
-/// <remarks>
-/// Optional: documents that do not enable automatic hyphenation never need it. When a
-/// document does enable it, hyphenation dictionaries are language-specific and
-/// LibreOffice uses Hunspell's, so matching its line breaks requires the same
-/// dictionaries.
-/// </remarks>
-public interface IHyphenator
-{
-    /// <summary>
-    /// Returns the UTF-16 offsets within a word where a hyphen may be inserted.
-    /// Returns an empty list when the word must not be hyphenated or no dictionary is
-    /// available for the language.
-    /// </summary>
-    IReadOnlyList<int> FindHyphenationPoints(ReadOnlySpan<char> word, string language);
-}
+// IHyphenator moved to Paperless.Core.Globalization.IHyphenator, and this note is the pointer
+// rather than a duplicate declaration. The chart category axis is the first consumer and
+// ChartAxisLabels lives in Paperless.Core, which this assembly is downstream of; keeping the
+// interface here would have meant Paperless.Core could not name it. Paragraph line breaking
+// reaches it through the project reference when it needs one — see
+// Paperless.Core/Globalization/IHyphenator.cs and HyphenationPatterns.cs.
