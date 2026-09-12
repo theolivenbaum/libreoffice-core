@@ -556,6 +556,14 @@ public static partial class SlideTextLayout
     /// rather than either reader.
     /// </para>
     /// <para>
+    /// <strong>But the bullet it does not draw still has a box, and that box is a floor on the
+    /// line's height</strong> — which is what <c>requireText: false</c> is for. The floor comes
+    /// off <c>Outliner::GetBulletArea</c>, and that reaches <c>Outliner::GetNumberFormat</c>
+    /// (<c>editeng/source/outliner/outliner.cxx</c>:1289-1312), which asks the paragraph's
+    /// <em>depth</em> and its numbering rule and never looks at <c>EE_PARA_BULLETSTATE</c>. So
+    /// suppressing the glyph does not remove the box. See <see cref="BulletFloored"/>.
+    /// </para>
+    /// <para>
     /// <strong>A character bullet whose file names no face is drawn from OpenSymbol, not from the
     /// paragraph's face.</strong> <c>Outliner::ImpCalcBulletFont</c> takes
     /// <c>pFmt-&gt;GetBulletFont()</c> for a <c>SVX_NUM_CHAR_SPECIAL</c> format and only falls back
@@ -589,11 +597,11 @@ public static partial class SlideTextLayout
     /// </para>
     /// </remarks>
     private static MarkedParagraph? Shaped(
-        SlideParagraph paragraph, Scaling scaling, SlideFonts fonts)
+        SlideParagraph paragraph, Scaling scaling, SlideFonts fonts, bool requireText = true)
     {
         if (paragraph.Marker is not { } marker) return null;
         if (marker.Text.Length == 0) return null;
-        if (paragraph.Text.Length == 0) return null;
+        if (requireText && paragraph.Text.Length == 0) return null;
         if (paragraph.Runs.Count == 0) return null;
 
         SlideTextRun first = paragraph.Runs[0];
@@ -998,7 +1006,9 @@ public static partial class SlideTextLayout
                 Length faceAscent = ascent > Length.Zero ? ascent : box.Baseline;
 
                 lines.Add(appended
-                    ? Appended(box, faceAscent, faceHeight, paragraph, paragraphIndex)
+                    ? BulletFloored(
+                        Appended(box, faceAscent, faceHeight, paragraph, paragraphIndex),
+                        paragraph, fonts, body.Device)
                     : Spaced(
                         new PlacedLine(box, faceAscent, faceLine, faceHeight),
                         scaling));
@@ -1031,7 +1041,9 @@ public static partial class SlideTextLayout
 
             if (appended)
             {
-                lines.Add(Appended(box, em, natural, paragraph, paragraphIndex));
+                lines.Add(BulletFloored(
+                    Appended(box, em, natural, paragraph, paragraphIndex),
+                    paragraph, fonts, body.Device));
                 continue;
             }
 
@@ -1866,8 +1878,9 @@ public static partial class SlideTextLayout
     /// </para>
     /// <para>
     /// The bullet area's own height can raise such a line further
-    /// (<c>:1974-1985</c>, which halves the difference into the ascent). That is deliberately not
-    /// modelled: no measured case needs it, and the witness above is reproduced without it.
+    /// (<c>:1974-1985</c>, which halves the difference into the ascent). That is
+    /// <see cref="BulletFloored"/>, and it is applied to this method's answer rather than inside
+    /// it, because it is outside the four line-spacing arms in the reference too.
     /// </para>
     /// </remarks>
     private static PlacedLine Appended(
@@ -1900,6 +1913,124 @@ public static partial class SlideTextLayout
         }
 
         return new PlacedLine(box, em, natural, natural);
+    }
+
+    /// <summary>
+    /// Raises an <em>empty</em> paragraph's line to its bullet's box when the bullet is the taller
+    /// of the two, halving the difference into the ascent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The last block of <c>ImpEditEngine::CreateAndInsertEmptyLine</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:1974-1985, this tree):
+    /// </para>
+    /// <code>
+    /// if ( !bLineBreak )
+    /// {
+    ///     tools::Long nMinHeight = aBulletArea.GetHeight();
+    ///     if ( nMinHeight &gt; static_cast&lt;tools::Long&gt;(pTmpLine-&gt;GetHeight()) )
+    ///     {
+    ///         tools::Long nDiff = nMinHeight - static_cast&lt;tools::Long&gt;(pTmpLine-&gt;GetHeight());
+    ///         // distribute nDiff upwards and downwards
+    ///         pTmpLine-&gt;SetMaxAscent( pTmpLine-&gt;GetMaxAscent() + nDiff/2 );
+    ///         pTmpLine-&gt;SetHeight( nMinHeight );
+    ///     }
+    /// }
+    /// </code>
+    /// <para>
+    /// Four properties of that hunk decide where it can be seen, and all four were measured
+    /// against 26.2.4.2 before it was written — the source below is
+    /// <c>27.2.0.0.alpha0+</c> and is the explanation, not the evidence.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <strong>It is only for a paragraph with no characters.</strong> <c>bLineBreak</c> is
+    /// <c>GetNode()-&gt;Len() &gt; 0</c>, so the line appended after a paragraph's trailing hard
+    /// break is excluded and a paragraph holding text is never floored by its own bullet.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>It is the last thing done to the line</strong>, after the <c>Min</c>, <c>Fix</c>
+    /// and <c>Prop</c> arms — so a proportional line spacing cannot shrink the line below the
+    /// box, and the floor does not scale with the percentage.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>The box exists even when no bullet is drawn.</strong> <c>GetBulletArea</c> goes
+    /// through <c>Outliner::GetNumberFormat</c>, which reads the paragraph's depth and the
+    /// numbering rule and never <c>EE_PARA_BULLETSTATE</c>; the empty-paragraph suppression the
+    /// readers apply (see <see cref="Shaped"/>) is a painting rule.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>A level whose format is <c>SVX_NUM_NUMBER_NONE</c> has a box of no height</strong>
+    /// — <c>Outliner::ImplGetBulletSize</c> returns <c>Size(0, 0)</c> for it
+    /// (<c>outliner.cxx</c>:1329-1332) — and so does a paragraph at no level at all, whose
+    /// <c>GetNumberFormat</c> is null. Both are a null <see cref="SlideParagraph.Marker"/> here.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// <strong>Measured by single-variable experiment at 26.2.4.2</strong>, on its own flat ODP of
+    /// <c>slides/done-012/ppt/JesuitAssocOfStudentPersonnel.ppt</c> page 24 cut to one slide, with
+    /// the shrink-to-fit turned off so the answer is a continuous baseline pitch rather than a
+    /// <c>constScaleLevels</c> row (<c>probes/slides-size2-r110</c>). Two 20 pt bulleted items
+    /// separated by one empty paragraph, everything else held fixed:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// Sweeping <c>fo:line-height</c> 100, 95, 90, 85, 80, 70, 60, 50 %, the reference's empty
+    /// line is <strong>787 hundredths of a millimetre at every percentage at or below 90</strong>
+    /// and follows the text line above it at 95 and 100. 787 is Liberation Sans' ascent plus
+    /// descent at 20 pt; <c>1.2 em × 0.8</c> is 678, which is what this tree drew.
+    /// </description></item>
+    /// <item><description>
+    /// Moving the same empty paragraph between five structures at 80 %: second
+    /// <c>&lt;text:p&gt;</c> of a <c>&lt;text:list-item&gt;</c> — floored; its own
+    /// <c>&lt;text:list-item&gt;</c> — floored; a <c>&lt;text:list-header&gt;</c> of a list style
+    /// whose level 1 is a <c>text:list-level-style-bullet</c> — floored; a
+    /// <c>&lt;text:list-header&gt;</c> of one whose level 1 is a
+    /// <c>text:list-level-style-number</c> with an empty <c>style:num-format</c> — <em>not</em>
+    /// floored; a bare <c>&lt;text:p&gt;</c> outside every list — <em>not</em> floored. Swapping
+    /// the paragraph <em>style</em> between the floored and unfloored cases moves nothing, so it
+    /// is the level's bullet and not the paragraph's margins.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>The box is the bullet's own, which identifies it.</strong> Setting the level's
+    /// <c>fo:font-size</c> to 50 % removes the floor entirely (the box is 394, below the line);
+    /// 200 % raises the empty line to 1576, which is the face's ascent plus descent at 40 pt; and
+    /// naming <c>DejaVu Sans</c> instead of <c>Arial</c> at 100 % moves it 787 → 821, which is
+    /// that face's <c>(1901 + 483) / 2048</c> against Liberation Sans' <c>(1854 + 434) / 2048</c>.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// The height is <see cref="BulletBoxHeight"/>'s — the same cached, <em>unscaled</em> box the
+    /// bullet is centred in, for the same reason and on the same measurement.
+    /// </para>
+    /// </remarks>
+    private static PlacedLine BulletFloored(
+        PlacedLine line, SlideParagraph paragraph, SlideFonts fonts, MetricGrid device)
+    {
+        // bLineBreak: an appended line whose paragraph has characters is the line after a
+        // trailing hard break, and the reference's guard excludes it.
+        if (paragraph.Text.Length != 0) return line;
+
+        // ...and an empty paragraph has a box only where its reader left it at its level. See
+        // SlideParagraph.EmptyKeepsMarkerLevel: OOXML sets the level to -1 and the other two do
+        // not, so this is a .ppt and ODF rule and the OOXML column cannot reach it.
+        if (!paragraph.EmptyKeepsMarkerLevel) return line;
+
+        if (Shaped(paragraph, Scaling.None, fonts, requireText: false) is not
+            { Face: { } face } marked)
+        {
+            return line;
+        }
+
+        Length box = BulletBoxHeight(
+            LineSpacing.Resolve(face, device), paragraph.Runs[0], marked.Marker);
+        if (box <= line.Height) return line;
+
+        // nDiff/2 is integer division of hundredths of a millimetre, and SetHeight's one-argument
+        // form sets the text height to the same value (EditLine.cxx:79-86).
+        Length half = Length.FromMm100((box.Mm100 - line.Height.Mm100) / 2);
+
+        return line with { Ascent = line.Ascent + half, Height = box, TextHeight = box };
     }
 
     /// <summary>
