@@ -90,6 +90,9 @@ internal sealed class PptSlideLayout
     /// </summary>
     private IReadOnlySet<uint> _hyperlinks = new HashSet<uint>();
     private Dictionary<int, EscherBlip>? _blips;
+
+    /// <summary>The document's picture-bullet store, read once for the deck.</summary>
+    private PptBulletPictures _bulletPictures = PptBulletPictures.None;
     private PptHeadersFooters _deckHeadersFooters = PptHeadersFooters.None;
     private bool _titlePlaceholdersOmitted;
 
@@ -139,6 +142,7 @@ internal sealed class PptSlideLayout
         _fontTable = PptFontTable.Read(_stream, pages.Environment);
         _hyperlinks = PptHyperlinks.Read(_stream, pages.Document, _summary);
         _blips = ReadBlips(pages);
+        _bulletPictures = PptBulletPictures.Read(_stream, pages.Document);
         _deckHeadersFooters = DeckHeadersFooters(pages);
         _titlePlaceholdersOmitted = TitlePlaceholdersOmitted(pages);
         ReadMasters(pages);
@@ -1437,7 +1441,7 @@ internal sealed class PptSlideLayout
         VerticalText flow = Flow(shape);
         if (PptTextBody.Build(run, context.Styles, context.Scheme, _fontTable,
                               Insets(shape), Anchor(shape), Wraps(shape),
-                              Autofits(shape, run)) is not { } body)
+                              Autofits(shape, run), _bulletPictures) is not { } body)
         {
             return null;
         }
@@ -1500,8 +1504,14 @@ internal sealed class PptSlideLayout
                     Length.FromEmu((long)Math.Round(rectangle.Height.Emu * placement.D))))
             : rectangle;
 
-        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts);
-        return runs.Count == 0 ? null : new PlacedText(runs, upright ? AffineTransform.Identity : placement);
+        List<PlacedPicture> markers = [];
+        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts, markers);
+        return runs.Count == 0 && markers.Count == 0
+            ? null
+            : new PlacedText(runs, upright ? AffineTransform.Identity : placement)
+            {
+                MarkerPictures = markers.Count == 0 ? null : markers,
+            };
     }
 
     /// <summary>
@@ -1539,8 +1549,9 @@ internal sealed class PptSlideLayout
                 rectangle.Width)
             : rectangle;
 
-        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts);
-        if (runs.Count == 0) return null;
+        List<PlacedPicture> markers = [];
+        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts, markers);
+        if (runs.Count == 0 && markers.Count == 0) return null;
 
         double halfWidth = rectangle.Width.Emu / 2.0;
         double halfHeight = rectangle.Height.Emu / 2.0;
@@ -1550,7 +1561,10 @@ internal sealed class PptSlideLayout
                 AffineTransform.Rotation(body.Rotation)),
             AffineTransform.Translation(rectangle.X.Emu + halfWidth, rectangle.Y.Emu + halfHeight));
 
-        return new PlacedText(runs, AffineTransform.Concat(about, placement));
+        return new PlacedText(runs, AffineTransform.Concat(about, placement))
+        {
+            MarkerPictures = markers.Count == 0 ? null : markers,
+        };
     }
 
     /// <summary>Which quarter turn <c>txflTextFlow</c> asks for, if any.</summary>

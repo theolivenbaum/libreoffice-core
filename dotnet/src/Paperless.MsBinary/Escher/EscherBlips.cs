@@ -247,6 +247,33 @@ public static class EscherBlips
             }
         }
 
+        return Decode(source, blip);
+    }
+
+    /// <summary>
+    /// The picture in a blip record that stands on its own, with no <c>msofbtBSE</c> in front of it.
+    /// </summary>
+    /// <remarks>
+    /// PowerPoint's picture-bullet store is written this way: a <c>PPT_PST_ExtendedBuGraAtom</c> holds
+    /// a two-byte type word and then the blip record itself, which LibreOffice reads with
+    /// <c>SvxMSDffManager::GetBLIPDirect</c> (<c>svdfppt.cxx:3255-3262</c>). There is no entry, no
+    /// reference count and no <c>foDelay</c> — so the store lookup above cannot serve it, while
+    /// everything from the checksums onwards is identical.
+    /// </remarks>
+    /// <param name="buffer">The stream the record is in.</param>
+    /// <param name="offset">Where the blip record's own header begins.</param>
+    public static EscherBlip? Direct(DffRecordBuffer buffer, int offset)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+
+        return buffer.TryReadHeader(offset, out DffRecordHeader blip) && IsBlipRecord(blip.Type)
+            ? Decode(buffer, blip)
+            : null;
+    }
+
+    /// <summary>The bytes of a blip record, past its checksums and its format's own preamble.</summary>
+    private static EscherBlip? Decode(DffRecordBuffer source, DffRecordHeader blip)
+    {
         ReadOnlySpan<byte> content = source.Content(blip);
 
         // One checksum, or two when the instance is odd. Nothing else distinguishes them.

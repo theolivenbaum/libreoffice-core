@@ -3,7 +3,9 @@ using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Numbering;
 using Paperless.Core.Units;
+using Paperless.MsBinary.Escher;
 using Paperless.Presentations.Layout;
+using Paperless.Vector;
 using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
@@ -92,6 +94,12 @@ internal static class PptTextBody
     /// Whether the text shrinks until it fits the shape. Decided by the shape rather than by the
     /// text — see <c>PptSlideLayout.Autofits</c> for what the binary format makes that mean.
     /// </param>
+    /// <param name="bulletPictures">
+    /// The document's picture-bullet store, or null when nothing will draw one. A level's
+    /// <c>buBlip</c> makes the bullet a bitmap only when a graphic answers for it
+    /// (<c>svdfppt.cxx:3448</c>), so the store is what decides the bullet's <em>kind</em> and not
+    /// only its picture.
+    /// </param>
     public static SlideTextBody? Build(
         PptTextRun run,
         PptStyleSheet? styles,
@@ -100,7 +108,8 @@ internal static class PptTextBody
         Margins insets,
         TextAnchor anchor,
         bool wraps,
-        bool autofits = false)
+        bool autofits = false,
+        PptBulletPictures? bulletPictures = null)
     {
         ArgumentNullException.ThrowIfNull(run);
 
@@ -127,7 +136,9 @@ internal static class PptTextBody
             int inherit = stop < 0 && start > 0 && length == 0 ? start - 1 : start;
 
             paragraphs.Add(
-                Paragraph(run, styles, scheme, fonts, start, length, inherit, counters, counting));
+                Paragraph(
+                    run, styles, scheme, fonts, start, length, inherit, counters, counting,
+                    bulletPictures));
 
             if (stop < 0) break;
             start = stop + 1;
@@ -176,7 +187,8 @@ internal static class PptTextBody
         int length,
         int inherit,
         int[] counters,
-        bool[] counting)
+        bool[] counting,
+        PptBulletPictures? bulletPictures)
     {
         PptParagraphRun properties = PropertiesAt(run.Paragraphs, start);
         int depth = properties.Depth;
@@ -262,6 +274,9 @@ internal static class PptTextBody
                 linkedBullet,
                 TextFontAt(run, characters, start),
                 run.ExtensionAt(ExtendedIndexAt(run, start)),
+                styles?.Extended.Level(run.Kind, depth) ?? default,
+                bulletPictures,
+                FontHeightAt(run, characters, start),
                 depth,
                 text.Length > 0,
                 counters,
@@ -373,12 +388,40 @@ internal static class PptTextBody
         Colour? linkedBullet,
         ushort textFont,
         PptExtendedParagraph? extended,
+        PptExtendedParagraphLevel masterExtended,
+        PptBulletPictures? bulletPictures,
+        ushort fontHeight,
         int depth,
         bool hasText,
         int[] counters,
         bool[] counting)
     {
         bool bulleted = properties.HasBullet ?? level.HasBullet;
+
+        // `ImplGetExtNumberFormat` is reached only for a paragraph that draws a bullet
+        // (`svdfppt.cxx:3709-3711`), and the picture branch outranks the automatic number:
+        // `if (nBuBlip != 0xffff) … else if (nHasAnm)` (`:3448-3466`).
+        PptExtendedParagraph merged = MergedExtension(extended, masterExtended);
+
+        if (bulleted
+            && runs.Count > 0
+            && BulletPicture(
+                   merged.BulletBlip,
+                   bulletPictures,
+                   fontHeight,
+                   properties.States(StatesBulletHeight)
+                       ? properties.BulletHeight
+                       : level.BulletHeight) is { } bitmap)
+        {
+            return new SlideMarker(
+                string.Empty,
+                null,
+                MarkerScale(properties, level),
+                MarkerColour(properties, level, scheme, linkedBullet))
+            {
+                Picture = bitmap,
+            };
+        }
 
         // The number outranks the bullet the paragraph states, and the paragraph goes on stating
         // one: a numbered PowerPoint list still carries its master's round dot in its property
@@ -387,7 +430,7 @@ internal static class PptTextBody
         // the bullet put there (`svdfppt.cxx:3466-3630`).
         if (bulleted
             && runs.Count > 0
-            && extended is { HasAutoNumber: true } numbering
+            && merged is { HasAutoNumber: true } numbering
             && PptNumbering.Next(numbering, depth, hasText, counters, counting) is { } number)
         {
             return new SlideMarker(
@@ -466,6 +509,179 @@ internal static class PptTextBody
             MarkerScale(properties, level),
             MarkerColour(properties, level, scheme, linkedBullet));
     }
+
+    /// <summary>
+    /// The paragraph's own extended entry merged with the master's level for that outline depth.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>PPTNumberFormatCreator::ImplGetExtNumberFormat</c>, <c>svdfppt.cxx:3407-3446</c>. The
+    /// merge is skipped outright when the paragraph's own mask names all three fields, and each
+    /// field is otherwise taken from the level only where the paragraph's mask does not name it.
+    /// </para>
+    /// <para>
+    /// <strong>The picture bullet carries an extra condition and it is not symmetrical with the
+    /// others.</strong> A blip is inherited only where the paragraph also says nothing about
+    /// automatic numbering — <c>if (!(nBuFlags &amp; 0x02000000)) nBuBlip = rLev.mnBuBlip;</c>,
+    /// under the comment "if there is a BuStart without BuInstance, then there is no graphical
+    /// Bullet possible". So a paragraph that states <c>hasAnm</c> and nothing else suppresses its
+    /// level's picture rather than merging it.
+    /// </para>
+    /// <para>
+    /// <strong>Why this is where a picture bullet is found at all.</strong> Measured over the
+    /// corpus's 51 <c>.ppt</c>: <b>8 documents carry a master level stating a blip</b>, 120 levels
+    /// in all, and <c>ws_prod-…-M.017-(French)-France.ppt</c> — whose four O15 pages this closes —
+    /// holds exactly <b>three</b> blip-bearing entries in any shape's or the document's own
+    /// <c>ExtendedParagraphAtom</c>. Reading only the paragraph's entry therefore finds a picture
+    /// bullet essentially nowhere. The same census counts <b>zero</b> master levels stating
+    /// <c>hasAnm</c> anywhere in the column, so merging the numbering fields as well is the
+    /// reference's rule and is inert on this corpus.
+    /// </para>
+    /// </remarks>
+    internal static PptExtendedParagraph MergedExtension(
+        PptExtendedParagraph? paragraph, PptExtendedParagraphLevel level)
+    {
+        PptExtendedParagraph own = paragraph ?? default;
+
+        // `nBuFlags` is zero unless the paragraph carries an entry that states something, and
+        // every field below is read out of the entry only under that guard (`:3409-3419`).
+        uint mask = own.Mask;
+        ushort blip = (mask & PptExtendedParagraphLevel.StatesBulletBlip) != 0
+            ? own.BulletBlip
+            : PptExtendedParagraph.NoBulletBlip;
+        bool numbered = (mask & PptExtendedParagraphLevel.StatesAutoNumber) != 0 && own.HasAutoNumber;
+        uint scheme = (mask & PptExtendedParagraphLevel.StatesScheme) != 0 ? own.Scheme : 0;
+
+        if ((mask & PptExtendedParagraphLevel.StatesEverything)
+                == PptExtendedParagraphLevel.StatesEverything
+            || !level.IsSet)
+        {
+            return new PptExtendedParagraph(mask, blip, numbered, scheme);
+        }
+
+        uint master = level.Mask;
+
+        if ((mask & PptExtendedParagraphLevel.StatesBulletBlip) == 0
+            && (master & PptExtendedParagraphLevel.StatesBulletBlip) != 0
+            && (mask & PptExtendedParagraphLevel.StatesAutoNumber) == 0)
+        {
+            blip = level.BulletBlip;
+        }
+
+        if ((mask & PptExtendedParagraphLevel.StatesScheme) == 0
+            && (master & PptExtendedParagraphLevel.StatesScheme) != 0)
+        {
+            scheme = level.Scheme;
+        }
+
+        if ((mask & PptExtendedParagraphLevel.StatesAutoNumber) == 0
+            && (master & PptExtendedParagraphLevel.StatesAutoNumber) != 0)
+        {
+            numbered = level.HasAutoNumber;
+        }
+
+        return new PptExtendedParagraph(mask | master, blip, numbered, scheme);
+    }
+
+    /// <summary>
+    /// The picture bullet a resolved <c>buBlip</c> names, at the size the format states for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>svdfppt.cxx:3448-3465</c>. The height is
+    /// <c>round(fontHeight × 0.2540 × bulletHeight)</c> in hundredths of a millimetre — the
+    /// paragraph's first portion's size in <em>points</em> against the level's bullet percentage —
+    /// and the width follows the graphic's own aspect ratio. It is an absolute size fixed at
+    /// import, so unlike a character bullet it does not move with the autofit's font scale.
+    /// </para>
+    /// <para>
+    /// <strong>Confirmed against 26.2.4.2's own flat ODP</strong> of
+    /// <c>ws_prod-…-M.017-(French)-France.ppt</c>, whose <c>text:list-level-style-image</c>
+    /// elements state its resolved answer for every level it draws: 0.787 cm at 20 pt, 0.630 at
+    /// 16, 0.709 at 18 and 1.102 at 28 with the level's 155 %, and 0.671 at 24, 0.503 at 18,
+    /// 0.447 at 16 and 0.559 at 20 with the second level's 110 % — that expression to the
+    /// hundredth of a millimetre at eight of eight.
+    /// </para>
+    /// <para>
+    /// <strong>The bullet height is <em>not</em> put through the negative-value conversion
+    /// first.</strong> <c>GetNumberFormat</c> turns a <c>nBulletHeight</c> above <c>0x7fff</c>
+    /// into a percentage of the character height only when the format is not a bitmap
+    /// (<c>:3659-3660</c>), and the graphic's size is computed before that in any case. So this
+    /// takes the raw stored word where <see cref="MarkerScale"/> takes the clamped one.
+    /// </para>
+    /// </remarks>
+    internal static SlideMarkerPicture? BulletPicture(
+        ushort blip,
+        PptBulletPictures? pictures,
+        ushort fontHeight,
+        ushort bulletHeight)
+    {
+        if (pictures is null) return null;
+
+        long height = (long)Math.Round(fontHeight * 0.2540 * bulletHeight, MidpointRounding.AwayFromZero);
+        if (height <= 0) return null;
+
+        // Decoded once per blip and shared by every paragraph that names it — see
+        // `PptBulletPictures.Decoded`, whose remarks carry what a picture per paragraph costs.
+        if (pictures.Decoded(blip, BulletGraphic) is not { } graphic) return null;
+
+        long width = graphic.Extent.Height > Length.Zero
+            ? height * graphic.Extent.Width.Emu / graphic.Extent.Height.Emu
+            : 0;
+
+        return new SlideMarkerPicture(
+            graphic.Raster, graphic.Vector, Length.FromMm100(width), Length.FromMm100(height));
+    }
+
+    /// <summary>One bullet graphic, decoded, with the extent its aspect ratio comes from.</summary>
+    private sealed record BulletGraphicEntry(
+        RasterImage? Raster, Lazy<VectorImage>? Vector, DocSize Extent);
+
+    /// <summary>
+    /// Decodes one bullet graphic and reads back the size its aspect ratio comes from.
+    /// </summary>
+    /// <remarks>
+    /// <c>Graphic::GetPrefSize</c> is only ever divided into itself here — <c>nWidth = (nHeight ×
+    /// aPrefSize.Width()) / aPrefSize.Height()</c> — so the unit does not matter and a raster's
+    /// pixel extent serves. A graphic with no readable extent takes a zero width, exactly as the
+    /// reference's own <c>aPrefSize.Height()</c> guard does.
+    /// </remarks>
+    private static BulletGraphicEntry? BulletGraphic(EscherBlip graphic)
+    {
+        ReadOnlyMemory<byte> bytes = graphic.Bytes;
+        if (bytes.IsEmpty) return null;
+
+        // A metafile bullet is decoded here rather than on first paint, which is the one place
+        // this reader pays for a picture it may not draw. It has to: the aspect ratio comes from
+        // the graphic itself, and a bullet has no stated extent of its own to fall back on. Rare
+        // enough not to matter -- all eight of the corpus decks carrying a picture bullet store
+        // theirs as PNG or JPEG.
+        if (VectorImages.For(bytes.Span) is not null)
+        {
+            Lazy<VectorImage> vector = new(() => VectorImages.Decode(bytes));
+            VectorImage decoded = vector.Value;
+            DocSize extent = decoded.IntrinsicSize.IsEmpty
+                ? decoded.ViewBox.Size
+                : decoded.IntrinsicSize;
+
+            return new BulletGraphicEntry(null, vector, extent);
+        }
+
+        return new BulletGraphicEntry(
+            RasterImage.Encoded(bytes, BulletMediaType(graphic.RecordType)),
+            null,
+            SlideImages.NaturalSize(bytes.Span) ?? default);
+    }
+
+    /// <summary>What a bullet blip's record type says its bytes are.</summary>
+    private static string? BulletMediaType(ushort recordType) => recordType switch
+    {
+        0xF01D or 0xF02A => "image/jpeg",
+        0xF01E => "image/png",
+        0xF01F => "image/bmp",
+        0xF029 => "image/tiff",
+        _ => null,
+    };
 
     /// <summary>The marker's size as a fraction of its text's.</summary>
     private static double MarkerScale(PptParagraphRun properties, PptParagraphLevel level)
@@ -558,6 +774,55 @@ internal static class PptTextBody
         }
 
         return level.FontIndex;
+    }
+
+    /// <summary>
+    /// The point size in force at a paragraph's first character, which sizes a picture bullet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>PPTNumberFormatCreator::GetNumberFormat</c> initialises it to <b>24</b> and then asks the
+    /// paragraph's <em>first portion</em> for <c>PPT_CharAttr_FontHeight</c>
+    /// (<c>svdfppt.cxx:3705-3708</c>), so a paragraph whose first portion states nothing and whose
+    /// master level states nothing takes 24 rather than zero. It is the raw stored word, in whole
+    /// points, and not the size the fit will draw the text at.
+    /// </para>
+    /// <para>
+    /// <strong>It is not always the height the reference sizes the picture from, and which one it
+    /// is was not settled.</strong> A paragraph gets a numbering rule of its own only when
+    /// <c>nHardCount</c> is non-zero (<c>PPTParagraphObj::ApplyTo</c>, <c>:6151</c>); otherwise it
+    /// keeps the <em>master's</em> rule, built once per instance at <c>:4409-4419</c> from
+    /// <c>rCharLevel.mnFontHeight</c>. Measured on two decks with the same master structure:
+    /// on <c>ws_prod-…-M.017-(French)-France.ppt</c> page 8 the reference's six bullets are
+    /// 17.86 pt, which is this portion's 16 pt at the level's 155 %, and on
+    /// <c>ws_prod-g-doc-Events-Part-M-presentation.ppt</c> page 21 they are 31.24 and 19.02 pt,
+    /// which are the <em>master's</em> 28 pt at 155 % and 24 pt at 110 %. Implementing the
+    /// <c>nHardCount</c> test over the seven paragraph attributes it sums does <em>not</em>
+    /// separate them — France's paragraph states none of the seven and still takes its portion's
+    /// height — so the discriminator is one of <c>GetAttrib</c>'s two terms this reader cannot
+    /// evaluate, the destination instance and the source-against-destination master comparison,
+    /// exactly as <c>LineSpacingStated</c> above records for a different question. The portion is
+    /// used because it is what the paragraph overload literally reads and because it is exact on
+    /// the deck this seat is about; the cost is one page, and
+    /// <c>probes/slides-final-r111/results.md</c> §2.3 measures it.
+    /// </para>
+    /// </remarks>
+    private static ushort FontHeightAt(PptTextRun run, PptCharacterLevel level, int start)
+    {
+        int position = 0;
+
+        foreach (PptCharacterRun character in run.Characters)
+        {
+            int runEnd = position + character.Length;
+            if (start >= position && start < runEnd)
+            {
+                return character.States(StatesFontHeight) ? character.FontHeight : level.FontHeight;
+            }
+
+            position = runEnd;
+        }
+
+        return level.FontHeight;
     }
 
     /// <summary>

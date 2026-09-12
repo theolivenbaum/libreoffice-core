@@ -163,6 +163,14 @@ public sealed record PptTextRuler(
 /// shape, and the reference numbers its outline <c>I. II. III. IV. V. VI.</c>
 /// </para>
 /// </remarks>
+/// <param name="Mask">
+/// The paragraph mask the entry opens with, <c>mnExtParagraphMask</c>. It is kept because it is
+/// what decides the <em>merge</em> with the master's level: <c>ImplGetExtNumberFormat</c> takes a
+/// field from the master only where the paragraph's own mask does not name it, and skips the merge
+/// entirely when the mask names all three (<c>svdfppt.cxx:3407-3446</c>). Without it, "the entry
+/// states no picture bullet" and "the entry says nothing about picture bullets" are the same
+/// value and the level's own blip can never be inherited.
+/// </param>
 /// <param name="BulletBlip">
 /// The picture-bullet index into the document's BLIP store, or <c>0xFFFF</c> for none.
 /// </param>
@@ -172,6 +180,7 @@ public sealed record PptTextRuler(
 /// <c>ImplGetExtNumberFormat</c> reads them (<c>svdfppt.cxx:3466-3630</c>).
 /// </param>
 public readonly record struct PptExtendedParagraph(
+    uint Mask,
     ushort BulletBlip,
     bool HasAutoNumber,
     uint Scheme)
@@ -564,9 +573,6 @@ public static class PptTextReader
         return states ? new PptTextRuler(defaultTab, textOffsets, bulletOffsets) : null;
     }
 
-    /// <summary>The name PowerPoint 97+ gives its own tagged block.</summary>
-    private const string ProgTagName = "___PPT9";
-
     /// <summary>
     /// A shape's <c>ExtendedParagraphAtom</c> entries, from its <c>ClientData</c>.
     /// </summary>
@@ -587,44 +593,14 @@ public static class PptTextReader
 
         if (clientData is not { } data) return null;
 
-        foreach (DffRecordHeader tags in stream.Children(data))
+        foreach (DffRecordHeader record in PptProgTags.Content(stream, data))
         {
-            if (tags.Type != PptRecordTypes.ProgTags) continue;
+            if (record.Type != PptRecordTypes.ExtendedParagraphAtom) continue;
 
-            foreach (DffRecordHeader tag in stream.Children(tags))
-            {
-                if (tag.Type != PptRecordTypes.ProgBinaryTag) continue;
-                if (!IsProgTag(stream, tag)) continue;
-
-                foreach (DffRecordHeader payload in stream.Children(tag))
-                {
-                    if (payload.Type != PptRecordTypes.BinaryTagData) continue;
-
-                    foreach (DffRecordHeader record in stream.Children(payload))
-                    {
-                        if (record.Type != PptRecordTypes.ExtendedParagraphAtom) continue;
-
-                        return ReadExtendedParagraphAtom(stream.Content(record));
-                    }
-                }
-            }
+            return ReadExtendedParagraphAtom(stream.Content(record));
         }
 
         return null;
-    }
-
-    /// <summary>Whether a <c>ProgBinaryTag</c> is the one PowerPoint 97+ writes.</summary>
-    private static bool IsProgTag(DffRecordBuffer stream, DffRecordHeader tag)
-    {
-        foreach (DffRecordHeader child in stream.Children(tag))
-        {
-            if (child.Type != PptRecordTypes.CString) continue;
-
-            return string.Equals(
-                DecodeUtf16(stream.Content(child)), ProgTagName, StringComparison.Ordinal);
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -663,7 +639,7 @@ public static class PptTextReader
 
             if (position > content.Length) break;
 
-            entries.Add(new PptExtendedParagraph(blip, numbered, scheme));
+            entries.Add(new PptExtendedParagraph(paragraph, blip, numbered, scheme));
         }
 
         return entries;

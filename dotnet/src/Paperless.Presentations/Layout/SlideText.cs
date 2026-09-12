@@ -4,6 +4,7 @@ using Paperless.Core.Units;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
+using Paperless.Vector;
 
 namespace Paperless.Presentations.Layout;
 
@@ -451,7 +452,54 @@ public readonly record struct SlideMarker(
     string? Typeface = null,
     double Scale = 1.0,
     Colour? Colour = null,
-    bool IsSymbol = true);
+    bool IsSymbol = true)
+{
+    /// <summary>
+    /// The graphic the marker is, when it is a picture rather than a character.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A picture bullet is a numbering format of its own — <c>SVX_NUM_BITMAP</c> — and it is not a
+    /// character drawn from a picture font. Three things follow, and each of them is why this is a
+    /// separate field rather than a <see cref="Text"/> that happens to be an image:
+    /// <c>Outliner::ImplGetBulletSize</c>'s box is the graphic's stated size and not a face's
+    /// ascent and descent; that size is <em>absolute</em>, fixed at import from the paragraph's
+    /// unscaled font height, so it does not move with <see cref="Scale"/> or with an autofit; and
+    /// it contributes no glyph, so it is invisible to every text comparison.
+    /// (<c>editeng/source/outliner/outliner.cxx</c>:1315-1355 for the box,
+    /// <c>filter/source/msfilter/svdfppt.cxx</c>:3448-3465 for where the size comes from.)
+    /// </para>
+    /// <para>
+    /// <see cref="Text"/> is empty when this is set, which is what keeps every character path —
+    /// shaping, the recode table, the fallback search — from being reached at all.
+    /// </para>
+    /// </remarks>
+    public SlideMarkerPicture? Picture { get; init; }
+}
+
+/// <summary>
+/// A picture bullet: the graphic, and the box it is drawn in.
+/// </summary>
+/// <remarks>
+/// The size is the <em>drawn</em> size rather than the picture's own, because the file states it:
+/// a binary PowerPoint computes <c>height = round(fontHeight × 0.2540 × bulletHeight)</c> in
+/// hundredths of a millimetre from the paragraph's first portion's point size and the level's
+/// bullet percentage, and takes the width from the graphic's aspect ratio
+/// (<c>svdfppt.cxx</c>:3450-3462). Confirmed against 26.2.4.2's own flat ODP of
+/// <c>ws_prod-g-doc-Events-2007-september-M.017-(French)-France.ppt</c>, whose
+/// <c>text:list-level-style-image</c> elements state 0.787 cm beside 20 pt text at 155 %,
+/// 0.630 cm beside 16 pt, 0.709 cm beside 18 pt and 1.102 cm beside 28 pt — that expression to the
+/// hundredth of a millimetre at all four, and 0.671, 0.503, 0.447 and 0.559 cm at 110 % likewise.
+/// </remarks>
+/// <param name="Image">The raster, or null when the graphic is a metafile.</param>
+/// <param name="Vector">The metafile, decoded on first use, or null when it is a raster.</param>
+/// <param name="Width">How wide it is drawn.</param>
+/// <param name="Height">How tall it is drawn, which is also the box its line is floored at.</param>
+public sealed record SlideMarkerPicture(
+    RasterImage? Image,
+    Lazy<VectorImage>? Vector,
+    Length Width,
+    Length Height);
 
 /// <summary>
 /// A run raised or lowered off its baseline, and shrunk while it is up there.

@@ -169,6 +169,18 @@ public sealed class PptStyleSheet
     public PptParagraphLevel Paragraph(PptTextKind kind, int level)
         => _paragraphs[Index(kind)][Math.Clamp(level, 0, MaxLevels - 1)];
 
+    /// <summary>
+    /// The master's PowerPoint 97+ paragraph extensions — the picture bullet a whole outline level
+    /// carries, and the numbering it states.
+    /// </summary>
+    /// <remarks>
+    /// It hangs off the style sheet because <c>PPTExtParaProv</c> does: a paragraph reaches it as
+    /// <c>pPara-&gt;mrStyleSheet.pExtParaProv</c> (<c>svdfppt.cxx:3403-3406</c>), so it is one per
+    /// main master and inherited by a title master exactly as the text styles are.
+    /// </remarks>
+    public PptExtendedParagraphSheet Extended { get; private init; } =
+        PptExtendedParagraphSheet.None;
+
     private static int Index(PptTextKind kind)
     {
         int index = (int)kind;
@@ -200,7 +212,10 @@ public sealed class PptStyleSheet
             paragraphs[instance] = BulletDefaults((PptTextKind)instance);
         }
 
-        PptStyleSheet sheet = new(characters, paragraphs);
+        PptStyleSheet sheet = new(characters, paragraphs)
+        {
+            Extended = PptExtendedParagraphSheet.Read(stream, master),
+        };
 
         bool environmentStatedTextInShape = false;
         if (environment is { } container)
