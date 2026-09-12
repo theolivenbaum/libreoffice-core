@@ -299,8 +299,16 @@ public static class ChartAxisLabels
             bool canAdjust =
                 !vertical && !stated.OverlapAllowed && !lineBreak && rotation == 0.0;
 
+            // The separation two labels must keep is not the whole tick spacing: the reference
+            // keeps the same `nReduce` clear between them that it takes off the wrap limit —
+            // see the block beside WrapFraction below for the measurement.
+            Length reserve = vertical
+                ? Length.Zero
+                : spacing * (staggered ? 2.0 : 1.0) * (1.0 - WrapFraction);
+
             if (stated.OverlapAllowed
-                || !Collides(boxes, centres, count, rhythm, staggered, rotation, vertical))
+                || !Collides(
+                    boxes, centres, count, rhythm, staggered, rotation, vertical, reserve))
             {
                 return new ChartAxisLabelLayout(
                     rotation, rhythm, staggered,
@@ -457,6 +465,51 @@ public static class ChartAxisLabels
     /// </remarks>
     private const double WrapFraction = 0.95;
 
+    // ---------------------------------------------------------------------------------------
+    // The gap two labels have to keep, and why it is the same five per cent.
+    //
+    // `doesOverlap` (VCartesianAxis.cxx:186-207) intersects the two label *shapes*, and reading
+    // this tree's chart2 says a label's shape is its text: `createSingleLabel` uses the
+    // `createText` overload at ShapeFactory.cxx:2042, which sets no text distance, and
+    // `SdrTextObj::AdjustTextFrameWidthAndHeight` (svx/source/svdraw/svdotxat.cxx:44-240) grows an
+    // auto-grow frame to `Outliner::CalcTextSize().Width() + 1` of 1/100 mm. On that reading two
+    // labels collide when their mean width exceeds the tick spacing.
+    //
+    // 26.2.4.2 does not behave that way, and the discriminator is a pair of labels of DIFFERENT
+    // widths, which separates the collision from the wrap: with equal labels the two thresholds
+    // are 1.00 and 0.95 of the spacing and only the smaller is ever reached, so a one-word ladder
+    // cannot see the collision at all. Alternating a long label with a short one along one axis
+    // and sweeping the chart frame's width (`probes/chart-collide-r110`, four pitches from 54.2
+    // to 121.7 pt, runs of one letter so no ligature or kern pair can enter):
+    //
+    //   pitch 54.193        turned from mean 51.369, upright to 51.158  -> pitch x (.0521,.0560]
+    //   pitch 71.85 / 72.04 turned / upright about mean 67.972         ->         (.0539,.0564]
+    //   pitch 108.398       turned from 103.063, upright to 102.739    ->         (.0492,.0522]
+    //   pitch 121.56/121.67 turned / upright about mean 115.258        ->         (.0519,.0527]
+    //
+    // A CONSTANT reserve is refuted outright - 2.9 pt at pitch 54 against 6.4 at pitch 122 - so
+    // whatever it is goes with the spacing. A single clean FRACTION is not established either: the
+    // two rows whose labels are runs of one letter, the only two with no tail-advance question in
+    // them, are (.0539,.0564] and (.0519,.0527] and do not intersect until the advance model's own
+    // +/-0.13 % is folded in, which leaves (.0529,.0540].
+    //
+    // The five per cent `nReduce` that `createTextShapes` already takes off the wrap limit "to have
+    // a visible distance between the labels" (VCartesianAxis.cxx:753-759) is 0.0500 - below that
+    // window by 6 % of itself and by 0.3 % of a tick. It is what is implemented anyway, and
+    // deliberately: 0.053 is a number fitted to one chart with no mechanism behind it; 0.050 is the
+    // source's own and is already this file's WrapFraction; the measurements with no free parameter
+    // at all - the one-word frame sweeps, which put the wrap limit at 0.95 to [0.94895, 0.95125)
+    // over five pitches - agree with the source exactly; and all 176 chart-bearing corpus
+    // renderings are byte-identical under either. The 6 % is recorded as open, not fitted away.
+    //
+    // Two limits of the measurement, both deliberate. It is a *horizontal* axis' constant: a
+    // vertical category axis' wrap limit has no reduction in it either
+    // (VCartesianAxis.cxx:768-773), so the reserve is zero there and nothing was measured. And it
+    // is added to the collision test alone, not to `Depth`: what is measured is the
+    // separation the reference keeps between two labels, and whether its shape is genuinely wider
+    // than its text — which would also deepen the band a rotated axis reserves — is not.
+    // ---------------------------------------------------------------------------------------
+
     /// <summary>Whether any label would wrap in the room one tick's worth of axis gives it.</summary>
     /// <remarks>
     /// <para>
@@ -472,11 +525,18 @@ public static class ChartAxisLabels
     /// <strong>Passing this test does not turn the axis; it turns line breaking off.</strong>
     /// <c>lcl_hasWordBreak</c> sets <c>m_bLineBreakAllowed = false</c> and restarts the layout
     /// (<c>VCartesianAxis.cxx:888-903</c>), and the 45° only follows if the labels then
-    /// <em>collide</em> as single lines. Round 30's decks all carried a one-word label, for which
-    /// the two boundaries are 0.95 and 1.00 of the spacing and only the outer one is visible: a
-    /// single word wider than 0.95 of a tick but narrower than a whole one breaks, unbreaks and
-    /// comes out upright, so the deck turns at the collision and the wrap limit leaves no trace.
-    /// Round 63's decks separate them by giving one label a space in it.
+    /// <em>collide</em> as single lines. Round 63's decks separate the two by giving one label a
+    /// space in it.
+    /// <para>
+    /// <strong>On a one-word label the two boundaries very nearly coincide, and this remark used
+    /// to say they were 0.95 and 1.00 of the spacing.</strong> They are not: the collision keeps
+    /// the same five per cent clear that the wrap does, so a single word past 0.95 of a tick
+    /// restarts the wrap <em>and</em> collides, and the axis turns. Round 110 swept the tick pitch
+    /// continuously at five run lengths and read the one-word turn threshold at
+    /// [0.94895, 0.95125) of the spacing, with no free parameter — see the block beside
+    /// <see cref="WrapFraction"/>. What the one-word case cannot show is the collision on its
+    /// own, which is why that round had to alternate two label widths.
+    /// </para>
     /// </para>
     /// <list type="table">
     /// <item><description><c>Middle Column</c> among twelve categories at 10 pt in Liberation
@@ -687,7 +747,8 @@ public static class ChartAxisLabels
         int rhythm,
         bool staggered,
         double rotation,
-        bool vertical)
+        bool vertical,
+        Length reserve)
     {
         // Staggering puts alternate labels on two rows, so what a label collides with is the one
         // two places away rather than the one beside it.
@@ -714,7 +775,11 @@ public static class ChartAxisLabels
                 double along = gap * cosine;
                 double across = gap * sine;
 
-                double width = (boxes[at].Width.Emu + boxes[previous].Width.Emu) / 2.0;
+                // `reserve` is added to the sum of the two half-widths, which is exactly the
+                // same arithmetic as widening *each* box by it — so it turns with the labels
+                // rather than being a gap measured along the axis.
+                double width =
+                    ((boxes[at].Width.Emu + boxes[previous].Width.Emu) / 2.0) + reserve.Emu;
                 double height = (boxes[at].Height.Emu + boxes[previous].Height.Emu) / 2.0;
 
                 if (along < width && across < height) return true;
