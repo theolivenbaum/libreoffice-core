@@ -1223,6 +1223,37 @@ public static partial class ChartLayout
             }
         }
 
+        // And the value axis' own arrangement, once its interval is settled. Same two-step shape
+        // as the category axis above: the arrangement is decided against the rectangle its labels
+        // were reserved room in, and a turned arrangement is deeper and narrower than an upright
+        // one, so the rectangle is composed again around it.
+        //
+        // Only the horizontal branch, and only after the interval — see ArrangeValueLabels.
+        ChartAxisLabelLayout? valueArranged = null;
+
+        if (plot.HasAxes && !columns && domain is null && plot.DataTable is null)
+        {
+            valueArranged = ArrangeValueLabels(plot, area, scale, measurer);
+
+            if (valueArranged is { } turned && Reshapes(turned))
+            {
+                area = PlotAreaOf(
+                    plot, frame, scale, secondary, domain, categories, measurer, arranged,
+                    valueArranged);
+
+                if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                    return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+
+                valueArranged = ArrangeValueLabels(plot, area, scale, measurer);
+                area = PlotAreaOf(
+                    plot, frame, scale, secondary, domain, categories, measurer, arranged,
+                    valueArranged);
+
+                if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                    return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+            }
+        }
+
         // The pie's own second pass, and the only chart type that has one:
         // impl_createDiagramAndContent draws the series once, takes the bounding box of everything
         // the diagram group produced — the labels included — and recreates the whole thing at
@@ -1272,7 +1303,8 @@ public static partial class ChartLayout
         if (plot.HasAxes)
         {
             AddValueAxis(
-                plot, area, scale, columns, plot.ValueFormat, false, measurer, lines, labels);
+                plot, area, scale, columns, plot.ValueFormat, false, measurer, lines, labels,
+                valueArranged);
 
             if (secondary is { } second && plot.SecondaryAxisVisible)
             {
@@ -1675,7 +1707,9 @@ public static partial class ChartLayout
             available = area.Width;
             needed = Length.Zero;
 
-            foreach (double tick in scale.MajorTicks())
+            // And only the first three ticks are measured, not all of them — see
+            // <see cref="MeasuredTicks"/>.
+            foreach (double tick in MeasuredTicks(scale))
             {
                 Length width = measurer.Measure(
                     ChartDataLabel.Write(tick, plot.ValueFormat), modelSize,
@@ -1698,6 +1732,42 @@ public static partial class ChartLayout
             ChartScale.MinimumAutoIntervalCount,
             ChartScale.MaximumAutoIntervalCount);
     }
+
+    /// <summary>
+    /// The tick labels the interval cap is measured over: at most the first <em>three</em>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>m_nMaximumTextWidthSoFar</c> is not the widest label on the axis. It is the widest of
+    /// the labels <c>createMaximumLabels</c> actually built, and that pass iterates a
+    /// <c>MaxLabelTickIter</c> (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:455-511), not
+    /// the whole tick array: it seeds itself with <c>getIndexOfLongestLabel</c> for a text axis
+    /// and with <strong>zero</strong> for a value axis (<c>:1517-1530</c>,
+    /// <c>m_bUseTextLabels</c> false), takes the index before it when there is one, and then adds
+    /// following indices until it holds three. So a value axis is capped on
+    /// <c>{0, 1, 2}</c> — its first three labels — and every later one, however wide, is never
+    /// measured.
+    /// </para>
+    /// <para>
+    /// <strong>Measured directly at 26.2.4.2, by making the two halves of one axis disagree.</strong>
+    /// <c>027_Simple_personal_cash_flow_statement</c>'s savings chart runs a currency value axis
+    /// along the bottom over 0…12,000, and the reference labels it <c>$0 $2,000 … $14,000</c> —
+    /// seven intervals. With its <c>c:numFmt</c> alone changed to
+    /// <c>[&lt;5000]"$"#,##0;[&gt;=5000]"$"#,##0"WWWWWWWW";General</c>, so that every tick from
+    /// 6,000 up is eight characters wider, the reference draws <strong>the same seven
+    /// intervals</strong>. With the condition reversed, so that only <c>$0</c>, <c>$2,000</c> and
+    /// <c>$4,000</c> carry the suffix, it collapses to <strong><c>$0 $10,000 $20,000</c></strong>.
+    /// Nothing but the width of the first three labels moved the cap.
+    /// (<c>probes/chart-axis-r112</c> §2.)
+    /// </para>
+    /// <para>
+    /// Only the horizontal branch of <see cref="IntervalsThatFit"/> is affected. A vertical value
+    /// axis is capped on <c>m_nMaximumTextHeightSoFar</c>, and one line of digits is as tall as
+    /// any other, so measuring three of them or all of them is the same number.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<double> MeasuredTicks(ChartScaleResult scale)
+        => scale.MajorTicks().Take(3);
 
     /// <summary>
     /// The second half of the cap: how many intervals the axis may have before two neighbouring
@@ -1924,7 +1994,8 @@ public static partial class ChartLayout
         ChartScaleResult? domain,
         int categories,
         ChartText measurer,
-        ChartAxisLabelLayout? arranged)
+        ChartAxisLabelLayout? arranged,
+        ChartAxisLabelLayout? valueArranged = null)
     {
         // Absolute, in the chart's own coordinates — ODF's chart:coordinate-region, which is
         // already in whatever space Place composed in.
@@ -2014,7 +2085,10 @@ public static partial class ChartLayout
         // label is deeper and narrower than an upright one. Both halves move: the band the plot
         // gives up is the rotated shape's height, and the overhang past the last tick is half its
         // rotated width. Zero rotation leaves both exactly as they were.
-        double valueTurn = plot.ValueAxisText.Rotation;
+        // And a value axis with nothing stated may still turn, because its labels collided and
+        // it turned itself — see ArrangeValueLabels. Both are the same number to everything
+        // below; only where it came from differs.
+        double valueTurn = valueArranged?.Rotation ?? plot.ValueAxisText.Rotation;
         double valueCos = Math.Abs(Math.Cos(valueTurn));
         double valueSin = Math.Abs(Math.Sin(valueTurn));
 
@@ -2249,7 +2323,8 @@ public static partial class ChartLayout
         bool secondary,
         ChartText measurer,
         List<ChartLine> lines,
-        List<ChartLabel> labels)
+        List<ChartLabel> labels,
+        ChartAxisLabelLayout? arranged = null)
     {
         // The axis line itself runs the full extent of the plot area on the side the value axis
         // is on: the left edge for columns, the bottom edge for bars — and the far side of each
@@ -2301,6 +2376,11 @@ public static partial class ChartLayout
         // The minor grid needs the *next* tick, so the ticks are taken as a list rather than
         // walked lazily. Only the primary axis draws a grid, exactly as for the major one.
         List<double> ticks = [.. scale.MajorTicks()];
+
+        // An arranged axis draws every nth label and all of its ticks and gridlines, exactly as
+        // a thinned category axis does: the rhythm is a property of the *labels*.
+        int rhythm = arranged is { Rhythm: > 1 } thinned ? thinned.Rhythm : 1;
+        int drawn = 0;
 
         if (!secondary && plot.ValueMinorGrid is { } minor && plot.ValueMinorIntervals > 1)
         {
@@ -2384,6 +2464,8 @@ public static partial class ChartLayout
 
                 if (!labelled) continue;
 
+                if (rhythm > 1 && drawn++ % rhythm != 0) continue;
+
                 string written = ChartDataLabel.Write(tick, format);
                 Length edge = labelY - ((outer + LabelSpacing) * labelOutward);
 
@@ -2398,9 +2480,10 @@ public static partial class ChartLayout
                 // document states one: the only value axis in the corpus that carries a rotation
                 // on its own c:txPr is N2_E_Maestroni_Swarm_COP.pptx's, at -45 degrees, and it
                 // runs along the bottom of a bar chart. See ChartPlot.ValueAxisText.
-                double turn = secondary
-                    ? plot.SecondaryValueAxisText.Rotation
-                    : plot.ValueAxisText.Rotation;
+                double turn = arranged?.Rotation
+                    ?? (secondary
+                        ? plot.SecondaryValueAxisText.Rotation
+                        : plot.ValueAxisText.Rotation);
 
                 if (turn == 0.0)
                 {
@@ -3204,6 +3287,70 @@ public static partial class ChartLayout
             direction, room);
     }
 
+    /// <summary>
+    /// How a <em>value</em> axis running along the bottom arranges its own labels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A value axis reaches <c>createTextShapes</c> by exactly the same road a category axis
+    /// does — <c>VCartesianAxis::createLabels</c> is <c>while (!createTextShapes(…)) {}</c> for
+    /// every axis it is called on — so a value axis whose labels collide turns 45° in the same
+    /// way. Nothing in this tree drew that until now: <see cref="AddValueAxis"/> read only the
+    /// axis' <em>stated</em> rotation, so a value axis could be left drawing labels on top of one
+    /// another where 26.2.4.2 turns them.
+    /// </para>
+    /// <para>
+    /// <strong>It is reachable only because the value axis' flags are now chart2's own.</strong>
+    /// <c>canAutoAdjustLabelPlacement</c> (<c>VCartesianAxis.cxx</c>:539-556) refuses both
+    /// rotation and staggering while <c>m_bLineBreakAllowed</c> is set, and OOXML's importer sets
+    /// it only inside <c>case CATEGORY/SERIES/DATE</c> — a <c>c:valAx</c> is <c>REALNUMBER</c> or
+    /// <c>PERCENT</c> and never enters that case (<c>axisconverter.cxx</c>:306-326). Round 111
+    /// corrected the reader; this is the half that draws. Confirmed a second time against the
+    /// binary rather than only in the tree: <c>--convert-to fods</c> on
+    /// <c>027_Simple_personal_cash_flow_statement</c> gives every one of its four value axes
+    /// <c>text:line-break="false"</c> with no <c>chart:label-arrangement</c> at all, against
+    /// <c>text:line-break="true" chart:label-arrangement="side-by-side"</c> on the category axes
+    /// beside them.
+    /// </para>
+    /// <para>
+    /// <strong>Only the horizontal branch.</strong> A value axis running down the left has one
+    /// label per tick on separate lines and cannot collide with itself; and
+    /// <see cref="AddValueAxis"/>'s rotation path is written for the bottom edge alone — see the
+    /// remarks there. A scatter chart's domain axis is left alone for the same reason it is left
+    /// alone in <see cref="IntervalsThatFit"/>: it is arranged by <see cref="AddDomainAxis"/>,
+    /// which is a separate seat.
+    /// </para>
+    /// </remarks>
+    /// <param name="plot">The chart, for the axis' stated flags and its number format.</param>
+    /// <param name="area">The plot rectangle the labels are arranged against.</param>
+    /// <param name="scale">The resolved scale, whose major ticks are the labels.</param>
+    /// <param name="measurer">Measures a line of text.</param>
+    /// <returns>The arrangement, or null when this axis is not arranged here at all.</returns>
+    private static ChartAxisLabelLayout? ArrangeValueLabels(
+        ChartPlot plot, DocRect area, ChartScaleResult scale, ChartText measurer)
+    {
+        if (!plot.ValueAxisVisible || !plot.ValueLabelsVisible) return null;
+
+        // A stated rotation is the file's own statement and outranks any arrangement, exactly as
+        // AddValueAxis already reads it.
+        if (plot.ValueAxisText.Rotation != 0.0) return null;
+
+        List<double> ticks = [.. scale.MajorTicks()];
+        if (ticks.Count < 2) return null;
+
+        string?[] texts = new string?[ticks.Count];
+        Length[] centres = new Length[ticks.Count];
+
+        for (int at = 0; at < ticks.Count; at++)
+        {
+            texts[at] = ChartDataLabel.Write(ticks[at], plot.ValueFormat);
+            centres[at] = area.Left + (area.Width * scale.Fraction(ticks[at]));
+        }
+
+        return ChartAxisLabels.Resolve(
+            texts, centres, plot.ValueAxisText, plot.LabelSize, measurer, plot.IsLabelBold,
+            ChartAxisDirection.Horizontal);
+    }
 
     /// <summary>
     /// Where a category sits along the axis, 0 at the plot area's start and 1 at its end.
