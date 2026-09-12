@@ -66,15 +66,13 @@ internal sealed class XlsxPivotGrid
     /// <summary><c>WEIGHT_BOLD</c>, on the hundred-point scale this tree keeps weights in.</summary>
     private const int BoldWeight = 700;
 
-    /// <summary>
-    /// The indent a row field that is not the innermost gives its member cell.
-    /// </summary>
+    /// <summary>One step of the indent a row field gives its member cell.</summary>
     /// <remarks>
     /// <c>o3tl::convert(13 * level, px, twip)</c> at <c>dpoutput.cxx</c>:1137 — thirteen pixels
     /// at 96 dpi is 195 twips, and the reference's own <c>.fods</c> writes it as
-    /// <c>fo:margin-left="0.1354in"</c>. The level is zero for every non-compact field, so the
-    /// whole of it here is the one step <c>nMinIndentLevel</c> adds while the drill-down buttons
-    /// are on.
+    /// <c>fo:margin-left="0.1354in"</c>. A field that is not the innermost takes one step while
+    /// the drill-down buttons are on, and each compact field packed into the same column adds
+    /// another for the fields inside it.
     /// </remarks>
     private const int IndentTwips = 195;
 
@@ -121,6 +119,10 @@ internal sealed class XlsxPivotGrid
     private readonly int _dataStartRow;
     private readonly int _tabEndColumn;
     private readonly int _tabEndRow;
+    private readonly int _clearedFirstRow;
+    private readonly int _clearedLastRow;
+    private readonly int _clearedFirstColumn;
+    private readonly int _clearedLastColumn;
     private readonly Dictionary<(int Row, int Column), int[]> _edges = [];
     private readonly Dictionary<(int Row, int Column), Generated> _styles = [];
     private readonly Dictionary<(int Row, int Column), int> _indents = [];
@@ -131,7 +133,7 @@ internal sealed class XlsxPivotGrid
 
     private XlsxPivotGrid(
         int tabStartColumn, int tabStartRow, int dataStartColumn, int dataStartRow,
-        int tabEndColumn, int tabEndRow)
+        int tabEndColumn, int tabEndRow, SheetRange stated, int pageStartRow)
     {
         _tabStartColumn = tabStartColumn;
         _tabStartRow = tabStartRow;
@@ -139,6 +141,17 @@ internal sealed class XlsxPivotGrid
         _dataStartRow = dataStartRow;
         _tabEndColumn = tabEndColumn;
         _tabEndRow = tabEndRow;
+
+        // The reference empties two rectangles before ScDPOutput writes anything: the range
+        // Excel stated, through `clearContents(… HARDATTR | STYLES …)`
+        // (`sc/source/filter/oox/pivottablebuffer.cxx`:1331-1336), and the range it computed
+        // for itself, through `DeleteAreaTab(…, InsertDeleteFlags::ALL)` (`dpoutput.cxx`:1226)
+        // from `maStartPos` — which is the stated start moved up over the page fields — to the
+        // table's own end. Their union is what a cell in here resolves through.
+        _clearedFirstRow = Math.Min(stated.FirstRow, pageStartRow);
+        _clearedLastRow = Math.Max(stated.LastRow, tabEndRow);
+        _clearedFirstColumn = Math.Min(stated.FirstColumn, tabStartColumn);
+        _clearedLastColumn = Math.Max(stated.LastColumn, tabEndColumn);
     }
 
     /// <summary>
@@ -170,7 +183,7 @@ internal sealed class XlsxPivotGrid
             if (Build(pivot) is not { } grid) continue;
             if (ReferenceEquals(formatting, SheetFormatting.Empty)) formatting = new SheetFormatting();
             grid.MergeInto(formatting);
-            grid.CollectStyles(styles);
+            grid.CollectStyles(styles, formats.SheetDefault);
         }
 
         return (formatting, formats.WithPivotStyles(styles));
@@ -210,9 +223,15 @@ internal sealed class XlsxPivotGrid
             columnFieldCount = 0;
         }
 
+        // maRowCompactFlags / mbHasCompactRowField, pivottablebuffer.cxx:296 and
+        // dpoutput.cxx:596-611 — a row field is compact when `subtotalTop`, `outline` and
+        // `compact` all hold, each defaulting to true.
+        bool[] compactRowFields = CompactRowFields(root, rowFields);
+        bool hasCompactRowField = Array.IndexOf(compactRowFields, true) >= 0;
+
         if (!IsGeneratable(
                 pivot, firstHeaderRow, firstDataRow, firstDataColumn,
-                rowFields, columnFieldCount, rowItems, columnItems))
+                rowFields, compactRowFields, columnFieldCount, rowItems, columnItems))
         {
             return null;
         }
@@ -249,13 +268,15 @@ internal sealed class XlsxPivotGrid
         int tabEndColumn = columnCount > 0 ? dataStartColumn + columnCount - 1 : dataStartColumn;
 
         XlsxPivotGrid grid = new(
-            tabStartColumn, tabStartRow, dataStartColumn, dataStartRow, tabEndColumn, tabEndRow);
+            tabStartColumn, tabStartRow, dataStartColumn, dataStartRow, tabEndColumn, tabEndRow,
+            area, pageStartRow);
 
         grid.PageFields(pageFields, tabStartColumn, pageStartRow);
         grid.ColumnHeaders(columnFieldCount, ReadAxis(columnItems, columnFieldCount, columnCount),
-            memberStartRow, columnCount);
+            memberStartRow, columnCount, hasCompactRowField);
         grid.RowHeaders(
-            rowFields.Count, ReadAxis(rowItems, rowFields.Count, rowCount), rowCount, showDrill);
+            rowFields.Count, ReadAxis(rowItems, rowFields.Count, rowCount), rowCount, showDrill,
+            compactRowFields, hasCompactRowField);
         grid.DataArea();
         return grid;
     }
@@ -269,28 +290,22 @@ internal sealed class XlsxPivotGrid
     /// about the stated geometry: <c>mnMemberStartRow = mnTabStartRow + mnHeaderSize</c>,
     /// <c>mnDataStartRow = mnMemberStartRow + mpColFields.size()</c> and
     /// <c>mnDataStartCol = mnMemberStartCol + GetColumnsForRowFields()</c> (<c>:854-868</c>).
-    /// <c>mnHeaderSize</c> is <c>1</c> here. It is <c>0</c> when the header is hidden, which the
-    /// OOXML import ties to the stated first header row outright —
+    /// <c>mnHeaderSize</c> is <c>0</c> when the header is hidden and <c>1</c> otherwise, and the
+    /// OOXML import ties the first to the stated first header row outright —
     /// <c>mpDPObject-&gt;SetHideHeader(maLocationModel.mnFirstHeaderRow == 0)</c>
-    /// (<c>sc/source/filter/oox/pivottablebuffer.cxx</c>:1368) — and that case is declined
-    /// because it was tried and refuted: with <c>firstHeaderRow="0"</c> accepted,
-    /// <c>033_Event_planning_tracker</c> predicts 24 of its 131 edges right and states 56 the
-    /// reference does not, because the reference's table there ends a row above the range Excel
-    /// wrote and its top row takes an inner rule where a table's first row takes an outer one.
-    /// Where the reference's table actually starts is not settled. The third case,
-    /// <c>mnHeaderSize = 2</c> for a grid header layout (<c>:886</c>), cannot arise at all:
-    /// <c>SetHeaderLayout</c> is called only by the BIFF and ODF importers, never by
-    /// <c>sc/source/filter/oox</c>.
+    /// (<c>sc/source/filter/oox/pivottablebuffer.cxx</c>:1368) — so
+    /// <c>mnHeaderSize == firstHeaderRow</c> for the two values that can arise. The third,
+    /// <c>mnHeaderSize = 2</c> for a grid header layout (<c>:886</c>), cannot: <c>SetHeaderLayout</c>
+    /// is called only by the BIFF and ODF importers, never by <c>sc/source/filter/oox</c>.
     /// </para>
     /// <para>
     /// A compact row field shares its column with the field outside it, so
-    /// <c>GetColumnsForRowFields</c> returns fewer columns than there are fields and the stated
-    /// geometry is not Calc's — except where there is only one row field, when the count is
-    /// <c>0</c> non-compact fields plus one for <c>maRowCompactFlags.back()</c>, which is the
-    /// one column Excel also wrote. A single compact field is also the last field, so
-    /// <c>bLast</c> drops its indent (<c>:1135-1137</c>) and it takes <c>FieldCell</c> rather
-    /// than <c>MultiFieldCell</c> (<c>:1087-1090</c>): nothing about it differs from the
-    /// non-compact case. More than one, and the layout is declined.
+    /// <c>GetColumnsForRowFields</c> returns fewer columns than there are fields; the stated
+    /// <c>firstDataCol</c> is checked against that packed count rather than against the field
+    /// count. What the packing changes besides the count is that the button row takes
+    /// <c>MultiFieldCell</c> rather than <c>FieldCell</c> and so is not boxed
+    /// (<c>:1087-1090</c>), and that each packed field adds an indent step to the fields inside
+    /// it (<c>:1135-1137</c>).
     /// </para>
     /// <para>
     /// The data-layout dimension on the row axis is declined outright. With one data field its
@@ -303,36 +318,71 @@ internal sealed class XlsxPivotGrid
     /// </remarks>
     private static bool IsGeneratable(
         XlsxPivotTable pivot, int firstHeaderRow, int firstDataRow, int firstDataColumn,
-        List<XElement> rowFields, int columnFieldCount,
+        List<XElement> rowFields, bool[] compactRowFields, int columnFieldCount,
         List<XElement> rowItems, List<XElement> columnItems)
     {
         if (!pivot.HasWorksheetCache) return false;
         if (rowItems.Count == 0 || columnItems.Count == 0) return false;
-        if (firstHeaderRow != 1) return false;
-        if (firstDataRow != 1 + columnFieldCount) return false;
-        if (firstDataColumn != rowFields.Count || firstDataColumn == 0) return false;
+        if (firstHeaderRow is not (0 or 1)) return false;
+        if (firstDataRow != firstHeaderRow + columnFieldCount) return false;
+        if (firstDataColumn != RowLabelColumns(compactRowFields) || firstDataColumn == 0)
+            return false;
 
         int dataFields = Xlsx.Children(Xlsx.Child(pivot.Root, "dataFields"), "dataField").Count();
         if (dataFields <= 1 && rowFields.Exists(field => (Xlsx.Integer(field, "x") ?? -1) < 0))
             return false;
 
-        // maRowCompactFlags, pivottablebuffer.cxx:296 — subtotalTop && outline && compact, each
-        // defaulting to true.
-        if (rowFields.Count == 1) return true;
+        return true;
+    }
 
-        List<XElement> pivotFields = [.. Xlsx.Children(Xlsx.Child(pivot.Root, "pivotFields"), "pivotField")];
-        foreach (XElement field in rowFields)
+    /// <summary>
+    /// Which of a pivot's row fields Calc lays out compactly, <c>maRowCompactFlags</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>maModel.mbCompact = mbSubtotalTop &amp;&amp; mbOutline &amp;&amp; compact</c>
+    /// (<c>sc/source/filter/oox/pivottablebuffer.cxx</c>:296) becomes
+    /// <c>DataPilotFieldLayoutMode::COMPACT_LAYOUT</c> (<c>:812-814</c>), which the
+    /// <c>ScDPOutput</c> constructor reads back into <c>maRowCompactFlags</c>
+    /// (<c>dpoutput.cxx</c>:596-611). Each of the three attributes defaults to true, so a field
+    /// stating none of them is compact.
+    /// </remarks>
+    private static bool[] CompactRowFields(XElement root, List<XElement> rowFields)
+    {
+        List<XElement> pivotFields = [.. Xlsx.Children(Xlsx.Child(root, "pivotFields"), "pivotField")];
+        bool[] compact = new bool[rowFields.Count];
+        for (int at = 0; at < rowFields.Count; at++)
         {
-            int index = Xlsx.Integer(field, "x") ?? -1;
+            int index = Xlsx.Integer(rowFields[at], "x") ?? -1;
             if (index < 0 || index >= pivotFields.Count) continue;
             XElement pivotField = pivotFields[index];
-            bool compact = Xlsx.Flag(pivotField, "subtotalTop", true)
-                           && Xlsx.Flag(pivotField, "outline", true)
-                           && Xlsx.Flag(pivotField, "compact", true);
-            if (compact) return false;
+            compact[at] = Xlsx.Flag(pivotField, "subtotalTop", true)
+                          && Xlsx.Flag(pivotField, "outline", true)
+                          && Xlsx.Flag(pivotField, "compact", true);
         }
 
-        return true;
+        return compact;
+    }
+
+    /// <summary>
+    /// <c>GetColumnsForRowFields</c>, <c>dpoutput.cxx</c>:854-868.
+    /// </summary>
+    /// <remarks>
+    /// A run of compact row fields is packed into one column: the count is one per non-compact
+    /// field, plus one more when the innermost field is compact. With no compact field at all
+    /// it is simply the field count, which is what Excel writes as <c>firstDataCol</c>.
+    /// </remarks>
+    private static int RowLabelColumns(bool[] compactRowFields)
+    {
+        if (Array.IndexOf(compactRowFields, true) < 0) return compactRowFields.Length;
+
+        int columns = 0;
+        foreach (bool compact in compactRowFields)
+        {
+            if (!compact) columns++;
+        }
+
+        if (compactRowFields.Length > 0 && compactRowFields[^1]) columns++;
+        return columns;
     }
 
     /// <summary>
@@ -469,11 +519,16 @@ internal sealed class XlsxPivotGrid
     }
 
     /// <summary><c>outputColumnHeaders</c>, <c>dpoutput.cxx</c>:1002.</summary>
-    private void ColumnHeaders(int fields, Flags[][] flags, int memberStartRow, int count)
+    private void ColumnHeaders(
+        int fields, Flags[][] flags, int memberStartRow, int count, bool hasCompactRowField)
     {
         for (int field = 0; field < fields; field++)
         {
-            if (memberStartRow > _tabStartRow) Box(_dataStartColumn + field, _tabStartRow, Inner);
+            // `if (!mbHasCompactRowField || nNumColFields == 1) FieldCell(…) else if (!nField)
+            // MultiFieldCell(…)`, dpoutput.cxx:1010-1015. FieldCell boxes its cell,
+            // MultiFieldCell does not — and it is written for the first field only.
+            if (memberStartRow > _tabStartRow && (!hasCompactRowField || fields == 1))
+                Box(_dataStartColumn + field, _tabStartRow, Inner);
 
             int rowPos = memberStartRow + field;
             for (int position = 0; position < count; position++)
@@ -530,15 +585,30 @@ internal sealed class XlsxPivotGrid
     /// field: the outermost field that has a member on a row claims it, and the fields inside it
     /// only rule their own column.
     /// </remarks>
-    private void RowHeaders(int fields, Flags[][] flags, int count, bool showDrill)
+    private void RowHeaders(
+        int fields, Flags[][] flags, int count, bool showDrill,
+        bool[] compactRowFields, bool hasCompactRowField)
     {
         bool[] framed = new bool[count];
+        int columnOffset = 0;   // nFieldColOffset — only a non-compact field takes a column
+        int indentLevel = 0;    // nFieldIndentLevel — how deep this field sits in its column
 
         for (int field = 0; field < fields; field++)
         {
-            Box(_tabStartColumn + field, _dataStartRow - 1, Inner);
+            if (!hasCompactRowField || fields == 1)
+                Box(_tabStartColumn + field, _dataStartRow - 1, Inner);
 
-            int columnPos = _tabStartColumn + field;
+            int columnPos = _tabStartColumn + columnOffset;
+
+            // `bLast = mnRowDims == (nField + 1)` and
+            // `nIndent = 13 * (bLast ? nFieldIndentLevel : nMinIndentLevel + nFieldIndentLevel)`
+            // px, dpoutput.cxx:1135-1137. bLast counts fields, not the columns they are packed
+            // into, so the innermost field of a packed column drops the drill step but keeps
+            // whatever depth the fields outside it in that column have added.
+            bool last = field + 1 == fields;
+            int step = last ? 0 : showDrill ? 1 : 0;
+            int indent = IndentTwips * (step + indentLevel);
+
             for (int position = 0; position < count; position++)
             {
                 int rowPos = _dataStartRow + position;
@@ -558,25 +628,38 @@ internal sealed class XlsxPivotGrid
                 if (field + 1 >= fields)
                 {
                     Style(columnPos, rowPos, _dataStartColumn - 1, rowPos, Generated.Category);
-                    continue;
                 }
-
-                int end = position;
-                while (end + 1 < count && flags[field][end + 1].HasFlag(Flags.Continue)) end++;
-                int endRowPos = _dataStartRow + end;
-
-                AddRow(rowPos);
-                if (!framed[position])
+                else
                 {
-                    Block(columnPos, rowPos, _tabEndColumn, endRowPos);
-                    framed[position] = true;
+                    int end = position;
+                    while (end + 1 < count && flags[field][end + 1].HasFlag(Flags.Continue)) end++;
+                    int endRowPos = _dataStartRow + end;
+
+                    AddRow(rowPos);
+                    if (!framed[position])
+                    {
+                        Block(columnPos, rowPos, _tabEndColumn, endRowPos);
+                        framed[position] = true;
+                    }
+
+                    Block(columnPos, rowPos, columnPos, endRowPos);
+                    if (field == fields - 2)
+                        Block(columnPos + 1, rowPos, columnPos + 1, endRowPos);
+
+                    Style(columnPos, rowPos, _dataStartColumn - 1, endRowPos, Generated.Category);
                 }
 
-                Block(columnPos, rowPos, columnPos, endRowPos);
-                if (field == fields - 2) Block(columnPos + 1, rowPos, columnPos + 1, endRowPos);
+                // The indent is applied to every member cell, the innermost field's included:
+                // it is outside the branch above in dpoutput.cxx, and only bLast keeping the
+                // step at zero makes it nothing there when no field is packed.
+                if (indent > 0) _indents[(rowPos, columnPos)] = indent;
+            }
 
-                Style(columnPos, rowPos, _dataStartColumn - 1, endRowPos, Generated.Category);
-                if (showDrill) _indents[(rowPos, columnPos)] = IndentTwips;
+            if (compactRowFields[field]) indentLevel++;
+            else
+            {
+                columnOffset++;
+                indentLevel = 0;
             }
         }
     }
@@ -654,28 +737,48 @@ internal sealed class XlsxPivotGrid
     /// <summary>
     /// Everything the generated styles and the row-header indent change about one sheet's text.
     /// </summary>
-    private void CollectStyles(Dictionary<(int Row, int Column), SheetPivotStyle> into)
+    private void CollectStyles(
+        Dictionary<(int Row, int Column), SheetPivotStyle> into, SheetCellFormat cleared)
     {
+        // Every cell of the emptied rectangle states the three properties outright, so the
+        // overlay replaces what the workbook put on a pivot cell rather than merging with it —
+        // which is what the two clearing calls above do. What it replaces them with is the
+        // sheet's own default format and not nothing: `clearContents` takes a cell back to the
+        // Default cell style, and a workbook whose default `cellXf` states an alignment or an
+        // indent still states it afterwards. `049_Expenses_calculator` is that workbook — 47
+        // cells of its pivot resolve their left justification and indent through `cellXfs[0]`
+        // and no cell of the range states an `s` of its own, and the reference keeps all 47.
+        SheetPivotStyle bare = new()
+        {
+            FontWeight = cleared.FontWeight,
+            Horizontal = cleared.Horizontal,
+            Indent = cleared.Indent,
+        };
+
+        for (int row = _clearedFirstRow; row <= _clearedLastRow; row++)
+        {
+            for (int column = _clearedFirstColumn; column <= _clearedLastColumn; column++)
+                into[(row, column)] = bare;
+        }
+
         foreach (KeyValuePair<(int Row, int Column), Generated> entry in _styles)
         {
+            SheetPivotStyle style = into.GetValueOrDefault(entry.Key, bare);
             into[entry.Key] = entry.Value switch
             {
-                Generated.Category => new SheetPivotStyle
-                {
-                    Horizontal = SheetHorizontalAlignment.Left,
-                },
-                Generated.Title => new SheetPivotStyle
+                Generated.Category => style with { Horizontal = SheetHorizontalAlignment.Left },
+                Generated.Title => style with
                 {
                     Horizontal = SheetHorizontalAlignment.Left,
                     FontWeight = BoldWeight,
                 },
-                _ => new SheetPivotStyle { FontWeight = BoldWeight },
+                _ => style with { FontWeight = BoldWeight },
             };
         }
 
         foreach (KeyValuePair<(int Row, int Column), int> entry in _indents)
         {
-            SheetPivotStyle style = into.GetValueOrDefault(entry.Key);
+            SheetPivotStyle style = into.GetValueOrDefault(entry.Key, bare);
             into[entry.Key] = style with { Indent = Length.FromTwips(entry.Value) };
         }
     }
