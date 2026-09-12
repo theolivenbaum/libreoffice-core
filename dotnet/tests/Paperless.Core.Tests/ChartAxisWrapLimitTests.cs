@@ -24,9 +24,12 @@ namespace Paperless.Core.Tests;
 /// 38.77;</description></item>
 /// <item><description>and <strong>breaking does not turn the axis</strong> — it turns line
 /// breaking off, after which the axis turns only if the labels then collide as single lines. A
-/// one-word label wider than 0.95 of a tick but narrower than a whole one breaks, unbreaks, and
-/// comes out upright. That is why round 30's decks — every one of them one-word — read the limit
-/// as 1.000 and rejected the source's own 0.95.</description></item>
+/// label that breaks at a <em>space</em> is at most one line's worth of the limit wide and comes
+/// out upright on two lines; that is why round 30's decks — every one of them one-word — read the
+/// limit as 1.000 and rejected the source's own 0.95. <strong>A one-word label past 0.95 of a
+/// tick does turn</strong>, because the collision keeps the same five per cent clear that the
+/// wrap does — round 110, and the case below asserted the opposite until
+/// then.</description></item>
 /// </list>
 /// <para>
 /// <strong>The upright half of each case used to assert a thinned axis and no longer does, and
@@ -98,33 +101,37 @@ public class ChartAxisWrapLimitTests
     }
 
     /// <summary>
-    /// A single word between 0.95 of a tick and a whole one breaks and the axis stays upright.
+    /// A single word between 0.95 of a tick and a whole one breaks, and the axis <em>turns</em>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The measurement that separates the wrap limit from the collision boundary, and the reason
-    /// seven rounds of decks read the wrong number. <c>lcl_hasWordBreak</c> sets
-    /// <c>m_bLineBreakAllowed = false</c> and restarts (<c>VCartesianAxis.cxx:888-903</c>); the
-    /// restarted pass finds a 96 pt label in a 100 pt slot, which does not collide, and returns it
-    /// upright on one line.
+    /// <strong>This case asserted the opposite until round 110 and the premise was wrong.</strong>
+    /// It read: "the restarted pass finds a 96 pt label in a 100 pt slot, which does not collide,
+    /// and returns it upright on one line" — true of <c>doesOverlap</c> as this tree's chart2
+    /// reads, and not true of 26.2.4.2. <c>probes/chart-geom-r108/fine-width.tsv</c> is fifteen
+    /// one-word labels from 51.702 to 54.267 pt on a 54.202 pt pitch, of which the reference turns
+    /// <strong>fifteen</strong>; and <c>probes/chart-collide-r110</c> §3.3 sweeps the tick pitch
+    /// continuously at five run lengths and puts the one-word turn threshold at
+    /// <strong>0.95 of the pitch, to [0.94895, 0.95125)</strong> — the wrap limit, not the tick.
     /// </para>
     /// <para>
-    /// An implementation that rotates on the break instead turns this axis, and every one-word
-    /// deck ever used to calibrate the limit looks identical under both — which is exactly how the
-    /// wrong constant survived.
+    /// What is between the two is a separation: the reference keeps the same <c>nReduce</c> clear
+    /// between two adjacent labels that it takes off the wrap limit. So the one-word case has
+    /// <em>one</em> boundary rather than two, and the case below is the control that keeps this
+    /// from becoming "a break turns the axis" — 94 points never restarts the wrap at all, so line
+    /// breaking stays on and <c>canAutoAdjustLabelPlacement</c> refuses to rotate whatever the
+    /// boxes do. See <c>ChartAxisCollisionReserveTests</c>.
     /// </para>
     /// </remarks>
     [Fact]
-    public void AOneWordLabelThatBreaksButDoesNotCollideStaysUpright()
+    public void AOneWordLabelPastTheWrapLimitTurnsInsideTheTick()
     {
-        ChartAxisLabelLayout layout = Resolve(Labels(8, new string('W', 96)), 100.0);
+        Resolve(Labels(8, new string('W', 96)), 100.0).Rotation
+            .ShouldBe(Math.PI / 4.0, 1e-12);
 
-        layout.Rotation.ShouldBe(0.0);
-        layout.Rhythm.ShouldBe(1);
-
-        // And past the collision boundary the same label does turn, so the case above is not
-        // simply an axis that never rotates.
-        Resolve(Labels(8, new string('W', 101)), 100.0).Rotation.ShouldBe(Math.PI / 4.0, 1e-12);
+        ChartAxisLabelLayout inside = Resolve(Labels(8, new string('W', 94)), 100.0);
+        inside.Rotation.ShouldBe(0.0);
+        inside.Rhythm.ShouldBe(1);
     }
 
     /// <summary>The first label is not tested for a break.</summary>
