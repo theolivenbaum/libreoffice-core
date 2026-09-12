@@ -530,6 +530,48 @@ public static class PptTextReader
     }
 
     /// <summary>
+    /// The <c>TextRulerAtom</c> of a shape's own client textbox, for the text it only refers to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A shape whose text is an <c>OutlineTextRefAtom</c> keeps its <em>ruler</em> in its own
+    /// client textbox while the characters live in the document's slide list, and the reference
+    /// reads the two from those two places: <c>PPTTextObj</c>'s constructor locates
+    /// <c>PPT_PST_TextRulerAtom</c> inside <c>aClientTextBoxHd</c> and remembers its file offset
+    /// <strong>before</strong> patching that header to point at the referenced text
+    /// (<c>filter/source/msfilter/svdfppt.cxx</c>, the <c>nTextRulerAtomOfs</c> block), then builds
+    /// its <c>PPTTextRulerInterpreter</c> from that offset once the patch has happened.
+    /// </para>
+    /// <para>
+    /// <strong>Every ruler in the two decks this matters to is in exactly that position.</strong>
+    /// Counted over the record tree of both: <c>ws_prod-…-M.017-(French)-France.ppt</c> holds
+    /// <b>54</b> <c>TextRulerAtom</c> records and
+    /// <c>ws_prod-g-doc-Events-Part-M-presentation.ppt</c> <b>3</b>, and in both files
+    /// <em>every one of them</em> sits in a client textbox that also holds an
+    /// <c>OutlineTextRefAtom</c> — 54 of 54 and 3 of 3. Read through
+    /// <see cref="Read(DffRecordBuffer,int,int,PptFieldValues,IReadOnlyList{PptExtendedParagraph},IReadOnlySet{uint})"/>
+    /// alone, which returns before it reaches the ruler on that branch, not one of the 57 was ever
+    /// applied.
+    /// </para>
+    /// </remarks>
+    /// <param name="stream">The document stream.</param>
+    /// <param name="start">Where the shape's client textbox content begins.</param>
+    /// <param name="end">Where it ends.</param>
+    internal static PptTextRuler? RulerIn(DffRecordBuffer stream, int start, int end)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        foreach (DffRecordHeader record in stream.Range(start, end))
+        {
+            if (record.Type != PptRecordTypes.TextRulerAtom) continue;
+
+            return ReadRuler(stream.Content(record));
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Reads a <c>TextRulerAtom</c>, or returns null when it states nothing this consumes.
     /// </summary>
     /// <remarks>

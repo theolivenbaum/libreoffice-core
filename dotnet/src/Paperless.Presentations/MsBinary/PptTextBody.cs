@@ -46,6 +46,12 @@ internal static class PptTextBody
     private const uint StatesTextOffset = 0x0000_0100;
     private const uint StatesBulletOffset = 0x0000_0400;
 
+    /// <summary>The mask bit for the bullet's presence, <c>PPT_ParaAttr_BulletOn</c>.</summary>
+    private const uint StatesBulletOn = 0x0000_0001;
+
+    /// <summary>The mask bit for the bullet's character, <c>PPT_ParaAttr_BulletChar</c>.</summary>
+    private const uint StatesBulletChar = 0x0000_0080;
+
     /// <summary>The mask bits for the bullet's own face, size and colour.</summary>
     private const uint StatesBulletFont = 0x0000_0010;
     private const uint StatesBulletHeight = 0x0000_0040;
@@ -71,6 +77,22 @@ internal static class PptTextBody
 
     /// <summary><c>PPT_ParaAttr_BuHardFont</c>'s bit within the same word — the first.</summary>
     private const ushort BulletHardFontFlag = 0x0002;
+
+    /// <summary>
+    /// The mask bit for <c>PPT_ParaAttr_BuHardHeight</c>, and its bit in the bullet-flags word.
+    /// </summary>
+    /// <remarks>
+    /// A stated <c>buSize</c> only counts as the paragraph's own when <em>both</em> are set:
+    /// <c>ReadParaProps</c> clears <c>mnAttrSet</c>'s <c>PPT_ParaAttr_BulletHeight</c> again unless
+    /// <c>(nMask &amp; (1 &lt;&lt; PPT_ParaAttr_BuHardHeight)) &amp;&amp;
+    /// (nBulFlg &amp; (1 &lt;&lt; PPT_ParaAttr_BuHardHeight))</c>
+    /// (<c>svdfppt.cxx</c>:4903-4912), which is the only one of the three hard-flags that gates
+    /// the mask rather than the value.
+    /// </remarks>
+    private const uint StatesBulletHardHeight = 0x0000_0008;
+
+    /// <summary><c>PPT_ParaAttr_BuHardHeight</c>'s bit within the bullet-flags word.</summary>
+    private const ushort BulletHardHeightFlag = 0x0008;
 
     /// <summary>The mask bits a character run sets for its face, size and colour.</summary>
     private const uint StatesFontIndex = 0x0001_0000;
@@ -277,6 +299,8 @@ internal static class PptTextBody
                 styles?.Extended.Level(run.Kind, depth) ?? default,
                 bulletPictures,
                 FontHeightAt(run, characters, start),
+                characters.FontHeight,
+                NumberingIsOwn(properties, run.Ruler, run.ExtensionAt(ExtendedIndexAt(run, start)), depth),
                 depth,
                 text.Length > 0,
                 counters,
@@ -379,6 +403,103 @@ internal static class PptTextBody
     /// A null colour is what <see cref="SlideMarker"/> already spells "the first run's".
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Whether the paragraph gets a numbering rule of its own, or keeps its master's —
+    /// <c>nHardCount</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>PPTNumberFormatCreator::GetNumberFormat</c> (<c>svdfppt.cxx</c>:3690-3712) sums eight
+    /// hardness answers, and <c>PPTParagraphObj::ApplyTo</c> (<c>:6151-6199</c>) then builds the
+    /// paragraph's rule <em>only</em> when the sum is non-zero: it copies the style sheet's own
+    /// <c>SvxNumBulletItem</c> for the instance and replaces the single level the paragraph sits
+    /// at. A paragraph summing zero has no item put on it at all and keeps the master's rule at
+    /// every level.
+    /// </para>
+    /// <para>
+    /// <strong>That is what decides which font height sizes a picture bullet</strong>, because the
+    /// two rules are built from different heights. The master's is
+    /// <c>GetNumberFormat(…, rParaLevel, rCharLevel, …)</c> (<c>:3642-3661</c>), which passes
+    /// <c>rCharLevel.mnFontHeight</c> — the master's character height at that depth. The
+    /// paragraph's own is <c>pParaObj->First()->GetAttrib(PPT_CharAttr_FontHeight, …)</c>
+    /// (<c>:3707-3708</c>), which is the first portion's stated height, or that same master
+    /// character height where the portion states none.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on the two decks that disagree, and the eighth term is not needed to
+    /// separate them.</strong> On
+    /// <c>ws_prod-…-M.017-(French)-France.ppt</c> the page-8 body paragraphs state
+    /// <c>0x1801</c> — <em>BulletOn</em>, alignment and line feed — so they sum one, take their
+    /// own portion's 16 pt, and 26.2.4.2 draws their bullets at 17.86 pt, which is
+    /// <c>round(16 × 0.254 × 155)</c>. On
+    /// <c>ws_prod-g-doc-Events-Part-M-presentation.ppt</c> page 21 the paragraphs behind the six
+    /// drawn pictures state <c>0x0000</c> and <c>0x1000</c> — neither of them one of the seven —
+    /// so they sum zero, keep the master's rule, and the reference draws 31.24 and 19.02 pt, which
+    /// are the master character levels' 28 and 24 pt at the same two percentages. Round 111
+    /// measured this pair as unseparable and read <c>0x1801</c> as stating none of the seven;
+    /// <c>PPT_ParaAttr_BulletOn</c> is bit zero and is the first of them.
+    /// </para>
+    /// <para>
+    /// <strong>Confirmed against 26.2.4.2's own flat ODP of the Part-M deck.</strong> Its
+    /// twenty-five <c>text:list-level-style-image</c> entries take four heights at level 1 —
+    /// 1.102 cm, 0.945, 0.787, 0.709, which are 28, 24, 20 and 18 pt at 155 % — and exactly one at
+    /// level 2, 0.671 cm, which is 24 pt at 110 % on every one of the thirteen list styles that
+    /// has one. Its depth-1 paragraphs state a hard 18 pt portion throughout, so if the portion
+    /// sized the box unconditionally, 0.709 cm would appear at level 2 somewhere and it never
+    /// does. The two list styles on page 21 that override a level at all — <c>L18</c> at level 2
+    /// and <c>L7</c> at level 1 — replace it with a <em>number</em>, not a picture, which is the
+    /// same rule seen from the other side.
+    /// </para>
+    /// <para>
+    /// The seven are <c>BulletOn</c>, <c>BulletChar</c>, <c>BulletFont</c>, <c>BulletHeight</c>,
+    /// <c>BulletColor</c>, <c>TextOfs</c> and <c>BulletOfs</c>, and two of them are not simply
+    /// mask bits. <c>BulletHeight</c> is hard only when the paragraph also sets
+    /// <c>BuHardHeight</c> in both its mask and its flags word — see
+    /// <see cref="StatesBulletHardHeight"/>. <c>TextOfs</c> and <c>BulletOfs</c> are hard when the
+    /// shape's own <em>ruler</em> speaks for them as well as when the paragraph does, because
+    /// <c>ReadParaProps</c>' tail writes the ruler's value into the property set and sets the mask
+    /// bit with it (<c>:5062-5068</c>).
+    /// </para>
+    /// <para>
+    /// The eighth term is <c>ImplGetExtNumberFormat</c>'s own return, added only for a bulleted
+    /// paragraph (<c>:3709-3711</c>). It is <c>true</c> when the destination instance is
+    /// <c>TSS_Type::Unknown</c> — which no shape path reaches, <c>ProcessObj</c> always resolving
+    /// one at <c>:999-1028</c> — or when the paragraph carries an extended entry stating anything
+    /// at all (<c>:3409-3419</c>).
+    /// </para>
+    /// <para>
+    /// <strong>What is still not evaluated here is the same pair round 111 named</strong>: where
+    /// the text's own instance differs from the destination the seven are also hard whenever the
+    /// source instance's master level differs from the destination's (<c>:5954-5958</c>). A Body
+    /// text resolves to the Body destination and never reaches it; a <em>HalfBody</em> or
+    /// <em>QuarterBody</em> does, since both map to Body (<c>:1021-1024</c>). No page in this
+    /// corpus's picture-bullet set is one, so the arm is left unimplemented rather than guessed.
+    /// </para>
+    /// </remarks>
+    internal static bool NumberingIsOwn(
+        PptParagraphRun properties, PptTextRuler? ruler, PptExtendedParagraph? extended, int depth)
+    {
+        if (properties.States(StatesBulletOn)
+            || properties.States(StatesBulletChar)
+            || properties.States(StatesBulletFont)
+            || properties.States(StatesBulletColour))
+        {
+            return true;
+        }
+
+        if (properties.States(StatesBulletHardHeight)
+            && (properties.BulletFlags & BulletHardHeightFlag) != 0
+            && properties.States(StatesBulletHeight))
+        {
+            return true;
+        }
+
+        if (properties.States(StatesTextOffset) || ruler?.TextOffset(depth) is not null) return true;
+        if (properties.States(StatesBulletOffset) || ruler?.BulletOffset(depth) is not null) return true;
+
+        return extended is { Mask: not 0 };
+    }
+
     private static SlideMarker? Marker(
         PptParagraphRun properties,
         PptParagraphLevel level,
@@ -391,6 +512,8 @@ internal static class PptTextBody
         PptExtendedParagraphLevel masterExtended,
         PptBulletPictures? bulletPictures,
         ushort fontHeight,
+        ushort masterFontHeight,
+        bool ownNumbering,
         int depth,
         bool hasText,
         int[] counters,
@@ -408,8 +531,8 @@ internal static class PptTextBody
             && BulletPicture(
                    merged.BulletBlip,
                    bulletPictures,
-                   fontHeight,
-                   properties.States(StatesBulletHeight)
+                   ownNumbering ? fontHeight : masterFontHeight,
+                   ownNumbering && properties.States(StatesBulletHeight)
                        ? properties.BulletHeight
                        : level.BulletHeight) is { } bitmap)
         {
