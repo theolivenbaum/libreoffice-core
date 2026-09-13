@@ -143,6 +143,34 @@ resolves text far smaller than any document actually uses.** Legibility is there
 never the reason to crop, and "I could not read it" almost always means the image was built
 wrongly rather than that the page needed more pixels.
 
+## A thin rule cannot be judged from a full page — and a false *presence* is the dangerous half
+
+The section above says to confirm a reviewer's "it is absent" against the PDF's own operators
+before believing it. The mirror case is worse and cost a reading here: **a reviewer will report a
+thin mark as *present* when it is not there at all**, and that closes an investigation instead of
+opening one.
+
+Measured, on the same block, by two fresh readers of the same quality:
+
+| | mark | reading |
+|---|---|---|
+| full page, side by side, **117 dpi** (the budget's maximum for this page) | a 0.51 pt underline = **0.83 px** | *"the blue underline … is present in both"* — **it is in neither half of ours** |
+| **600 dpi** crop of that block | the same underline = **4.25 px** | *"nothing in the top half and one solid underline in the bottom half … roughly 4–5 px thick"* — exactly right, with the right candidate causes named |
+
+The arithmetic is the px-per-em rule applied to a rule rather than a glyph. About **3 px** is
+needed to call a hairline present or absent, so
+
+    dpi ≈ 216 / width_in_points
+
+and a full page is capped at 117–170 dpi by the 2000 px budget. **Any rule thinner than roughly
+1.3 pt is therefore unjudgeable from a full-page pair.** Crop the block, or do not put the
+question to a reviewer at all — a fluent "present in both" is indistinguishable from a real one.
+
+Note the 117 dpi reader *did* warn that "all hairlines are one pixel at this scale" and that a
+small missing mark "would need a crop at several times this resolution". A reviewer that states
+its own resolution limit is telling you its presence claims are void; read that sentence before
+the findings.
+
 ## What cropping *is* for: ink finer than a glyph
 
 Crop when the question is about geometry below the level of a letter:
