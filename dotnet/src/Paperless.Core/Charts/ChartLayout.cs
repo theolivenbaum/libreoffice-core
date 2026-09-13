@@ -1202,7 +1202,12 @@ public static partial class ChartLayout
         // and the scale and the rectangle are computed again if it came out lower.
         if (plot.HasAxes)
         {
-            int fitting = IntervalsThatFit(plot, area, columns, scale, measurer);
+            int fitting = IntervalsThatFit(
+                plot, area, columns, scale, measurer,
+                columns
+                    ? area.Width
+                    : MaximumPassWidth(
+                        plot, frame, area, scale, domain, categories, measurer));
             if (fitting < ChartScale.MaximumAutoIntervalCount)
             {
                 scale = ChartScale.Resolve(
@@ -1681,7 +1686,8 @@ public static partial class ChartLayout
         DocRect area,
         bool columns,
         ChartScaleResult scale,
-        ChartText measurer)
+        ChartText measurer,
+        Length capWidth)
     {
         // A stated interval is honoured whatever fits; only the automatic one is re-derived.
         if (plot.ValueScale.MajorUnit is { } stated && stated > 0.0)
@@ -1704,7 +1710,9 @@ public static partial class ChartLayout
         }
         else
         {
-            available = area.Width;
+            // NOT `area.Width` — see <see cref="MaximumPassWidth"/>. The numerator is the
+            // rectangle the *maximum-label* pass left, which is wider than the plot as drawn.
+            available = capWidth;
             needed = Length.Zero;
 
             // And only the first three ticks are measured, not all of them — see
@@ -1768,6 +1776,262 @@ public static partial class ChartLayout
     /// </remarks>
     private static IEnumerable<double> MeasuredTicks(ChartScaleResult scale)
         => scale.MajorTicks().Take(3);
+
+    /// <summary>
+    /// The text a data label's <c>[CATEGORY NAME]</c> field draws for one point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It is the <em>axis'</em> number format, not the source cell's.</strong>
+    /// <c>VSeriesPlotter::getCategoryName</c>
+    /// (<c>chart2/source/view/charttypes/VSeriesPlotter.cxx</c>:2213-2224) is
+    /// <c>m_pExplicitCategoriesProvider-&gt;getSimpleCategories()[n]</c> — the same strings the
+    /// category axis draws — and those are built by
+    /// <c>ExplicitCategoriesProvider::convertCategoryAnysToText</c>
+    /// (<c>chart2/source/tools/ExplicitCategoriesProvider.cxx</c>:186-227), which takes one
+    /// number format <em>before</em> the loop, from <c>getAxisByDimension2(0, 0)</c> through
+    /// <c>AxisHelper::getExplicitNumberFormatKeyForAxis</c>, and writes every numeric category
+    /// through it. A category that is already a string is passed straight out
+    /// (<c>aAny &gt;&gt;= aText</c>), which is what <see cref="ChartDataLabel.WriteCategory"/>
+    /// answers for one.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 with one-attribute variants of
+    /// <c>055_Project_timeline_with_milestones</c></strong>, whose thirteen milestone labels are
+    /// a <c>CELLRANGE</c> field and a <c>CATEGORYNAME</c> field over a <c>c:dateAx</c> stating
+    /// <c>[$-409]d\ mmm;@</c> while the source cells are <c>m/d/yyyy</c>. Changing the axis'
+    /// <c>formatCode</c> to <c>yyyy</c> draws them <c>2023</c>, to <c>mmmm</c> draws them
+    /// <c>April</c>, to <c>0.00</c> draws them <c>45021.00</c>; changing the <em>cells'</em>
+    /// format to either <c>yyyy</c> or <c>0.00</c> leaves the rendering byte-identical to the
+    /// control. <c>probes/chart-cap-r113</c> §3, <c>catname-055.py</c>.
+    /// </para>
+    /// <para>
+    /// <strong>And the axis' <c>sourceLinked</c> is not consulted for an axis at all.</strong>
+    /// <c>ObjectFormatter::convertNumberFormat</c>
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:1143-1147) sets
+    /// <c>LinkNumberFormatToSource</c> from <c>maFormatCode.isEmpty()</c> when the object is an
+    /// axis — under a comment saying the property *"does not really work, at least not for
+    /// axis"* — so a stated code always wins. The <c>sourceLinked="1"</c> variant of the same
+    /// probe is byte-identical to the control, which is that line measured.
+    /// </para>
+    /// </remarks>
+    private static string? CategoryTextAt(ChartPlot plot, int index)
+    {
+        if (index < 0) return null;
+
+        // A date axis' categories reach this tree as *text already formatted by the source cell*
+        // — an OOXML chart in a workbook resolves its `c:cat` range against the live sheet, so
+        // `Categories[n]` is `4/5/2023` and not the serial 45021, and there is nothing left for
+        // WriteCategory to reformat. The serials survive on the resolved axis, which is where
+        // the reference's own numbers come from too, so the field is written from those.
+        if (plot.DateAxis is { } date
+            && index < date.CategoryValues.Count
+            && date.CategoryValues[index] is { } serial)
+        {
+            return date.LabelOf(serial);
+        }
+
+        return index < plot.Categories.Count
+            ? ChartDataLabel.WriteCategory(plot.Categories[index], plot.CategoryFormat)
+            : null;
+    }
+
+    /// <summary>
+    /// The length a <em>horizontal</em> value axis' interval cap is taken against — which is not
+    /// the axis as drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>estimateMaximumAutoMainIncrementCount</c> divides <c>nTotalAvailable</c> by
+    /// <c>m_nMaximumTextWidthSoFar</c>, and <c>nTotalAvailable</c> is
+    /// <c>get2DAxisMainLine</c>'s length <em>at the moment the second <c>doAutoScaling</c>
+    /// runs</em> (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1559-1618,
+    /// <c>VCoordinateSystem.cxx</c>:415-417). <c>ChartView::impl_createDiagramAndContent</c>
+    /// (<c>chart2/source/view/main/ChartView.cxx</c>:556-604) puts that moment between two
+    /// resizes and not after them:
+    /// </para>
+    /// <list type="number">
+    /// <item><c>aVDiagram.reduceToMinimumSize()</c> — the inner rectangle becomes the available
+    /// one over 2.2 (<c>VDiagram.cxx</c>:635-651);</item>
+    /// <item><c>createMaximumAxesLabels()</c> — every axis lays out the <em>three</em> labels
+    /// <c>MaxLabelTickIter</c> picks, <c>m_bOverlapAllowed</c> forced true and
+    /// <c>m_bLineBreakAllowed</c> forced false (<c>VCartesianAxis.cxx</c>:1769-1809);</item>
+    /// <item><c>adjustInnerSize(aConsumedOuterRect)</c> — the inner rectangle grows back by
+    /// <c>available − consumed</c> in each dimension, floored at a third of the available one
+    /// (<c>VDiagram.cxx</c>:653-698);</item>
+    /// <item><strong>then</strong> the estimate.</item>
+    /// </list>
+    /// <para>
+    /// The <c>2.2</c> cancels: the consumed rectangle is the reduced diagram plus whatever its
+    /// labels hang outside it, so the rectangle the cap is taken against is the
+    /// <em>available</em> width less that overhang. On a bar chart the overhang on the near side
+    /// is the vertical category axis' own maximum labels, and on the far side it is nothing at
+    /// all — the value labels the maximum pass drew are <c>{0, 1, 2}</c>, which are at the near
+    /// end of the axis. So the numerator is <em>wider than the plot area as drawn</em>, and
+    /// wider than the reference's own drawn plot area.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2, on the axis at right angles to round 112's.</strong> On
+    /// <c>027_Simple_personal_cash_flow_statement</c>'s savings chart the five categories are
+    /// <c>Other 1</c>, <c>Other 2</c>, <c>Cash Reserves</c>, <c>Savings/Investment</c>,
+    /// <c>401(k)/Etc</c>; the longest is index 3, which is <c>nMaxIndex-1</c>, so
+    /// <c>MaxLabelTickIter</c> resets to zero and the set is <c>{0, 1, 2}</c> — widest
+    /// <c>Cash Reserves</c>, not <c>Savings/Investment</c>. Rewriting one category at a time in
+    /// the chart's own <c>c:strCache</c>:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>index 3 or index 4 eight characters wider — the value axis keeps
+    /// <c>$0 $2,000 … $14,000</c> exactly, while the drawn axis collapses from 115.67 pt to
+    /// <strong>75.10</strong>;</item>
+    /// <item>index 0, 1 or 2 eight characters wider — it coarsens to
+    /// <c>$0 $5,000 $10,000 $15,000</c>.</item>
+    /// </list>
+    /// <para>
+    /// A drawn axis a third shorter with the same interval is what rules the plot rectangle out.
+    /// The fine sweep pins the numerator: padding <c>Cash Reserves</c> with <c>l</c> (1.4225 pt
+    /// each at that document's drawn scale) holds seven intervals to three <c>l</c> and drops to
+    /// three at four, so <c>nTotalAvailable ∈ [129.7, 131.1) pt</c> against a 170.1 pt available
+    /// width, a 39.4 pt category band and a 115.7 pt drawn axis. The model above predicts 130.7.
+    /// <c>probes/chart-cap-r113</c> §1, <c>cat-set-027.py</c>, <c>cat.tsv</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The vertical branch is left alone, and that is measured too.</strong> On a column
+    /// chart the crossing axis is horizontal and its maximum labels <em>do</em> take the depth
+    /// they take when drawn, so the numerator and the drawn plot height differ by at most the
+    /// half label the top edge gives up. Four variants of one probe over a 120 pt frame —
+    /// category names of 2, 20, 40 and 60 characters, drawn axes of 96.61, 86.12, 60.36 and
+    /// 42.40 pt — give seven intervals, seven, three and three, which both readings fit.
+    /// <c>probes/chart-cap-r113</c> §2, <c>colcap.py</c>.
+    /// </para>
+    /// <para>
+    /// <strong>And a chart that states its own inner rectangle skips all of it.</strong>
+    /// <c>mbUseFixedInnerSize</c> guards <c>reduceToMinimumSize</c> and every
+    /// <c>adjustInnerSize</c> alike, and it is the diagram's <c>PosSizeExcludeAxes</c> — which
+    /// <c>c:layoutTarget val="inner"</c> and ODF's <c>chart:coordinate-region</c> both set. For
+    /// those the cap is taken against the stated rectangle, which is <c>area</c> itself.
+    /// </para>
+    /// </remarks>
+    private static Length MaximumPassWidth(
+        ChartPlot plot,
+        DocRect frame,
+        DocRect area,
+        ChartScaleResult scale,
+        ChartScaleResult? domain,
+        int categories,
+        ChartText measurer)
+    {
+        // mbUseFixedInnerSize — the stated rectangle IS the inner one, and nothing resizes it.
+        if (plot.PlotArea is not null || plot.PlotAreaFraction is not null) return area.Width;
+
+        DocRect outer = StatedOuterArea(plot, frame) ?? DiagramAreaOf(plot, frame, measurer);
+        if (outer.Width <= Length.Zero) return area.Width;
+
+        // A category axis whose line runs *inside* the plot hangs its labels inside it and
+        // overflows nothing, exactly as PlotAreaOf has it.
+        double along = CategoryLabelsAt(plot, scale);
+        bool inside = along > 0.0 && along < 1.0;
+
+        bool categoryLabels = plot.CategoryAxisVisible && plot.CategoryLabelsVisible && !inside;
+
+        Length band = Length.Zero;
+        if (plot.CategoryAxisVisible && !inside)
+        {
+            band = OuterTick(plot.CategoryTicks);
+            if (categoryLabels)
+            {
+                band += (domain is { } across
+                            ? WidestValueLabel(
+                                  across, plot.DomainFormat, plot.LabelSize, measurer,
+                                  plot.IsLabelBold)
+                            : WidestMaximumCategoryLabel(plot, categories, measurer))
+                        + LabelSpacing;
+            }
+        }
+
+        // The maximum pass' own first label is centred on the near corner and hangs half of
+        // itself past it; the labels after it are further along the axis and hang past nothing,
+        // which is why no room comes off the far end.
+        Length near = Length.Zero;
+        if (plot.ValueAxisVisible && plot.ValueLabelsVisible)
+        {
+            foreach (double tick in MeasuredTicks(scale))
+            {
+                near = measurer.Measure(
+                    ChartDataLabel.Write(tick, plot.ValueFormat), plot.LabelSize,
+                    plot.IsLabelBold).Width / 2;
+                break;
+            }
+        }
+
+        Length width = outer.Width - Length.Max(band, near);
+        Length floor = outer.Width / 3;
+        return width < floor ? floor : width;
+    }
+
+    /// <summary>
+    /// The widest of the category labels <c>createMaximumLabels</c> actually builds — at most
+    /// three of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MaxLabelTickIter</c>'s own arithmetic (<c>VCartesianAxis.cxx</c>:472-495): seed with
+    /// the index of the longest label, reset that to zero when it is the last or the
+    /// last-but-one, take the index before it when there is one, then add following indices
+    /// until three are held. <c>createMaximumLabelTickIterator</c> (<c>:672-690</c>) uses it for
+    /// a plain text axis and hands a <em>complex</em> category axis and a <em>date</em> axis
+    /// every label instead, which is why both fall through to
+    /// <see cref="WidestCategoryLabel"/> here.
+    /// </para>
+    /// <para>
+    /// <strong>"Longest" is a character count and not a width, and that is not a detail.</strong>
+    /// <c>VAxisBase::getIndexOfLongestLabel</c> (<c>chart2/source/view/axes/VAxisBase.cxx</c>
+    /// :195-212) compares <c>getLength()</c> under its own <c>//todo: get real text width
+    /// (without creating shape) instead of character count</c>, and the comparison is strictly
+    /// greater, so the <em>first</em> of two equally long labels wins. On
+    /// <c>026_Monthly_cash_flow_statement</c>'s expenses chart the two longest are
+    /// <c>Disability premiums</c> at index 12 and <c>Federal/SS/Medicare</c> at index 16 —
+    /// nineteen characters each, and the second is <c>nMaxIndex-1</c>. Choosing by width picks
+    /// index 16, which the reset then sends to <c>{0, 1, 2}</c> — <c>Other 1</c>,
+    /// <c>Other 2</c>, <c>Garbage</c> — and leaves the numerator 25 pt too large, which is
+    /// exactly one interval on that axis: eight where 26.2.4.2 draws four. Counting characters
+    /// picks index 12, holds <c>{11, 12, 13}</c>, and reproduces the reference.
+    /// </para>
+    /// </remarks>
+    private static Length WidestMaximumCategoryLabel(
+        ChartPlot plot, int categories, ChartText measurer)
+    {
+        if (plot.DateAxis is not null || plot.CategoryLevels is { Count: > 1 })
+            return WidestCategoryLabel(plot, categories, measurer);
+
+        int count = Math.Min(categories, plot.Categories.Count);
+        if (count <= 0) return Length.Zero;
+
+        var texts = new string?[count];
+        int longest = 0;
+
+        for (int at = 0; at < count; at++)
+        {
+            texts[at] = ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat);
+            if ((texts[at]?.Length ?? 0) > (texts[longest]?.Length ?? 0)) longest = at;
+        }
+
+        int last = count - 1;
+        if (longest >= last - 1) longest = 0;
+
+        int first = longest > 0 ? longest - 1 : longest;
+        int end = longest;
+        for (int held = longest > 0 ? 2 : 1; held < 3 && end < last; held++) end++;
+
+        Length widest = Length.Zero;
+        for (int at = first; at <= end; at++)
+        {
+            if (texts[at] is not { Length: > 0 } text) continue;
+            Length width = measurer.Measure(text, plot.LabelSize, plot.IsLabelBold).Width;
+            if (width > widest) widest = width;
+        }
+
+        return widest;
+    }
 
     /// <summary>
     /// The second half of the cap: how many intervals the axis may have before two neighbouring
@@ -3576,10 +3840,7 @@ public static partial class ChartLayout
             if (series.LabelAt(index) is not { Draws: true } label) continue;
 
             string? text = label.Compose(
-                index < plot.Categories.Count ? plot.Categories[index] : null,
-                series.Name,
-                value,
-                total);
+                CategoryTextAt(plot, index), series.Name, value, total);
 
             if (text is not { Length: > 0 }) continue;
 
@@ -3966,10 +4227,7 @@ public static partial class ChartLayout
                 double reach = label.Placement is ChartLabelPlacement.Outside ? 1.1 : 0.5;
 
                 string? text = label.Compose(
-                    at < plot.Categories.Count ? plot.Categories[at] : null,
-                    series.Name,
-                    value,
-                    total);
+                    CategoryTextAt(plot, at), series.Name, value, total);
 
                 if (text is { Length: > 0 })
                 {
@@ -4330,10 +4588,7 @@ public static partial class ChartLayout
         List<ChartLabel> labels)
     {
         string? text = label.Compose(
-            index < plot.Categories.Count ? plot.Categories[index] : null,
-            series.Name,
-            value,
-            series.Total());
+            CategoryTextAt(plot, index), series.Name, value, series.Total());
 
         if (text is not { Length: > 0 }) return;
 
