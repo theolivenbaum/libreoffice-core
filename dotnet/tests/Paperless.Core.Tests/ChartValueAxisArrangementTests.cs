@@ -150,16 +150,31 @@ public class ChartValueAxisArrangementTests
     /// A horizontal value axis whose labels collide is turned 45°, not left overlapping.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Measured on <c>026_Monthly_cash_flow_statement</c> page 7, whose first chart 26.2.4.2
     /// labels <c>$0 $20,000 … $100,000</c> at 45° — as 39 glyph-sized filled paths rather than
     /// as text, because a turned run inside an anisotropically squeezed chart is outlined — where
     /// this tree drew three upright labels.
+    /// </para>
+    /// <para>
+    /// <strong>This is the one test of the five that does not use <see cref="Frame"/>, and the
+    /// 380 is chosen rather than incidental.</strong> Round 117 corrected what a <em>turned</em>
+    /// value label reserves at the axis' far end — <c>h·sin/2</c> rather than
+    /// <c>(w·cos + h·sin)/2</c>, see <see cref="ChartTurnedValueLabelOverhangTests"/> — which
+    /// widens the plot rectangle that this test's own collision is then decided in, and 420 sat
+    /// within a few points of the threshold on this ruler. The rule under test is unchanged and
+    /// so is the assertion; what moved is whether the fixture still exercises it. Swept over
+    /// 300…460 pt, the axis turns at 360 and 380 under either reserve.
+    /// </para>
     /// </remarks>
     [Fact]
     public void AHorizontalValueAxisTurnsItsLabelsWhenTheyCollide()
     {
+        DocRect narrow =
+            new(Length.Zero, Length.Zero, Length.FromPoints(380), Length.FromPoints(200));
+
         ChartDrawing drawing = ChartLayout.Place(
-            Savings("\"$\"#,##0"), Frame(), new Ruler());
+            Savings("\"$\"#,##0"), narrow, new Ruler());
 
         ChartLabel[] money =
             [.. drawing.Labels.Where(label => !double.IsNaN(Number(label.Text)))];
