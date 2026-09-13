@@ -74,6 +74,28 @@ internal static class PptShapeGeometry
     /// </remarks>
     public const ushort TableRowProperties = 928;
 
+    /// <summary>
+    /// <c>mso_sptLine</c>, the only shape type the reference turns into a two-point
+    /// <c>SdrPathObj</c> and therefore the only one a table group counts as a rule.
+    /// </summary>
+    /// <remarks>
+    /// <c>SvxMSDffManager::ImportShape</c> (<c>filter/source/msfilter/msdffimp.cxx</c>:4403-4412)
+    /// builds an <c>SdrObjKind::Line</c> from the shape's own bound rectangle for this type and
+    /// this type alone, unless it is extruded; <c>IsLine</c> (<c>svdfppt.cxx</c>:7183) then asks
+    /// for exactly such an object with two points, and <c>CreateTable</c> sends every member that
+    /// answers yes to <c>ApplyCellLineAttributes</c> and every other member to a cell.
+    /// </remarks>
+    public const ushort LineShape = 20;
+
+    /// <summary>
+    /// <c>DFF_Prop_fc3DLightFace</c>'s boolean word; bit 3 is <c>f3D</c>, and an extruded line is
+    /// not imported as a line at all (<c>msdffimp.cxx</c>:4403).
+    /// </summary>
+    public const ushort ThreeDimensionalFlags = 703;
+
+    /// <summary>The <see cref="ThreeDimensionalFlags"/> bit that makes a shape extruded.</summary>
+    public const uint Extruded = 8;
+
     /// <summary>How lines are joined; the property's own default is a mitre.</summary>
     public const ushort LineJoin = 470;
 

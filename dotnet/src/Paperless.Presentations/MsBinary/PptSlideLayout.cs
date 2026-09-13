@@ -708,6 +708,12 @@ internal sealed class PptSlideLayout
         /// table. See <see cref="IsTableGroup"/>: a cell's text never autofits.
         /// </summary>
         public bool InTable { get; init; }
+
+        /// <summary>
+        /// The rows the reference re-derives for the table group the shape sits in, or null when
+        /// it sits in none or nothing moves. See <see cref="PptTableRows"/>.
+        /// </summary>
+        public PptTableRows? Rows { get; init; }
     }
 
     /// <summary>
@@ -832,13 +838,14 @@ internal sealed class PptSlideLayout
         {
             if (depth >= MaxGroupDepth) return;
 
+            AffineTransform inner = GroupSpace(shape, space);
+
             // A group the reference replaces by a table hands its members' text to cells, and a
-            // cell keeps none of the item set that would have autofitted it.
+            // cell keeps none of the item set that would have autofitted it. The rows are then
+            // re-derived from what those cells need, which the members' own anchors only bound.
             Context inside = context.InTable || !IsTableGroup(shape)
                 ? context
-                : context with { InTable = true };
-
-            AffineTransform inner = GroupSpace(shape, space);
+                : context with { InTable = true, Rows = TableRows(shape, context, inner) };
             foreach (EscherShape child in shape.Children)
             {
                 Add(child, inside, inner, shapes, depth + 1);
@@ -947,6 +954,10 @@ internal sealed class PptSlideLayout
         DocRect local = new(
             Units(anchor.Left), Units(anchor.Top), Units(anchor.Width), Units(anchor.Height));
 
+        // A table member is drawn where the table's own layout puts it, not where the group's
+        // rectangle sat: the reference discards the group and lays the cells out again.
+        if (context.Rows is { } rows) local = rows.Remap(local);
+
         if (local.Width <= Length.Zero && local.Height <= Length.Zero) return null;
 
         double rotation = Rotation(shape);
@@ -1019,7 +1030,7 @@ internal sealed class PptSlideLayout
             ShadedParts = painted.ShadedParts,
             Bounds = bounds,
             Fill = Fill(shape, context.Scheme, local, placement),
-            Line = Line(shape, context.Scheme),
+            Line = Line(shape, context.Scheme, context.InTable),
             Picture = Picture(shape, bounds),
             Text = Text(text, local, preset, adjustment, placement),
             Shadow = Shadow(shape, context.Scheme),
@@ -1265,7 +1276,7 @@ internal sealed class PptSlideLayout
     /// The width defaults to 9525 EMUs — three quarters of a point — which is what the drawing
     /// layer draws for a shape that states a line and no thickness (<c>msdffimp.cxx:916</c>).
     /// </remarks>
-    private static Stroke? Line(EscherShape shape, PptColourScheme scheme)
+    private static Stroke? Line(EscherShape shape, PptColourScheme scheme, bool inTable = false)
     {
         bool lined = shape.Properties.StatesBoolean(EscherPropertyIds.Lined)
             ? shape.Properties.Boolean(EscherPropertyIds.Lined)
@@ -1280,11 +1291,84 @@ internal sealed class PptSlideLayout
             return null;
         }
 
+        uint stated = shape.Properties.Value(EscherPropertyIds.LineWidth, 9525);
+
         return new Stroke(
             Paint.Solid(colour),
-            Length.FromEmu(shape.Properties.Value(EscherPropertyIds.LineWidth, 9525)),
+            inTable && IsTableRule(shape)
+                ? TableBorderWidth(stated)
+                : Length.FromEmu(stated),
             Cap(shape.Properties.Value(PptShapeGeometry.LineEndCap, 0)),
             Join(shape.Properties.Value(PptShapeGeometry.LineJoin, PptShapeGeometry.MiterJoin)));
+    }
+
+    /// <summary>
+    /// Whether a member of a table group is one of the group's rules rather than one of its
+    /// cells — the reference's <c>IsLine</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>IsLine</c> (<c>svdfppt.cxx</c>:7183) asks for an <c>SdrPathObj</c> that is a line with
+    /// two points, and the only shape <c>SvxMSDffManager::ImportShape</c> builds one of is an
+    /// unextruded <c>mso_sptLine</c> (<c>msdffimp.cxx</c>:4403-4412). Measured over the corpus's
+    /// 51 <c>.ppt</c>, every one of the 1089 members of the 34 table groups is either that or a
+    /// rectangle-kind cell.
+    /// </remarks>
+    private static bool IsTableRule(EscherShape shape)
+        => shape.ShapeType == PptShapeGeometry.LineShape
+           && (shape.Properties.Value(PptShapeGeometry.ThreeDimensionalFlags, 0)
+               & PptShapeGeometry.Extruded) == 0;
+
+    /// <summary>
+    /// The width the reference finally strokes a <c>.ppt</c> table's rule at, from the EMUs the
+    /// file states.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Not the stated width, and on the corpus's own numbers it is well under half of
+    /// it.</strong> A rule inside a table group never reaches the page as a line: the reference
+    /// turns it into the neighbouring cells' <c>BorderLine2</c> and draws it from there, and the
+    /// value is mangled twice on the way.
+    /// </para>
+    /// <list type="number">
+    /// <item><description>
+    /// <c>SvxMSDffManager::ScaleEmu</c> (<c>msdffimp.cxx</c>:3193, applied at :1048) divides the
+    /// EMUs by 360 into hundredths of a millimetre, <em>truncating</em>: one point, 12700 EMU, is
+    /// 35 and not 35.28.
+    /// </description></item>
+    /// <item><description>
+    /// <c>ApplyCellLineAttributes</c> (<c>svdfppt.cxx</c>:7513-7531) sets
+    /// <c>LineWidth = max(1, XATTR_LINEWIDTH / 4)</c> — integer again, so 35 becomes 8 and the 79
+    /// of a 2.25 pt rule becomes 19.
+    /// </description></item>
+    /// <item><description>
+    /// <c>impGetLineStyle</c> (<c>svx/source/table/viewcontactoftableobj.cxx</c>:183-184) hands
+    /// that number to <c>svx::frame::Style</c> scaled by
+    /// <c>o3tl::convert(1.0, twip, mm100)</c> — it reads the hundredths of a millimetre as
+    /// <b>twips</b>. One unit is therefore drawn as 1/20 pt.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// The whole chain is <c>max(1, floor(emu / 360) / 4) / 20</c> points, and it is measured at
+    /// both ends: <c>Thailand17.ppt</c> page 11's group states 12700 and 28575 EMU, 26.2.4.2's own
+    /// flat ODP of the deck states the cells' borders as <c>0.23pt</c> and <c>0.54pt</c> — 8 and
+    /// 19 hundredths of a millimetre — and its PDF strokes them at <b>0.40 pt and 0.9499 pt</b>,
+    /// which is 8/20 and 19/20 exactly. Reproduced rather than corrected, because the reference is
+    /// what a comparison is against; the truncation at two of the three steps is why a 1 pt rule
+    /// loses 60 % and a 2.25 pt rule 58 %.
+    /// </para>
+    /// <para>
+    /// The <c>.pptx</c> path has its own version of the same ending —
+    /// <c>DrawingTableGeometry.BorderWidth</c> — which rounds where this truncates and halves
+    /// where this quarters, because <c>oox</c> and <c>msfilter</c> write the
+    /// <c>BorderLine2</c> differently. They are deliberately not one function.
+    /// </para>
+    /// </remarks>
+    internal static Length TableBorderWidth(uint emu)
+    {
+        long hundredthsOfMillimetre = emu / 360;
+        long quarter = Math.Max(1, hundredthsOfMillimetre / 4);
+
+        return Length.FromEmu(quarter * Length.EmuPerTwip);
     }
 
     private static LineCap Cap(uint cap) => cap switch
@@ -1803,10 +1887,11 @@ internal sealed class PptSlideLayout
     /// </para>
     /// <para>
     /// This tree still draws the group as the rectangles it literally is — which is what the
-    /// reference's table decomposes back into — so the only consequence read here is the one that
-    /// moves the page: a cell's text is not autofitted. Its row heights are the members' own
-    /// anchors rather than the grid <c>CreateTableRows</c> derives, which is a separate and
-    /// smaller difference; see <c>probes/slides-bullet2-r112/results.md</c>.
+    /// reference's table decomposes back into — and takes three consequences of the substitution:
+    /// a cell's text is not autofitted, its row heights come from <see cref="PptTableRows"/>
+    /// rather than from the members' own anchors, and a rule is drawn at
+    /// <see cref="TableBorderWidth"/> rather than at the width the file states. See
+    /// <c>probes/slides-bullet2-r112/results.md</c> and <c>probes/slide-table-r113/results.md</c>.
     /// </para>
     /// <para>
     /// Censused over the 51 <c>.ppt</c> of the corpus
@@ -1818,6 +1903,137 @@ internal sealed class PptSlideLayout
     internal static bool IsTableGroup(EscherShape group)
         => (group.TertiaryProperties.Value(PptShapeGeometry.TableProperties, 0) & 3) != 0
            && !group.TertiaryProperties.Data(PptShapeGeometry.TableRowProperties).IsEmpty;
+
+    /// <summary>
+    /// The rows a table group's members are re-laid onto, or null when nothing moves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CreateTable</c> (<c>svdfppt.cxx</c>:7569) seeds the table's rows from the non-line
+    /// members' snap-rect tops and measures the last one to the group's own bottom
+    /// (<c>CreateTableRows</c>, :7339), and <c>TableLayouter::LayoutTableHeight</c>
+    /// (<c>svx/source/table/tablelayouter.cxx</c>:724) then raises each to
+    /// <c>max(stated, minimum)</c> before <see cref="PptTableRows"/>'s own remark takes over. The
+    /// minimum is the tallest single-row cell's <c>Cell::getMinimumHeight</c>
+    /// (<c>svx/source/table/cell.cxx</c>:686): its text laid out at the cell's width less the two
+    /// horizontal distances, plus one hundredth of a millimetre, plus the two vertical distances.
+    /// A cell spanning rows is deferred to its last row.
+    /// </para>
+    /// <para>
+    /// <strong>A row none of whose cells can be measured keeps what the file states.</strong> The
+    /// reference measures an empty cell as one empty paragraph of the draw outliner's own font,
+    /// which is not in the file and cannot be recovered from it; a zero would be worse than the
+    /// stated height in both directions, because the second layout can shrink a row as well as
+    /// grow it and would collapse such a row outright. Measured: it is the last row of
+    /// <c>joint_user_outcomes_michael_fullerton_29.06.12.ppt</c> page 15, where the guard leaves
+    /// 19.25 pt against the reference's 19.42 and dropping it leaves nothing at all.
+    /// </para>
+    /// <para>
+    /// The arithmetic is done in the group's own child space, which is what a member's anchor is
+    /// stated in; a minimum is measured on the page and divided back by the group's own scale,
+    /// because the text is laid out at the size it is drawn at.
+    /// </para>
+    /// </remarks>
+    private PptTableRows? TableRows(EscherShape group, Context context, AffineTransform inner)
+    {
+        if (inner.A <= 0 || inner.D <= 0) return null;
+
+        Context cells = context with { InTable = true };
+        List<(EscherShape Shape, long Top, long Bottom, long Width)> members = [];
+        long groupTop = long.MaxValue;
+        long groupBottom = long.MinValue;
+        SortedSet<long> tops = [];
+
+        foreach (EscherShape child in group.Children)
+        {
+            if (AnchorOf(child) is not { } a) continue;
+
+            long top = Units(a.Top).Emu;
+            long bottom = top + Units(a.Height).Emu;
+            groupTop = Math.Min(groupTop, top);
+            groupBottom = Math.Max(groupBottom, bottom);
+
+            if (IsTableRule(child)) continue;
+
+            // A member narrower or shorter than one unit is not a cell (`GetCellPosition`,
+            // `svdfppt.cxx`:7193) but it does seed a row, exactly as it does there.
+            tops.Add(top);
+            if (a.Width > 1 && a.Height > 1)
+            {
+                members.Add((child, top, bottom, Units(a.Width).Emu));
+            }
+        }
+
+        if (tops.Count == 0 || groupBottom <= tops.Min) return null;
+
+        long[] edges = [.. tops, groupBottom];
+        long[] minimums = new long[edges.Length - 1];
+        bool[] measured = new bool[minimums.Length];
+        List<(int Last, int First, long Minimum)> spanning = [];
+
+        foreach ((EscherShape shape, long top, long bottom, long width) in members)
+        {
+            int first = Array.BinarySearch(edges, top);
+            if (first < 0 || first >= minimums.Length) continue;
+
+            int last = first;
+            while (last + 1 < minimums.Length && edges[last + 1] < bottom) last++;
+
+            if (Minimum(shape, width) is not { } minimum) continue;
+
+            if (last > first)
+            {
+                spanning.Add((last, first, minimum));
+            }
+            else
+            {
+                minimums[first] = Math.Max(minimums[first], minimum);
+                measured[first] = true;
+            }
+        }
+
+        // A row none of whose cells could be measured keeps what the file states, and is
+        // therefore neither grown nor shrunk. See the remark above: the reference measures an
+        // empty cell as one empty paragraph of the draw outliner's own font, which is not in the
+        // file, and a zero here would let `distribute` collapse the row outright.
+        for (int row = 0; row < minimums.Length; row++)
+        {
+            if (!measured[row]) minimums[row] = edges[row + 1] - edges[row];
+        }
+
+        // A row-spanning cell only ever grows its last row, and the rows it covers are subtracted
+        // from what it needs -- except when the span starts at row zero, where the reference's own
+        // loop guard skips the subtraction outright (`tablelayouter.cxx`:830).
+        foreach ((int last, int first, long minimum) in spanning)
+        {
+            long remaining = minimum;
+            for (int row = Math.Max(first, 1); row < last; row++)
+            {
+                remaining -= Math.Max(edges[row + 1] - edges[row], minimums[row]);
+            }
+
+            minimums[last] = Math.Max(minimums[last], remaining);
+        }
+
+        return PptTableRows.Of(edges, groupTop, groupBottom, minimums);
+
+        long? Minimum(EscherShape shape, long width)
+        {
+            if (TextIn(shape, cells) is not { } text) return null;
+            if (text.Flow != VerticalText.None) return null;
+
+            Margins insets = Insets(shape);
+            Length textWidth = Length.FromEmu(
+                (long)(width * inner.A) - insets.Left.Emu - insets.Right.Emu);
+
+            if (textWidth <= Length.Zero) return null;
+
+            Length height = SlideTextLayout.Height(text.Body, textWidth, _fonts);
+            long onPage = height.Emu + Length.EmuPerMm100 + insets.Top.Emu + insets.Bottom.Emu;
+
+            return (long)(onPage / inner.D);
+        }
+    }
 
     /// <summary>
     /// A shape's text, whether it holds the characters itself or refers to the slide list.
