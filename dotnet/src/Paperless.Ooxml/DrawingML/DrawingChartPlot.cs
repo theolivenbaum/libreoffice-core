@@ -71,8 +71,12 @@ public static class DrawingChartPlot
     /// </remarks>
     private static readonly Colour AutomaticChartAreaLine = Colour.FromRgb(0xD9D9D9);
 
-    /// <summary>0.75 pt — <c>getDefaultChartAreaLineWidth()</c>'s 9525 EMU.</summary>
-    private static readonly Length AutomaticChartAreaLineWidth = Length.FromEmu(9525);
+    /// <summary>
+    /// <c>getDefaultChartAreaLineWidth()</c>'s 9525 EMU, as the reference keeps it — 26 hundredths
+    /// of a millimetre, 0.73701 pt, and not the 0.75 the EMU spells.
+    /// </summary>
+    private static readonly Length AutomaticChartAreaLineWidth =
+        DrawingChartAutoFormat.LineWidth(9525);
 
     /// <summary>How many <c>c:pt</c> a cache is trusted to declare.</summary>
     /// <remarks>The same ceiling <see cref="DrawingChart"/> applies, for the same reason.</remarks>
@@ -1365,7 +1369,7 @@ public static class DrawingChartPlot
                 numbers,
                 SuppressesFill(properties) ? null : FillOf(properties, theme) ?? autoFill,
                 SuppressesLine(properties) ? null : LineOf(properties, theme) ?? autoLine,
-                StatedLineWidth(properties) ?? AutoLineWidth(automatic, frame, theme, seriesIndex),
+                SeriesLineWidth(element, properties, automatic, frame, theme, seriesIndex),
                 PointFills(
                     element,
                     numbers.Length,
@@ -2208,9 +2212,125 @@ public static class DrawingChartPlot
             _ => LineCap.Butt,
         };
 
+    /// <summary>
+    /// How wide a series' own line is drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three cases, and the middle one is the one that is easy to miss. A series stating
+    /// <c>a:ln/@w</c> takes that width. A series stating <strong>no <c>a:ln</c> at all</strong>
+    /// takes the automatic entry — the theme's subtle line times the chart style's
+    /// <c>mnRelLineWidth</c>, which is 300 % at style 1 and 500 % at style 18. And a series that
+    /// states an <c>a:ln</c> <em>without</em> a <c>w</c> takes neither: it is drawn at a flat
+    /// <see cref="SeriesLineDefault"/>.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 on one fixture varied one attribute at a time, read back through its
+    /// own <c>--convert-to ods</c> so the number is the reference's resolved model rather than a
+    /// rasterised guess (<c>probes/stroke-resid-r117/results.md</c> §4.4):
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     no <c>c:spPr</c>, theme 9525, <c>c:style val="1"</c> → <c>svg:stroke-width="0.079cm"</c>
+    ///     = 9525 × 300 % as a whole 1/100 mm.
+    ///   </description></item>
+    ///   <item><description>
+    ///     no <c>c:spPr</c>, theme 9525, <c>c:style val="18"</c> → <c>0.132cm</c> = 9525 × 500 %.
+    ///     Wrapping the style in the <c>mc:AlternateContent</c> that pairs
+    ///     <c>c14:style val="118"</c> with a <c>c:style val="18"</c> fallback changes nothing,
+    ///     which is the fallback winning as <see cref="DrawingChartAutoFormat.StyleOf"/> says.
+    ///   </description></item>
+    ///   <item><description>
+    ///     the same chart with <c>&lt;c:spPr&gt;&lt;a:ln&gt;&lt;a:solidFill/&gt;&lt;/a:ln&gt;</c>
+    ///     and no <c>w</c> → <c>0.035cm</c>, and <strong>raising the theme's subtle line to 38100
+    ///     moves every gridline from 0.026 to 0.106 cm and leaves the series at 0.035</strong>. So
+    ///     it is a constant and not a scaled theme width.
+    ///   </description></item>
+    ///   <item><description>
+    ///     and it is not a property of the series being drawn as a line: a <em>bar</em> series and
+    ///     a <em>pie</em> series stating the same <c>a:ln</c> at the same style are both
+    ///     <c>0.035cm</c> too, even though <c>spFilledSeriesLines</c> is
+    ///     <c>AUTOFORMAT_INVISIBLE</c> over styles 17-32 and so gives them no automatic width at
+    ///     all to replace.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// A <c>c:dPt</c> is the exception and <see cref="PointsStateTheirOwnLine"/> carries it.
+    /// </para>
+    /// <para>
+    /// Reading it the other way — applying the relative multiplier to a series that states an
+    /// <c>a:ln</c> — draws <c>064_Small_business_cash_flow</c>'s alert line at 3.74 pt against the
+    /// reference's 0.99, which is what this rule was found by.
+    /// </para>
+    /// <para>
+    /// <strong>Where 35 hundredths of a millimetre comes from is not established.</strong> It is
+    /// chart2's own answer once the OOXML importer has set no width, and it could not be located
+    /// in the 27.2 tree; the measurements above are what this rests on.
+    /// </para>
+    /// </remarks>
+    /// <param name="element">The <c>c:ser</c>, for its <c>c:dPt</c> children.</param>
+    /// <param name="properties">The series' <c>c:spPr</c>.</param>
+    /// <param name="automatic">The chart-space automatic-format context.</param>
+    /// <param name="frame">Whether the series is drawn as a line or as an area.</param>
+    /// <param name="theme">The theme, for the automatic entry.</param>
+    /// <param name="seriesIndex">The series' <c>c:idx</c>.</param>
+    private static Length SeriesLineWidth(
+        XElement element,
+        XElement? properties,
+        ChartAutoContext automatic,
+        ChartAutoObject frame,
+        DrawingTheme? theme,
+        int seriesIndex)
+    {
+        if (StatedLineWidth(properties) is { } stated) return stated;
+
+        if (Drawing.Child(properties, "ln") is null)
+        {
+            return AutoLineWidth(automatic, frame, theme, seriesIndex);
+        }
+
+        return PointsStateTheirOwnLine(element) ? Length.Zero : SeriesLineDefault;
+    }
+
+    /// <summary>
+    /// Whether every mark this series draws takes its outline from a <c>c:dPt</c> rather than from
+    /// the series.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>c:dPt</c>'s own <c>a:ln</c> is resolved per point, and a point's answer is <em>not</em>
+    /// the series' — measured on the pie fixture with one <c>c:dPt</c> added, whose <c>a:ln</c>
+    /// states a colour and no <c>w</c>: 26.2.4.2 strokes that one wedge at <c>0 w</c> and the other
+    /// three, which take the series' identical <c>a:ln</c>, at 0.99036. So a stated <c>a:ln</c> with
+    /// no width is <see cref="SeriesLineDefault"/> on a series and a hairline on a point.
+    /// </para>
+    /// <para>
+    /// <strong>This model has no per-point line width</strong> — <c>ChartSeries.PointFills</c> has
+    /// no companion — so every mark takes the series' one. This asks whether any point states an
+    /// <c>a:ln</c> of its own and, when one does, gives the whole series the point's answer. That is
+    /// exact for a series where <em>every</em> point states one, which is the shape that occurs:
+    /// <c>bitesize-writing-a-report.pptx</c>'s pie carries ten of them and 26.2.4.2 strokes all
+    /// twenty of its wedge outlines at <c>0 w</c>. It is wrong for a series where only some points
+    /// state one, and the proper fix is a per-point width in the model rather than this.
+    /// </para>
+    /// </remarks>
+    /// <param name="element">The <c>c:ser</c>.</param>
+    private static bool PointsStateTheirOwnLine(XElement element)
+    {
+        foreach (XElement point in Children(element, "dPt"))
+        {
+            if (Drawing.Child(Child(point, "spPr"), "ln") is not null) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>35 hundredths of a millimetre — see <see cref="SeriesLineWidth"/>.</summary>
+    private static readonly Length SeriesLineDefault = Length.FromMm100(35);
+
     private static Length? StatedLineWidth(XElement? properties)
         => Drawing.Number(Drawing.Child(properties, "ln"), "w") is { } emu
-            ? Length.FromEmu(Math.Max(emu, 0))
+            ? DrawingChartAutoFormat.LineWidth(Math.Max(emu, 0))
             : null;
 
     /// <summary>
@@ -2237,7 +2357,7 @@ public static class DrawingChartPlot
         if (Drawing.Number(line, "w") is not { } emu || emu <= 0) return Length.Zero;
 
         _ = theme;
-        return Length.FromEmu(emu * relative / 100);
+        return DrawingChartAutoFormat.LineWidth(emu * relative / 100);
     }
 
     /// <summary>A shape property bag's solid fill, or null when it has none.</summary>
@@ -2433,7 +2553,7 @@ public static class DrawingChartPlot
     {
         XElement? line = Drawing.Child(properties, "ln");
         return Drawing.Number(line, "w") is { } emu && emu > 0
-            ? Length.FromEmu(emu)
+            ? DrawingChartAutoFormat.LineWidth(emu)
             : Length.Zero;
     }
 

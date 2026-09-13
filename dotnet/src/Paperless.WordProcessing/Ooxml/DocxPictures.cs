@@ -352,7 +352,9 @@ public sealed class DocxPictures
         return new DocxChart(
             // `automaticChartAreaLine`: the exception in objectformatter.cxx:838-848 is Impress's
             // alone, so a Writer chart with no `a:ln` of its own carries the grey default border.
-            DrawingChartPlot.Read(chartSpace, _file.Theme, _file.IsOffice2007,
+            // `styles`: the theme's `a:lnStyleLst`, which is where an automatic axis line or
+            // gridline gets its width. Without it every one of them was drawn at width zero.
+            DrawingChartPlot.Read(chartSpace, _file.Theme, _file.IsOffice2007, _file.ShapeStyles,
                                   automaticChartAreaLine: true),
             LabelFamily(chartSpace));
     }

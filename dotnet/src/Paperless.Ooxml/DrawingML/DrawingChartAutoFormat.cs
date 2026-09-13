@@ -485,8 +485,39 @@ public static class DrawingChartAutoFormat
         if (styles?.LineStyle(SubtleStyleIndex) is not { } line) return Length.Zero;
         if (Drawing.Number(line, "w") is not { } emu || emu <= 0) return Length.Zero;
 
-        return Length.FromEmu(emu * relative / 100);
+        return LineWidth(emu * relative / 100);
     }
+
+    /// <summary>
+    /// A DrawingML line width, in the unit the reference actually keeps it in: a whole hundredth
+    /// of a millimetre.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>LineProperties::getLineWidth</c> is <c>convertEmuToHmm(moLineWidth)</c>
+    /// (<c>oox/source/drawingml/lineproperties.cxx</c>:560-563), and <c>convertEmuToHmm</c> is
+    /// <c>o3tl::convertNarrowing&lt;sal_Int32, emu, mm100&gt;</c> whose <c>MulDiv</c> is
+    /// <c>(n + 180) / 360</c> for a positive value — an integer, rounded half up
+    /// (<c>include/oox/drawingml/drawingmltypes.hxx</c>:186-190,
+    /// <c>include/o3tl/unit_conversion.hxx</c>:72-78). So the reference never holds a width of
+    /// 0.75 pt: 9525 EMU is 26.458 hundredths of a millimetre and it keeps 26, which is
+    /// 0.73701 pt.
+    /// </para>
+    /// <para>
+    /// Confirmed against 26.2.4.2's own output rather than only in source. Its
+    /// <c>--convert-to ods</c> of the corpus writes every chart's <c>svg:stroke-width</c> as a
+    /// whole hundredth of a millimetre — <c>0.009cm</c>, <c>0.026cm</c>, <c>0.035cm</c>,
+    /// <c>0.044cm</c>, <c>0.071cm</c>, <c>0.079cm</c>, <c>0.088cm</c>, <c>0.106cm</c> on
+    /// <c>008_Contextures_chart_sample</c>, <c>018_Weight_Loss_Chart</c> and
+    /// <c>022_Pareto_Chart_Template</c> — and its PDF of the same three strokes them at
+    /// 0.2551, 0.9921, 1.2472, 2.0124, 2.4943 and 3.0045 pt, which are those integers times
+    /// 0.0283465 pt to four decimal places. The corresponding stated widths are 0.25, 1, 1.25, 2,
+    /// 2.5 and 3 pt, none of which the reference draws.
+    /// </para>
+    /// </remarks>
+    /// <param name="emu">The stated width in EMU.</param>
+    public static Length LineWidth(long emu)
+        => emu <= 0 ? Length.Zero : Length.FromMm100(Length.FromEmu(emu).Mm100);
 
     /// <summary>
     /// How wide a line series' automatic stroke is, as a percentage of the theme's subtle line.
