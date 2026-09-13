@@ -750,10 +750,21 @@ public sealed class SlideFonts
     /// Roman in the same collection.
     /// </para>
     /// <para>
-    /// The pitch and not the family class, deliberately. The family bits are in the same byte and
-    /// the word processor's equivalent leaves them alone for the same reason — declaring a family
-    /// class changes the answer for every name in the deck and has never been measured on a slide,
-    /// where a declared *pitch* has now been measured twice.
+    /// The pitch and not the family class, deliberately — and that abstention has now been
+    /// measured on a slide twice, in both formats, and endorsed. Reading the family bits would
+    /// send the whole class to fontconfig as a second generic family, which is what 26.2.4.2 does
+    /// when it <em>measures</em> and not when it <em>draws</em>: on the draw layer
+    /// <c>FontAttribute</c> has no class field, so the reference lays a run out in one face and
+    /// paints it in another (the seventh confound, <c>probes/title-font-r92</c> for the
+    /// <c>.pptx</c> half and <c>probes/ppt-spacing-r115</c> for the <c>.ppt</c> half). Leaving the
+    /// nibble unread puts this tree on the face 26.2.4.2 itself draws, at that face's own
+    /// advances; reading it would put us on the other, equally self-inconsistent, branch. Measured
+    /// on <c>architecture6.ppt</c>, whose two <c>FontEntityAtom</c>s state <c>Helvetica</c> at
+    /// <c>0x22</c>: clearing that one byte and changing nothing else takes 26.2.4.2's own output
+    /// from 268 differing text runs to 52 and its worst run-origin shift against ours from
+    /// 322.07 pt to 1.60 over 31 pages. The words and sheets paths do pass a declared class, and
+    /// are right to — Writer body text never becomes a drawinglayer primitive, so there the
+    /// reference measures and draws in the same face.
     /// </para>
     /// </remarks>
     /// <remarks>

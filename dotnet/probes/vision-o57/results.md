@@ -1,3 +1,13 @@
+> **Answered by round 115 — the width is INVENTED, and this file's last section is the one that
+> mattered.** 26.2.4.2 lays this deck's 14 pt table text out at DejaVu Sans' advances while drawing
+> Liberation Sans' glyphs: the seventh confound (`L1`) reaching the binary format through
+> `lfPitchAndFamily = 0x22`. A `.ppt` cannot state character spacing at all — the reference's own
+> reader has no field for one. Two one-attribute variants of the deck collapse 26.2.4.2 onto this
+> tree to 0.042–0.069 pt. See `probes/ppt-spacing-r115`. **Two numbers below are wrong and are
+> corrected there**: the 24 pt heading row compares 39 characters against 40 and the heading is not
+> affected at all, and the justified-measure figures are origin-to-origin with a different final
+> glyph on each side (like for like it is 3.3 pt, not 7.1).
+
 # O57 is not a line-breaking bug — the reference draws the same string wider
 
 Round 113 seated O57 as *"26.2.4.2 fits 22 lines into a `.ppt` table cell where this tree fits 19,

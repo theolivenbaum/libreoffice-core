@@ -1961,6 +1961,28 @@ Round 90 filed exactly that as a letter-spacing defect before correcting it.
 primitive, which is why the 24-of-24 agreement in the next section stands. `probes/title-font-r92/`
 has the census, fourteen one-attribute variants, and why no code changed.
 
+***And it reaches the LEGACY BINARIES, which that census could not see — a `.ppt` states the same
+class in the top nibble of `lfPitchAndFamily`.*** `ReadPptFontEntityAtom`
+(`filter/source/msfilter/svdfppt.cxx`:410-435) maps `FF_ROMAN`/`FF_SWISS` to
+`FAMILY_ROMAN`/`FAMILY_SWISS`, `:2186` puts it on the `vcl::Font`, and from there it is the same
+`FontConfigManager::Substitute`. The 101-of-803 figure is a **zip** census, so the whole
+`.ppt`/`.doc`/`.xls` track was invisible to it — the same trap this file already records for
+charts. Measured rather than censused, by rendering all **51** legacy PPT-family corpus documents
+twice with 26.2.4.2, as authored and with every `FontEntityAtom`'s family nibble cleared and
+nothing else changed: **20 of 51 state** a splitting class-ful family, and **3 of 51 have it reach
+drawn text** — `architecture6.ppt`, `RRM-training-syllabus-…` (O15's own witness, which the
+instrument rediscovered without being told) and `pres_ioc_phuket.ppt`, which is new. The other 48
+do not move by a thousandth, three of them from a *high* `TJ` level that is justification and
+kerning — which is why the discriminator has to be run as a **difference** and never as a level.
+
+***And a `.ppt` cannot state character spacing, so do not go looking for a record.***
+`PPTStyleTextPropReader::ReadCharProps` (`svdfppt.cxx`:5096-5185) reads the whole of a
+`TextCFException` and there is no tracking field in it and no `PPT_CharAttr_*` constant for one
+(`include/filter/msfilter/svdfppt.hxx`:1416-1428). O57 stood for three rounds as *"the reference
+draws the same string 3.3 % wider"* and then as a possible spacing record; it is this confound, and
+it is worth 268 → **52** run differences and 322.07 → **1.60 pt** worst origin shift over
+`architecture6.ppt`'s 31 pages when one byte of the file removes it. `probes/ppt-spacing-r115`.
+
 ### The two references differ in a *rule*, not only in their fonts, and it decides font fallback
 
 **24.2.7.2 lets the family name decide; 26.2.4.2 lets a declared family class beat it.**
