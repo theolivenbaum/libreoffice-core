@@ -292,6 +292,15 @@ result was reverted with `git checkout --`, and this round's fifteen rows were *
 in the file's own format instead. Whatever is wrong with the generator, running it costs the index
 half its content and looks like a routine refresh.
 
+## A second, smaller instrument note
+
+`OPEN-ISSUES.md` is a markdown table and **ten of its rows contained an unescaped `|` inside a code
+span**, which splits the row into five or seven cells and drops everything after the first pipe from
+every renderer. Nine are `|ink|%` and `|glyph distance|` in other seats' rows and are left alone —
+a parallel round is editing this file — but the O57 row written here escapes its `\|TJ\|`, and so
+should the next one. `python3 -c "import re;[print(i+1) for i,l in enumerate(open('dotnet/probes/OPEN-ISSUES.md')) if re.match(r'^\| [A-Z]',l) and len(re.split(r'(?<!\\)\|',l))-2!=3]"`
+lists them.
+
 ## Files
 
 | file | what |
