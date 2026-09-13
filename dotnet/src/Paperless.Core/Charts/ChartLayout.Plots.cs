@@ -750,10 +750,8 @@ public static partial class ChartLayout
 
                 if (series.LabelAt(at) is { Draws: true } label
                     && label.Compose(
-                        at < plot.Categories.Count ? plot.Categories[at] : null,
-                        series.Name,
-                        Value(at),
-                        total) is { Length: > 0 } text)
+                        CategoryTextAt(plot, at), series.Name, Value(at), total)
+                        is { Length: > 0 } text)
                 {
                     labels.Add(new ChartLabel(
                         text,
@@ -801,10 +799,7 @@ public static partial class ChartLayout
         if (series.Values[index] is not { } value || !double.IsFinite(value)) return;
 
         string? text = label.Compose(
-            index < plot.Categories.Count ? plot.Categories[index] : null,
-            series.Name,
-            value,
-            total);
+            CategoryTextAt(plot, index), series.Name, value, total);
 
         if (text is not { Length: > 0 }) return;
 

@@ -157,10 +157,7 @@ public static partial class ChartLayout
             if (series.LabelAt(at) is not { Draws: true } label) continue;
 
             string? text = label.Compose(
-                at < plot.Categories.Count ? plot.Categories[at] : null,
-                series.Name,
-                value,
-                total);
+                CategoryTextAt(plot, at), series.Name, value, total);
 
             if (text is not { Length: > 0 }) continue;
 
