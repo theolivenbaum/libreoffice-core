@@ -173,9 +173,14 @@ public class DrawingChartFurnitureTests
         ChartPlot narrow = Read(Bars("<c:majorGridlines/>"), ThemeXml("000000"));
         ChartPlot wide = Read(Bars("<c:majorGridlines/>"), ThemeXml("000000", width: "38100"));
 
-        narrow.ValueGrid.ShouldNotBeNull().Width.ShouldBe(Length.FromEmu(9525));
-        wide.ValueGrid.ShouldNotBeNull().Width.ShouldBe(Length.FromEmu(38100));
-        wide.ValueAxisLine.Width.ShouldBe(Length.FromEmu(38100));
+        // `convertEmuToHmm` rounds a DrawingML width to a whole hundredth of a millimetre, so the
+        // reference never holds the EMU the file states. `DrawingChartAutoFormat.LineWidth` has
+        // the two legs; `probes/stroke-resid-r117/results.md` §3 has the measurements.
+        // 9525 EMU is 26 hundredths of a millimetre and 38100 is 106. 26.2.4.2 draws the first
+        // at 0.7357 pt on `sheet-chart-auto-line.xlsx`, whose theme states 9525.
+        narrow.ValueGrid.ShouldNotBeNull().Width.ShouldBe(Length.FromMm100(26));
+        wide.ValueGrid.ShouldNotBeNull().Width.ShouldBe(Length.FromMm100(106));
+        wide.ValueAxisLine.Width.ShouldBe(Length.FromMm100(106));
     }
 
     /// <summary>
@@ -201,7 +206,10 @@ public class DrawingChartFurnitureTests
 
         plot.ValueGrid.ShouldNotBeNull().Colour.ShouldBe(Colour.FromRgb(0xFF0000));
         plot.ValueAxisLine.Colour.ShouldBe(Colour.FromRgb(0x666666));
-        plot.ValueAxisLine.Width.ShouldBe(Length.FromEmu(19050));
+        // `convertEmuToHmm` rounds a DrawingML width to a whole hundredth of a millimetre, so the
+        // reference never holds the EMU the file states. `DrawingChartAutoFormat.LineWidth` has
+        // the two legs; `probes/stroke-resid-r117/results.md` §3 has the measurements.
+        plot.ValueAxisLine.Width.ShouldBe(Length.FromMm100(53));
     }
 
     /// <summary>

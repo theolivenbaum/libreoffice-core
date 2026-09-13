@@ -52,8 +52,11 @@ public class DrawingChartAreaBorderTests
     {
         ChartPlot plot = Plot("", host: true);
 
+        // `convertEmuToHmm` rounds to a whole hundredth of a millimetre, so the reference never
+        // holds the EMU the file states. See `DrawingChartAutoFormat.LineWidth` for the two legs
+        // this rests on and `probes/stroke-resid-r117/results.md` §3.
         plot.Border.ShouldBe(Colour.FromRgb(0xD9D9D9));
-        plot.BorderWidth.ShouldBe(Length.FromEmu(9525));
+        plot.BorderWidth.ShouldBe(Length.FromMm100(26));
     }
 
     /// <summary>And a slide's chart does not, which is the whole of tdf#150176.</summary>
@@ -77,8 +80,11 @@ public class DrawingChartAreaBorderTests
             """<c:spPr><a:ln w="19050"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln></c:spPr>""",
             host: true);
 
+        // `convertEmuToHmm` rounds to a whole hundredth of a millimetre, so the reference never
+        // holds the EMU the file states. See `DrawingChartAutoFormat.LineWidth` for the two legs
+        // this rests on and `probes/stroke-resid-r117/results.md` §3.
         plot.Border.ShouldBe(Colour.FromRgb(0xFF0000));
-        plot.BorderWidth.ShouldBe(Length.FromEmu(19050));
+        plot.BorderWidth.ShouldBe(Length.FromMm100(53));
     }
 
     /// <summary>An <c>a:noFill</c> is a line the file turns off, not a line it fails to state.</summary>

@@ -240,7 +240,7 @@ internal static class XlsxDrawings
                 return drawing with
                 {
                     IsChart = true,
-                    Chart = ExtendedPlot(data, package, images, theme, ranges),
+                    Chart = ExtendedPlot(data, package, images, theme, styles, ranges),
                 };
             }
 
@@ -249,7 +249,7 @@ internal static class XlsxDrawings
             return drawing with
             {
                 IsChart = true,
-                Chart = Plot(data, package, images, theme, ranges),
+                Chart = Plot(data, package, images, theme, styles, ranges),
             };
         }
 
@@ -378,6 +378,7 @@ internal static class XlsxDrawings
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> parts,
         DrawingTheme? theme,
+        DrawingStyleMatrix? styles,
         XlsxChartRanges? ranges)
     {
         string? id = Attribute(
@@ -399,7 +400,7 @@ internal static class XlsxDrawings
             // resolver is bound here, once the chart's own c:plotVisOnly is in hand. See
             // XlsxChartHiddenCells.
             : DrawingChartPlot.Read(
-                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null,
+                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles,
                 ranges?.Resolver(DrawingChart.PlotsVisibleCellsOnly(
                     chartSpace, OoxmlMetadata.IsOffice2007(package))),
                 automaticChartAreaLine: true);
@@ -418,6 +419,7 @@ internal static class XlsxDrawings
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> parts,
         DrawingTheme? theme,
+        DrawingStyleMatrix? styles,
         XlsxChartRanges? ranges)
     {
         string? id = Attribute(
@@ -432,7 +434,7 @@ internal static class XlsxDrawings
 
         return chartSpace is null
             ? null
-            : DrawingChartex.Read(chartSpace, theme, styles: null, ranges?.Resolver(true));
+            : DrawingChartex.Read(chartSpace, theme, styles, ranges?.Resolver(true));
     }
 
     /// <summary>

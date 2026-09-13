@@ -3891,6 +3891,34 @@ public static partial class ChartLayout
     private const double MarkerSize = 0.7;
 
     /// <summary>One marker, as a path centred on the point.</summary>
+    /// <remarks>
+    /// <strong>A filled marker is filled <em>and</em> stroked, at a hairline.</strong> chart2
+    /// builds every symbol as one shape carrying both a fill colour and a border colour
+    /// (<c>VSeriesPlotter</c>'s <c>createSymbol2D</c>, and
+    /// <c>VLegendSymbolFactory.cxx</c>:115-155 for the legend's copy of it), so the reference
+    /// emits two operations per marker: the filled path, then the same path stroked in the
+    /// border colour at width zero. Measured on 26.2.4.2's own PDF of
+    /// <c>022_Pareto_Chart_Template</c>, whose line series states
+    /// <c>c:marker/c:spPr</c> with a <c>6B0C00</c> fill and a <c>6B0C00</c> <c>a:ln</c>: the
+    /// reference draws sixteen <c>f</c> quads and sixteen <c>s</c> quads at the identical
+    /// rectangles, and this drew only the sixteen fills.
+    /// <para>
+    /// The outline is a hairline, so it is worth about a device pixel of ink each side and no
+    /// visible change on a marker whose border matches its fill — but it is a stroked item where
+    /// there was none, which is what an ink census counts.
+    /// </para>
+    /// <para>
+    /// <strong>And its colour is the marker's <em>fill</em>, not the <c>a:ln</c> the marker
+    /// states.</strong> <c>TypeGroupConverter::convertMarker</c> sets <c>Symbol::FillColor</c>
+    /// from the marker's fill and only reaches for the line colour when there is no fill at all
+    /// — the <c>tdf#124817</c> branch (<c>typegroupconverter.cxx</c>:656-679) — and
+    /// <c>VLegendSymbolFactory</c> says the same in a comment: <em>"border of symbols always same
+    /// as fill color"</em>. Measured on a purpose-built fixture that separates the two, a
+    /// diamond marker with an <c>ED7D31</c> fill and a stated <c>203864</c> outline: 26.2.4.2
+    /// strokes all four markers in <c>ED7D31</c> and <c>203864</c> appears nowhere in the page.
+    /// <see cref="ChartSeries.MarkerLine"/> therefore reaches only the stroke-only symbols.
+    /// </para>
+    /// </remarks>
     private static ChartShape Marker(
         ChartMarker kind, DocPoint at, Length size, Colour fill, Colour stroke)
     {
@@ -3918,7 +3946,7 @@ public static partial class ChartLayout
                     new DocPoint(at.X + k, at.Y - half), new DocPoint(at.X + half, at.Y - k),
                     new DocPoint(at.X + half, at.Y));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
             }
 
             case ChartMarker.Diamond:
@@ -3927,14 +3955,14 @@ public static partial class ChartLayout
                 path.LineTo(new DocPoint(at.X, at.Y + half));
                 path.LineTo(new DocPoint(at.X - half, at.Y));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
 
             case ChartMarker.Triangle:
                 path.MoveTo(new DocPoint(at.X, at.Y - half));
                 path.LineTo(new DocPoint(at.X + half, at.Y + half));
                 path.LineTo(new DocPoint(at.X - half, at.Y + half));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
 
             case ChartMarker.Cross:
                 path.MoveTo(new DocPoint(at.X - half, at.Y));
@@ -3956,7 +3984,7 @@ public static partial class ChartLayout
                 path.LineTo(new DocPoint(at.X + half, at.Y + half));
                 path.LineTo(new DocPoint(at.X - half, at.Y + half));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
         }
     }
 

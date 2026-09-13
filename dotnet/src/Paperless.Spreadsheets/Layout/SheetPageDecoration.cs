@@ -96,6 +96,20 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// <summary>The axis line's own width, which is one of those units.</summary>
     private static readonly Length AxisWidth = Length.FromPoints(2.54 / 100 * 72 / 25.4);
 
+    /// <summary>
+    /// One unit of a border's dash table: ten twips, half a point.
+    /// </summary>
+    /// <remarks>
+    /// <c>svtools::GetLineDashing</c>'s table is in units the caller scales, and the caller is
+    /// <c>CreateBorderPrimitives</c> with <c>PatternScale() * 10.0</c>
+    /// (<c>svx/source/sdr/primitive2d/sdrframeborderprimitive2d.cxx</c>:599). A Calc cell's
+    /// pattern scale is <c>fColScale</c>, which for a print or PDF export is the constant
+    /// twips-to-1/100 mm factor 2540/1440 = 1.76389 — so one table unit is
+    /// <c>10 × 1.76389</c> hundredths of a millimetre, which is ten twips exactly. The print
+    /// zoom multiplies it afterwards, as it multiplies the width.
+    /// </remarks>
+    private static readonly Length DashUnit = Length.FromTwips(10);
+
     /// <summary>One centimetre, the width of the printed row headings.</summary>
     /// <remarks><c>PRINT_HEADER_WIDTH</c>, <c>sc/source/ui/inc/printfun.hxx:45</c>.</remarks>
     public static Length HeadingWidth { get; } = Length.FromTwips(567);
@@ -1218,7 +1232,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // extension arithmetic above.
         Stroke pen = new(
             Paint.Solid(edge.Border.Colour), drawn, LineCap.Butt, LineJoin.Round,
-            DashPattern: Dashes(edge.Border, drawn));
+            DashPattern: Dashes(edge.Border));
 
         GraphicsPath path = edge.IsHorizontal
             ? new GraphicsPath().MoveTo(new DocPoint(start, at)).LineTo(new DocPoint(end, at))
@@ -1232,34 +1246,57 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Proportional to the line's width, which is how <c>SvxBorderLine</c> states them: the
-    /// patterns are defined as multiples of the width rather than in absolute lengths, so a thick
-    /// dashed border has long dashes and a hairline one has short ones.
+    /// <strong>Absolute, and not a multiple of the line's width.</strong> A border's dashing is a
+    /// fixed table scaled by the border's own <em>pattern scale</em>, which for a Calc cell is the
+    /// twips-to-1/100 mm factor and nothing to do with how thick the line is:
+    /// <c>ScDocument::FillInfo</c> builds every <c>svx::frame::Style</c> as
+    /// <c>Style(pBox-&gt;GetLeft(), fColScale)</c> (<c>sc/source/core/data/fillinfo.cxx</c>:1144-1147),
+    /// which lands in <c>mfPatternScale</c>; <c>CreateBorderPrimitives</c> then asks for
+    /// <c>svtools::GetLineDashing(type, PatternScale() * 10.0)</c>
+    /// (<c>svx/source/sdr/primitive2d/sdrframeborderprimitive2d.cxx</c>:599-601) and
+    /// <c>GetDashing</c> is a table of small integers — 1/2 dotted, 6/2 fine-dashed, 16/5 dashed,
+    /// 16/5/5/5 dash-dot and 16/5/5/5/5/5 dash-dot-dot
+    /// (<c>svtools/source/control/ctrlbox.cxx</c>:248-283). Ten of those units times 1.76389
+    /// hundredths of a millimetre is <see cref="DashUnit"/>: ten twips, half a point.
     /// </para>
     /// <para>
-    /// <strong>That is measured to be wrong and is left, seated as O59.</strong> 26.2.4.2's own
-    /// dash arrays are <em>absolute</em> and identical for a thin and a medium line of the same
-    /// pattern: <c>[0.5 1.0]</c> dotted, <c>[3.0 1.0]</c> fine-dashed, <c>[8.0 2.5]</c> dashed,
-    /// <c>[8.0 2.5 2.5 2.5]</c> dash-dot and <c>[8.0 2.5 2.5 2.5 2.5 2.5]</c> dash-dot-dot, in
-    /// points, and they take the print scale like everything else — the same five arrays come
-    /// out at 42 per cent as <c>[0.21001 0.42002]</c> and the rest
-    /// (<c>probes/sheet-border-r115/results.md</c> §4). Changing them moves no width and so is
-    /// not part of the width seat; it wants its own reach measurement.
+    /// Measured at 26.2.4.2 rather than read off that. On a thirteen-style fixture the arrays are
+    /// the same five whatever the border's width — a <c>thin</c> dotted rule and a <c>medium</c>
+    /// dotted one both draw <c>[0.49999 0.99998]</c> — and they take the print scale like
+    /// everything else, coming out as <c>[0.21001 0.42002]</c> at 42 per cent
+    /// (<c>probes/sheet-border-r115/results.md</c> §4). Confirmed again on a corpus document
+    /// rather than a fixture: page 1 of <c>079_Org_charts_visual</c> is drawn at a fitted scale of
+    /// 0.40002 and its dotted borders come out <c>0.29481 w</c> with <c>[.20001 .40001] 0</c> —
+    /// which is <c>26/100 mm × 0.40002</c> for the width and <c>[0.5 1.0] pt × 0.40002</c> for the
+    /// dash, to five figures and with no free parameter.
+    /// </para>
+    /// <para>
+    /// <strong>The dash lengths are not rounded to a whole logic unit and the width is.</strong>
+    /// <c>VclMetafileProcessor2D::processPolygonStrokePrimitive2D</c> writes
+    /// <c>std::round(getTransformedLineWidth(...))</c> for the width and a bare
+    /// <c>getTransformedLineWidth(...)</c> for <c>SetDashLen</c> and <c>SetDistance</c>
+    /// (<c>drawinglayer/source/processor2d/vclmetafileprocessor2d.cxx</c>:1818-1874), which is
+    /// why <see cref="Drawn"/> rounds and this does not.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<Length>? Dashes(SheetBorder border, Length width)
+    /// <param name="border">The border whose pattern is wanted.</param>
+    private Length[]? Dashes(SheetBorder border)
     {
-        Length unit = width > Length.Zero ? width : Length.FromTwips(1);
-
-        return border.Pattern switch
+        double[]? units = border.Pattern switch
         {
-            SheetBorderPattern.Dotted => [unit, unit],
-            SheetBorderPattern.Dashed => [unit * 4, unit * 2],
-            SheetBorderPattern.FineDashed => [unit * 3, unit * 3],
-            SheetBorderPattern.DashDot => [unit * 4, unit * 2, unit, unit * 2],
-            SheetBorderPattern.DashDotDot => [unit * 4, unit * 2, unit, unit * 2, unit, unit * 2],
+            SheetBorderPattern.Dotted => [1, 2],
+            SheetBorderPattern.Dashed => [16, 5],
+            SheetBorderPattern.FineDashed => [6, 2],
+            SheetBorderPattern.DashDot => [16, 5, 5, 5],
+            SheetBorderPattern.DashDotDot => [16, 5, 5, 5, 5, 5],
             _ => null,
         };
+
+        if (units is null) return null;
+
+        Length[] dashes = new Length[units.Length];
+        for (int at = 0; at < units.Length; at++) dashes[at] = DashUnit * units[at] * _scale;
+        return dashes;
     }
 
     private static void Rule(Length x1, Length y1, Length x2, Length y2, IDrawingSink sink)
