@@ -1133,37 +1133,92 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// would put the red one 2.5 pt too long.
     /// </para>
     /// </remarks>
-    private static void Stroke(Edge edge, Edges edges, IDrawingSink sink)
+    private void Stroke(Edge edge, Edges edges, IDrawingSink sink)
     {
         SheetBorder border = edge.Border;
-        Length start = edge.From - edges.ExtensionAt(edge, edge.From);
-        Length end = edge.To + edges.ExtensionAt(edge, edge.To);
+        Length start = edge.From - (edges.ExtensionAt(edge, edge.From) * _scale);
+        Length end = edge.To + (edges.ExtensionAt(edge, edge.To) * _scale);
 
         // A double rule is two lines about the centre, the gap between them untouched.
         if (border.IsDouble)
         {
-            Length half = (border.Primary + border.Distance + border.Secondary) / 2;
-            Line(edge, start, end, half - (border.Primary / 2), border.Primary, sink);
-            Line(edge, start, end, (border.Secondary / 2) - half, border.Secondary, sink);
+            Length half = (border.Primary + border.Distance + border.Secondary) * _scale / 2;
+            Line(edge, start, end, half - (border.Primary * _scale / 2), border.Primary, sink);
+            Line(edge, start, end, (border.Secondary * _scale / 2) - half, border.Secondary, sink);
             return;
         }
 
         Line(edge, start, end, Length.Zero, border.Primary, sink);
     }
 
-    private static void Line(
+    /// <summary>
+    /// The width one line of a border is stroked at: the stated width times the print scale,
+    /// floored at a tenth of a point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A cell border is scaled by the sheet's print scale exactly as its geometry is,
+    /// and this drew every one of them at full size.</strong> Calc hands
+    /// <c>svx::frame::Style</c> a width in twips times <c>nScaleX</c>
+    /// (<c>ScDocument::FillInfo</c>, <c>sc/source/core/data/fillinfo.cxx:1144-1147</c>), and for
+    /// a print or a PDF export <c>nScaleX</c> is the constant twips-to-1/100 mm factor
+    /// (<c>ScPrintFunc::InitModes</c>, <c>printfun.cxx:2627-2628</c>) — the zoom arrives later,
+    /// as the fractional scale of the <c>Map100thMM</c> map mode the whole page is drawn
+    /// through (<c>:2639-2641</c>), which multiplies the widths along with the coordinates.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 rather than read off that: one workbook of thirteen cells, one
+    /// border style each, exported at nine stated print scales
+    /// (<c>probes/sheet-border-r115/make.py</c>). The drawn <c>w</c> operators are the stated
+    /// width times the scale at every one of them — <c>thin</c> 0.75, 0.5625, 0.375, 0.315,
+    /// 0.1875 and 3.0 pt at 100, 75, 50, 42, 25 and 400 per cent — and the same nine numbers
+    /// come back out of the file saved as <c>.xls</c>, so the two filters share this.
+    /// </para>
+    /// <para>
+    /// <strong>The floor is a tenth of a point</strong>, which is one pixel of the PDF export's
+    /// own 720 dpi device: <c>PDFPage::appendLineInfo</c> writes <c>72/DPIX</c> for anything
+    /// that does not survive as a whole logic unit (<c>vcl/source/pdf/PDFPage.cxx:497-505</c>).
+    /// Measured: <c>hair</c> is 1 twip and is drawn at 0.1 pt at 100 per cent and at 0.19956 at
+    /// 400, and <c>thin</c> at a scale of 10 per cent is drawn at 0.1 rather than 0.075.
+    /// </para>
+    /// <para>
+    /// <strong>A patterned line's width goes through a whole 1/100 mm first.</strong> The dashed
+    /// styles reach the metafile as a <c>LineInfo</c> whose width is
+    /// <c>std::round(getTransformedLineWidth(...))</c> in logic units
+    /// (<c>drawinglayer/source/processor2d/vclmetafileprocessor2d.cxx:1818-1819</c>) where a
+    /// solid one keeps its double, so a dotted <c>thin</c> is 26 rather than 26.46 hundredths of
+    /// a millimetre. Measured at 0.737 against a solid 0.75004, and 1.75745 against 1.75008 for
+    /// the medium ones — and the rounding happens before the zoom, since at 42 per cent the same
+    /// lines are 0.30956 and 0.73817.
+    /// </para>
+    /// </remarks>
+    /// <param name="border">The border the line belongs to, for its pattern.</param>
+    /// <param name="width">One line's stated width.</param>
+    private Length Drawn(SheetBorder border, Length width)
+    {
+        if (width <= Length.Zero) return Length.Zero;
+
+        Length stated = border.Pattern == SheetBorderPattern.Solid
+            ? width
+            : Length.FromMm100(Math.Max(1, width.Mm100));
+
+        return Length.Max(stated * _scale, HairlineWidth);
+    }
+
+    private void Line(
         Edge edge, Length start, Length end, Length offset, Length width, IDrawingSink sink)
     {
         if (width <= Length.Zero) return;
 
         Length at = edge.At + offset;
+        Length drawn = Drawn(edge.Border, width);
 
         // Butt caps and round joins, which is what LibreOffice's own export writes for a border:
         // "q 2.49983 w 0 J 1 j". A square cap would add half a width at each end and undo the
         // extension arithmetic above.
         Stroke pen = new(
-            Paint.Solid(edge.Border.Colour), width, LineCap.Butt, LineJoin.Round,
-            DashPattern: Dashes(edge.Border, width));
+            Paint.Solid(edge.Border.Colour), drawn, LineCap.Butt, LineJoin.Round,
+            DashPattern: Dashes(edge.Border, drawn));
 
         GraphicsPath path = edge.IsHorizontal
             ? new GraphicsPath().MoveTo(new DocPoint(start, at)).LineTo(new DocPoint(end, at))
@@ -1176,9 +1231,21 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// The dash pattern a border pattern draws with, or null for a solid line.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Proportional to the line's width, which is how <c>SvxBorderLine</c> states them: the
     /// patterns are defined as multiples of the width rather than in absolute lengths, so a thick
     /// dashed border has long dashes and a hairline one has short ones.
+    /// </para>
+    /// <para>
+    /// <strong>That is measured to be wrong and is left, seated as O59.</strong> 26.2.4.2's own
+    /// dash arrays are <em>absolute</em> and identical for a thin and a medium line of the same
+    /// pattern: <c>[0.5 1.0]</c> dotted, <c>[3.0 1.0]</c> fine-dashed, <c>[8.0 2.5]</c> dashed,
+    /// <c>[8.0 2.5 2.5 2.5]</c> dash-dot and <c>[8.0 2.5 2.5 2.5 2.5 2.5]</c> dash-dot-dot, in
+    /// points, and they take the print scale like everything else — the same five arrays come
+    /// out at 42 per cent as <c>[0.21001 0.42002]</c> and the rest
+    /// (<c>probes/sheet-border-r115/results.md</c> §4). Changing them moves no width and so is
+    /// not part of the width seat; it wants its own reach measurement.
+    /// </para>
     /// </remarks>
     private static IReadOnlyList<Length>? Dashes(SheetBorder border, Length width)
     {

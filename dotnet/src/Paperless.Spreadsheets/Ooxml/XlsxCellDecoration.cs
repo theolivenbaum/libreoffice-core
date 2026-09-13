@@ -208,10 +208,27 @@ internal static class XlsxCellDecoration
     /// One edge, from the fourteen style names SpreadsheetML allows.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The widths are LibreOffice's, in twips: hair 1, thin 15, medium 35 and thick 50
     /// (<c>API_LINE_*</c>, <c>sc/source/filter/inc/stylesbuffer.hxx:63-67</c>), assigned by the
     /// same switch this mirrors (<c>stylesbuffer.cxx:1700-1748</c>). They are not what the names
     /// suggest: <c>thin</c> draws at 0.75 pt and <c>hair</c> at a twentieth of a point.
+    /// </para>
+    /// <para>
+    /// <strong><c>double</c> is 10/15/10 twips and not a third of a thick rule each.</strong>
+    /// <c>Border::convertBorderLine</c> calls <c>lclSetBorderLineWidth(rBorderLine, 10, 15, 10)</c>
+    /// for it, which is a whole rule of 1.75 pt rather than the 2.5 pt this used to build out of
+    /// <c>API_LINE_THICK</c>. Confirmed at 26.2.4.2 on a one-style-per-cell workbook: the two
+    /// lines are stroked at 0.50002 pt each and their centres are 1.248 pt apart, so the gap is
+    /// 0.748 — 10, 15 and 10 twips. The <c>.xls</c> side of the same workbook is a different
+    /// number and is in <c>XlsCellDecoration</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Two of the patterns were the wrong way round.</strong> <c>mediumDashed</c> is
+    /// <c>DASHED</c> and <c>slantDashDot</c> is <c>FINE_DASHED</c> in the same switch. Confirmed
+    /// in the reference's own dash arrays on that workbook: <c>mediumDashed</c> alone draws
+    /// <c>[8.0 2.5]</c>, while <c>slantDashDot</c> shares <c>[3.0 1.0]</c> with <c>dashed</c>.
+    /// </para>
     /// </remarks>
     private static SheetBorder Edge(XElement? edge, XlsxPalette palette)
     {
@@ -220,30 +237,31 @@ internal static class XlsxCellDecoration
         string style = Xlsx.Attribute(edge, "style") ?? "none";
         Colour colour = palette.Read(Xlsx.Child(edge, "color")) ?? Colour.Black;
 
-        (int twips, SheetBorderPattern pattern, bool doubled) = style switch
+        if (string.Equals(style, "double", StringComparison.Ordinal))
         {
-            "hair" => (1, SheetBorderPattern.Solid, false),
-            "thin" => (15, SheetBorderPattern.Solid, false),
-            "medium" => (35, SheetBorderPattern.Solid, false),
-            "thick" => (50, SheetBorderPattern.Solid, false),
-            "double" => (50, SheetBorderPattern.Solid, true),
-            "dotted" => (15, SheetBorderPattern.Dotted, false),
-            "dashed" => (15, SheetBorderPattern.FineDashed, false),
-            "dashDot" => (15, SheetBorderPattern.DashDot, false),
-            "dashDotDot" => (15, SheetBorderPattern.DashDotDot, false),
-            "mediumDashed" => (35, SheetBorderPattern.FineDashed, false),
-            "mediumDashDot" => (35, SheetBorderPattern.DashDot, false),
-            "mediumDashDotDot" => (35, SheetBorderPattern.DashDotDot, false),
-            "slantDashDot" => (35, SheetBorderPattern.DashDot, false),
-            _ => (0, SheetBorderPattern.Solid, false),
+            return new SheetBorder(
+                Length.FromTwips(10), Length.FromTwips(15), Length.FromTwips(10), colour);
+        }
+
+        (int twips, SheetBorderPattern pattern) = style switch
+        {
+            "hair" => (1, SheetBorderPattern.Solid),
+            "thin" => (15, SheetBorderPattern.Solid),
+            "medium" => (35, SheetBorderPattern.Solid),
+            "thick" => (50, SheetBorderPattern.Solid),
+            "dotted" => (15, SheetBorderPattern.Dotted),
+            "dashed" => (15, SheetBorderPattern.FineDashed),
+            "dashDot" => (15, SheetBorderPattern.DashDot),
+            "dashDotDot" => (15, SheetBorderPattern.DashDotDot),
+            "mediumDashed" => (35, SheetBorderPattern.Dashed),
+            "mediumDashDot" => (35, SheetBorderPattern.DashDot),
+            "mediumDashDotDot" => (35, SheetBorderPattern.DashDotDot),
+            "slantDashDot" => (35, SheetBorderPattern.FineDashed),
+            _ => (0, SheetBorderPattern.Solid),
         };
 
-        if (twips == 0) return SheetBorder.None;
-
-        Length width = Length.FromTwips(twips);
-        if (!doubled) return SheetBorder.Line(width, colour, pattern);
-
-        Length line = width / 3;
-        return new SheetBorder(line, width - line - line, line, colour, pattern);
+        return twips == 0
+            ? SheetBorder.None
+            : SheetBorder.Line(Length.FromTwips(twips), colour, pattern);
     }
 }

@@ -219,35 +219,48 @@ internal sealed class XlsDecorationTable
     /// (<c>sc/source/filter/inc/xlconst.hxx:250-253</c>). Style 6, <c>double</c>, is a
     /// <em>thick</em> rule rather than a thin one — an easy off-by-one against the OOXML table,
     /// where <c>double</c> is also thick but the neighbouring entries differ.
+    /// <para>
+    /// <strong>And its two lines are 10 twips each with a 30-twip gap, not a third of the rule
+    /// each.</strong> BIFF states one width and the style name, so the split comes from
+    /// <c>DOUBLE_THIN</c>'s own <c>BorderWidthImpl</c> — <c>CHANGE_DIST</c> with the two lines
+    /// pinned at 10 (<c>editeng/source/items/borderline.cxx:358-360</c>) — where the OOXML
+    /// filter states 10/15/10 outright. Confirmed at 26.2.4.2 on the same workbook saved both
+    /// ways: as <c>.xls</c> the two lines stroke at 0.50002 pt with their centres 1.984 pt
+    /// apart, a 1.484 pt gap, against 1.248 pt apart as <c>.xlsx</c>.
+    /// </para>
     /// </remarks>
     private SheetBorder Edge(int style, int colour)
     {
-        (int twips, SheetBorderPattern pattern, bool doubled) = style switch
+        if (style == 6)
         {
-            1 => (15, SheetBorderPattern.Solid, false),
-            2 => (35, SheetBorderPattern.Solid, false),
-            3 => (15, SheetBorderPattern.FineDashed, false),
-            4 => (15, SheetBorderPattern.Dotted, false),
-            5 => (50, SheetBorderPattern.Solid, false),
-            6 => (50, SheetBorderPattern.Solid, true),
-            7 => (1, SheetBorderPattern.Solid, false),
-            8 => (35, SheetBorderPattern.Dashed, false),
-            9 => (15, SheetBorderPattern.DashDot, false),
-            10 => (35, SheetBorderPattern.DashDot, false),
-            11 => (15, SheetBorderPattern.DashDotDot, false),
-            12 => (35, SheetBorderPattern.DashDotDot, false),
-            13 => (35, SheetBorderPattern.DashDot, false),
-            _ => (0, SheetBorderPattern.Solid, false),
+            return new SheetBorder(
+                Length.FromTwips(10),
+                Length.FromTwips(30),
+                Length.FromTwips(10),
+                Colour(colour) ?? Core.Graphics.Colour.Black);
+        }
+
+        (int twips, SheetBorderPattern pattern) = style switch
+        {
+            1 => (15, SheetBorderPattern.Solid),
+            2 => (35, SheetBorderPattern.Solid),
+            3 => (15, SheetBorderPattern.FineDashed),
+            4 => (15, SheetBorderPattern.Dotted),
+            5 => (50, SheetBorderPattern.Solid),
+            7 => (1, SheetBorderPattern.Solid),
+            8 => (35, SheetBorderPattern.Dashed),
+            9 => (15, SheetBorderPattern.DashDot),
+            10 => (35, SheetBorderPattern.DashDot),
+            11 => (15, SheetBorderPattern.DashDotDot),
+            12 => (35, SheetBorderPattern.DashDotDot),
+            13 => (35, SheetBorderPattern.DashDot),
+            _ => (0, SheetBorderPattern.Solid),
         };
 
-        if (twips == 0) return SheetBorder.None;
-
-        Length width = Length.FromTwips(twips);
-        Colour ink = Colour(colour) ?? Core.Graphics.Colour.Black;
-        if (!doubled) return SheetBorder.Line(width, ink, pattern);
-
-        Length line = width / 3;
-        return new SheetBorder(line, width - line - line, line, ink, pattern);
+        return twips == 0
+            ? SheetBorder.None
+            : SheetBorder.Line(
+                Length.FromTwips(twips), Colour(colour) ?? Core.Graphics.Colour.Black, pattern);
     }
 
     /// <summary>
