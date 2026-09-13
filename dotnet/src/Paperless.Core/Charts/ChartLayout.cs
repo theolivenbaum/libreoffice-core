@@ -2467,8 +2467,32 @@ public static partial class ChartLayout
             if (ValueLabelsFar(plot, false)) top += valueBand + valueSpace;
             else bottom -= valueBand + valueSpace;
 
-            // The last value label is centred on the axis' right end, so half of it overhangs.
-            right -= ((valueLabel * valueCos) + (valueHeight * valueSin)) / 2;
+            // What the last value label overhangs the axis' far end by — and it is two rules
+            // rather than one, because `lcl_correctRotation_Bottom`
+            // (`chart2/source/view/main/LabelPositionHelper.cxx`:241-256) does *nothing at all*
+            // at zero degrees and jumps to `-(h·sin + w·cos)/2` at any other angle.
+            //
+            // The label's shape is autogrown around a centred paragraph, so before that
+            // correction its top *centre* sits on the tick — `makeTransformation`'s own comment,
+            // "as autogrow is active the rectangle is automatically expanded to that side to
+            // which the text is not adjusted" (`ShapeFactory.cxx`). Rotating that box about the
+            // tick puts its right edge at `w·cos/2 + h·sin`, and the correction then takes
+            // `(w·cos + h·sin)/2` off it, leaving **`h·sin/2`** — a quantity with no `w` in it at
+            // all. Upright, no correction is applied and the plain half-width stands.
+            //
+            // Measured on `027_Simple_personal_cash_flow_statement`'s savings chart against
+            // 26.2.4.2, with the value axis' scale pinned so the tick set cannot move
+            // (`probes/chart-slide-r117/turn027.py`): widening every value label from 19.18 pt of
+            // ink to 40.69 by its number format alone moves the drawn plot width by **0.02 pt**
+            // in 8 of 8 variants, where half the width would have moved it 10.8; the last
+            // label's right edge stays at 2.00 pt past its own tick throughout. Over three
+            // stated sizes (6, 9, 14 pt) and four angles (22.5, 45, 67.5, 90) the reserve is
+            // `h·sin/2` with `h` the chart's own line height to within 1.6 %. The upright control
+            // — the same chart with two labels, which therefore do not collide and are not turned
+            // — has the last label centred on its tick to 0.04 pt at four label widths.
+            right -= valueTurn == 0.0
+                ? valueLabel / 2.0
+                : (valueHeight * valueSin) / 2.0;
         }
 
         return right <= left || bottom <= top

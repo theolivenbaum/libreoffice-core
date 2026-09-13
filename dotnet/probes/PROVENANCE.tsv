@@ -2154,3 +2154,14 @@ dotnet/probes/sheet-border-r115/like-for-like-base.tsv	2026-09-13	current	26.2.4
 dotnet/probes/sheet-border-r115/like-for-like-after.tsv	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/sheet-border-r115/results.md
 dotnet/probes/sheet-border-r115/class-before-after.txt	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/sheet-border-r115/results.md
 dotnet/probes/sheet-border-r115/moved.tsv	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/sheet-border-r115/results.md
+dotnet/probes/chart-slide-r117/axis-census.py	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md
+dotnet/probes/chart-slide-r117/axis-results.tsv	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-slide-r117/axis-rows.tsv	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-slide-r117/axis-trace.diff	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-slide-r117/cellbreaks.py	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md
+dotnet/probes/chart-slide-r117/pagelines.py	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md
+dotnet/probes/chart-slide-r117/reach-after.tsv	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-slide-r117/reach-base.tsv	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md;dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/chart-slide-r117/read58.py	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md
+dotnet/probes/chart-slide-r117/results.md	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md;dotnet/src/Paperless.Core/Charts/ChartLayout.cs;dotnet/tests/Paperless.Core.Tests/ChartTurnedValueLabelOverhangTests.cs
+dotnet/probes/chart-slide-r117/turn027.py	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/chart-slide-r117/results.md;dotnet/probes/OPEN-ISSUES.md
