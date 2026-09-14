@@ -191,7 +191,7 @@ is a separate thing and is NOT WORK; it is seated as O66 below.**
 
 ## 3. `NAS-…-Weather.pptx`'s transform — **alive as a mechanism, dead as a defect, and misdiagnosed**
 
-### It is not a table
+### The frame carrying the transform is not a table — but the file does hold three
 
 r94 §8: *"we lay a `p:graphicFrame` table out nominally and stretch it by 1.3151 × 1.3134;
 the reference lays it out at its final size. Costs 0.13 % of anisotropy here and could cost
@@ -200,9 +200,36 @@ more where the factor is further from unity."*
 `ppt/slides/slide11.xml` holds one `p:graphicFrame`, and its `graphicData` uri is
 `http://schemas.openxmlformats.org/presentationml/2006/ole`. Inside it is
 `<p:oleObj name="Worksheet" progId="Excel.Sheet.12" imgW="11277718" imgH="3192990">` with a
-`mc:Fallback` picture. There is no `a:tbl` in the file at all — no `a:gridCol`, no `a:tr`.
-**It is an embedded Excel worksheet, not a DrawingML table**, and any future round looking for
-the table layout code would look in the wrong place.
+`mc:Fallback` picture. **The frame carrying the transform is an embedded Excel worksheet, not a
+DrawingML table**, and any future round looking for the table layout code would look in the wrong
+place for *this* frame.
+
+> **Correction, made at merge and not by this round.** The sentence that stood here — *"There is
+> no `a:tbl` in the file at all — no `a:gridCol`, no `a:tr`"* — is **false**, and it mattered,
+> because it was the whole reason this round never looked further. `NAS-…-Weather.pptx` holds
+> **three** DrawingML tables, one each on `slide8.xml`, `slide9.xml` and `slide10.xml`
+> (`unzip -p … | grep -c '<a:tbl>'` → 1, 1, 1; five `<a:tbl>` across all parts). Only
+> `slide11.xml` is the OLE frame. r94 §3's heading is *"the coarse instrument overstates page
+> 11"*, so page 11 is indeed the page it discussed — but r94 §8 called that frame a *table*, and
+> the file does contain three real ones that this round dismissed without measuring.
+>
+> **Measured at merge, and the verdict survives — for a reason this round did not give.**
+> Rendering the document with the r119 CLI and 26.2.4.2 and diffing every page with
+> `pdf-ops.py diff`, classified by the *kind* of difference reported:
+>
+> | page | frame | `shows` | `glyphs` | **position** | **size** |
+> |---|---|---:|---:|---:|---:|
+> | 8 | `a:tbl` | 35 | 14 | **0** | **0** |
+> | 9 | `a:tbl` | 33 | 15 | **0** | **0** |
+> | 10 | `a:tbl` | 30 | 15 | **0** | **0** |
+> | 11 | `p:oleObj` | 3 | 0 | **0** | 87 |
+>
+> On all three real table pages the *only* differences are how text is split into show operators
+> and the glyph counts that follow from it — **not one position and not one size divergence**. So
+> the three table frames take no nominal-layout-plus-stretch at all, and r94's claim is dead on
+> the tables as well as on the OLE frame. Page 11's 87 size differences are the 9.00 vs 9.01
+> hundredth-of-a-point already tabulated below, and the count of 87 corroborates this round's
+> 87 paired records independently.
 
 ### The mechanism is unchanged at HEAD
 
