@@ -670,6 +670,12 @@ public sealed partial class Ww8DocumentReader
         (Ww8FieldTypes fieldTypes, int fieldBase) = FieldTypesOf(body);
         Stack<int> openFields = new();
 
+        // Where this story's index fields cached their results, for the character styles inside them.
+        // Saved and restored around the walk, because a note or a text box is read from inside it and is
+        // a story of its own — see `_indexResults`.
+        IReadOnlyList<Ww8Range> outerIndexResults = _indexResults;
+        _indexResults = IndexResultRanges(text, body.Start, fieldTypes, fieldBase);
+
         // Where each open field's cached result began, as an offset into the paragraph being built, or
         // −1 for a field whose separator has not been seen — and for one whose result began in an
         // earlier paragraph, which `Close` resets. A field result that crosses a paragraph mark is left
@@ -950,7 +956,24 @@ public sealed partial class Ww8DocumentReader
                     // the two shaped to 18.67 pt of .notdef between "Before the box." and "After the
                     // box." — invisible while the box was misplaced far to the left, and exactly the
                     // width by which the sentence overshot once the box was put in the right place.
-                    if (CollectFrame(position, current.Length)) continue;
+                    //
+                    // An as-character frame is the exception, and it is the same exception the DOCX
+                    // walk makes. Writer inserts an anchor character for FLY_AS_CHAR and for no other
+                    // anchor (`SwFormatFlyCnt` and `GetCharOfTextAttr`,
+                    // `sw/source/core/txtnode/thints.cxx`:3633-3652, put in by
+                    // `SwDoc::SetFlyFrameAnchor`, `docfly.cxx`:337-348), and that character is what
+                    // gives two adjacent inline objects two *offsets*: an inline object's offset is a
+                    // boundary, so without one each they collapse onto the same boundary and no
+                    // measurer can put a break between them. That is the whole of
+                    // `RMI_Document_Repository_Public-Reprts_GettingOffOil.doc` page 2, whose two
+                    // full-measure pictures were drawn one over the other on a single line. It costs no
+                    // width — `ShapingControls.IsRemovedBeforeShaping` drops the whole C0 range before
+                    // the shaper sees it.
+                    if (CollectFrame(position, current.Length, out bool asCharacter))
+                    {
+                        if (asCharacter) Emit(current, positions, AnchorCharacter, position);
+                        continue;
+                    }
 
                     // The other half of the same rule, and it needs one character of lookahead.
                     // `ww8par.cxx:3602` reads a U+0001 inside a SHAPE field as the shape's own
@@ -987,6 +1010,7 @@ public sealed partial class Ww8DocumentReader
             ? LiftTextFrames(assembler.Finished())
             : assembler.Finished();
         SuppressAutoSpacing(finished);
+        _indexResults = outerIndexResults;
         return finished;
 
         // One paragraph, handed to the assembler with the properties of the mark that ended it — which is
@@ -1047,8 +1071,10 @@ public sealed partial class Ww8DocumentReader
         // box's story goes through ReadLayoutBlocks exactly as a note's body does, which is what makes a
         // table inside a text box work without a second path. Returns whether a frame was made, which is
         // what decides whether the anchor character stays in the text.
-        bool CollectFrame(int position, int offset)
+        bool CollectFrame(int position, int offset, out bool asCharacter)
         {
+            asCharacter = false;
+
             if (Drawings.AnchorAt(position) is not { } anchor)
             {
                 // No FSPA, which for a U+0001 means an inline picture: its run states a
@@ -1056,8 +1082,11 @@ public sealed partial class Ww8DocumentReader
                 if (InlinePicture(position, offset) is not { } inline) return false;
 
                 _pendingFrames.Add(inline);
+                asCharacter = true;
                 return true;
             }
+
+            asCharacter = openFields.Count > 0 && openFields.Peek() == Ww8FieldTypes.Shape;
 
             MsBinary.Escher.EscherShape? shape = Drawings.Shape(anchor.ShapeId);
             _pendingFrames.Add(
@@ -1072,7 +1101,7 @@ public sealed partial class Ww8DocumentReader
                     // shape FLY_AS_CHAR instead of FLY_AT_CHAR. This is how Word writes a picture that
                     // sits in the run of text: it still gets an FSPA, and the field around it is the
                     // only thing that says the FSPA's position is not to be believed.
-                    IsSetInLine = openFields.Count > 0 && openFields.Peek() == Ww8FieldTypes.Shape,
+                    IsSetInLine = asCharacter,
                 });
 
             return true;
@@ -1526,7 +1555,8 @@ public sealed partial class Ww8DocumentReader
                 if (cachedTo <= cachedFrom) cachedTo = cachedFrom + 1;
             }
 
-            Ww8LayoutFormat format = ApplyCharacterException(inherited, properties);
+            Ww8LayoutFormat format =
+                ApplyCharacterException(inherited, properties, IsInIndexResult(positions[index]));
             Ww8LayoutRun run = new(
                 index,
                 1,
@@ -1949,7 +1979,114 @@ public sealed partial class Ww8DocumentReader
     private Ww8LayoutFormat ResolveCharacterLayout(int position)
         => ApplyCharacterException(
             CharacterStyleFormat(position),
-            _characterProperties.Find(_pieces.FileOffsetOf(position)));
+            _characterProperties.Find(_pieces.FileOffsetOf(position)),
+            IsInIndexResult(position));
+
+    /// <summary>
+    /// The cached results of the index fields in the story being walked, in character positions.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A document-level extent rather than a per-paragraph flag, because that is the extent the rule
+    /// has: LibreOffice's <c>m_bLoadingTOXCache</c> is set when the <c>TOC</c> field's instruction has
+    /// been read and cleared at that same field's end (<c>ww8par5.cxx</c>:3053-3055 and :596-608), and
+    /// a contents list is one field spanning every one of its entries' paragraphs. The DOCX reader
+    /// learned the same lesson the expensive way — see <c>DocxLayoutSource._indexFieldDepth</c>, whose
+    /// per-paragraph counter suppressed the style on the first entry and on nothing else.
+    /// </para>
+    /// <para>
+    /// Saved and restored around a nested story exactly as <c>_pendingNotes</c> is: a note or a text box
+    /// read from inside a contents entry is a story of its own, with its own field table, and its text
+    /// is not part of the index's result.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<Ww8Range> _indexResults = [];
+
+    /// <summary>True where a position falls inside an index field's cached result.</summary>
+    private bool IsInIndexResult(int position)
+    {
+        for (int i = 0; i < _indexResults.Count; i++)
+        {
+            Ww8Range range = _indexResults[i];
+            if (position >= range.Start && position < range.End) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Pairs a story's field markers to find where each index field's cached result lies.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same pairing the character walk does, run ahead of it because a run's formatting is resolved
+    /// from a position rather than from the walk's own state — and because the walk reaches a
+    /// paragraph's runs only once the mark that ends it has been read.
+    /// </para>
+    /// <para>
+    /// Only the outermost index field contributes a range. A <c>TOC</c> nested in a <c>TOC</c> is
+    /// <c>m_nEmbeddedTOXLevel</c>, which the reference counts up and down without ever clearing the flag
+    /// (<c>ww8par5.cxx</c>:3058-3062), and the <c>PAGEREF</c> and <c>HYPERLINK</c> fields inside each
+    /// entry open and close well within it.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The story's text, as the walk reads it.</param>
+    /// <param name="start">The character position the text begins at.</param>
+    /// <param name="types">The story's field table.</param>
+    /// <param name="fieldBase">The position that table's own numbering counts from.</param>
+    internal static List<Ww8Range> IndexResultRanges(
+        string text, int start, Ww8FieldTypes types, int fieldBase)
+    {
+        List<Ww8Range> ranges = [];
+        if (types.Count == 0) return ranges;
+
+        Stack<int> open = new();
+        int depth = 0;
+        int resultStart = -1;
+
+        for (int index = 0; index < text.Length; index++)
+        {
+            switch (text[index])
+            {
+                case Special.FieldBegin:
+                    open.Push(types.At(start + index - fieldBase) ?? 0);
+                    break;
+
+                case Special.FieldSeparator:
+                    if (open.Count > 0 && IsIndexField(open.Peek()))
+                    {
+                        if (depth == 0) resultStart = start + index + 1;
+                        depth++;
+                    }
+
+                    break;
+
+                case Special.FieldEnd:
+                {
+                    int closed = open.Count > 0 ? open.Pop() : 0;
+                    if (IsIndexField(closed) && depth > 0 && --depth == 0 && resultStart >= 0)
+                    {
+                        ranges.Add(new Ww8Range(resultStart, start + index));
+                        resultStart = -1;
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        // A field left open where the story ends still had its result drawn, so it reaches the end.
+        if (depth > 0 && resultStart >= 0) ranges.Add(new Ww8Range(resultStart, start + text.Length));
+
+        return ranges;
+    }
+
+    /// <summary>Whether a field type is one whose result LibreOffice rebuilds as an index.</summary>
+    /// <remarks>
+    /// 13 <c>TOC</c> and 8 <c>INDEX</c>, the two <c>Read_F_Tox</c> slots of <c>aWW8FieldTab</c>
+    /// (<c>ww8par5.cxx</c>:857 and :862) and the two cases <c>End_Field</c> handles together at :595.
+    /// </remarks>
+    private static bool IsIndexField(int fieldType) => fieldType is 13 or 8;
 
     /// <summary>
     /// The character sprms an <em>empty</em> paragraph is as tall as.
@@ -2007,9 +2144,11 @@ public sealed partial class Ww8DocumentReader
         ReadOnlyMemory<byte> before = _characterProperties.Find(_pieces.FileOffsetOf(position - 1));
         if (before.IsEmpty) return own;
 
+        bool inIndex = IsInIndexResult(position);
         return ApplyCharacterException(
-            ApplyCharacterException(CharacterStyleFormat(position), before),
-            _characterProperties.Find(_pieces.FileOffsetOf(position)));
+            ApplyCharacterException(CharacterStyleFormat(position), before, inIndex),
+            _characterProperties.Find(_pieces.FileOffsetOf(position)),
+            inIndex);
     }
 
     /// <summary>
@@ -2027,14 +2166,15 @@ public sealed partial class Ww8DocumentReader
     /// </para>
     /// </remarks>
     private Ww8LayoutFormat ApplyCharacterException(
-        Ww8LayoutFormat inherited, ReadOnlyMemory<byte> exception)
+        Ww8LayoutFormat inherited, ReadOnlyMemory<byte> exception, bool inIndexResult = false)
     {
         Ww8LayoutFormat format = inherited;
 
         // Index zero is not "no character style" — in WW8 the stylesheet is one table and istd 0 is
         // *Normal*, a paragraph style. Resolving its chain here would lay the document's default font size
         // over the paragraph style's own, so every run of an 11 pt paragraph would come out at 12.
-        if (CharacterStyleIndexIn(exception) is var styleIndex and not 0)
+        if (CharacterStyleIndexIn(exception) is var styleIndex and not 0
+            && !(inIndexResult && IsIndexLinkStyle(_styles, styleIndex)))
         {
             Colour? outer = format.Highlight;
 
@@ -2051,6 +2191,39 @@ public sealed partial class Ww8DocumentReader
         }
 
         return ApplyLayoutSprms(format, exception);
+    }
+
+    /// <summary>
+    /// Whether a run's character style is the one an index's cached result must not keep.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word writes every entry of a hyperlinked table of contents as a run naming the built-in
+    /// <c>Hyperlink</c> character style, which is blue and underlined; LibreOffice rebuilds the index's
+    /// own links in the <c>Index Link</c> pool style, which is empty, so honouring the file's style
+    /// draws the whole contents list blue and underlined where the reference draws it plain.
+    /// </para>
+    /// <para>
+    /// <strong>The rule is narrower than the DOCX one and is not an OOXML rule at all.</strong>
+    /// <c>DomainMapper.cxx</c>:3037-3047 declines to insert <em>any</em> character style on a run inside
+    /// a TOC; the WW8 reader instead declines exactly one, in the sprm handler itself —
+    /// <c>SwWW8ImplReader::Read_CColl</c> (<c>sw/source/filter/ww8/ww8par6.cxx</c>:4135-4160) returns
+    /// without applying the style when <c>m_bLoadingTOXCache &amp;&amp;
+    /// m_vColl[nId].GetWWStyleId() == ww::stiHyperlink</c>, under a comment saying why: *"for the
+    /// hyperlinks inside TOX in MS Word is not same with a common hyperlink Character styles: without
+    /// underline and blue font color"*. So <c>FollowedHyperlink</c> (<c>stiHyperlinkFollowed</c>, 86) and
+    /// every style of the document's own are kept, and the run's direct sprms are kept in all cases —
+    /// only the style layer of the one built-in style goes.
+    /// </para>
+    /// <para>
+    /// Keyed on the style's <c>sti</c> and not on its name, exactly as the reference is: a document may
+    /// rename the built-in style, and may equally name a style of its own <c>Hyperlink</c>.
+    /// </para>
+    /// </remarks>
+    internal static bool IsIndexLinkStyle(Ww8StyleSheet styles, ushort styleIndex)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+        return styles.At(styleIndex) is { IsCharacterStyle: true, Sti: Ww8Style.HyperlinkStyle };
     }
 
     /// <summary>

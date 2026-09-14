@@ -30,20 +30,30 @@ namespace Paperless.WordProcessing.Tests;
 /// </para>
 /// <para>
 /// So the defect round 124 saw on <c>RMI_…GettingOffOil.doc</c> — two as-char pictures drawn on one
-/// baseline, one over the other — is not this mechanism and is still open against the WW8 reader.
-/// See <c>probes/wordsgroup-r128/results.md</c> §3.
+/// baseline, one over the other — is not this mechanism. See <c>probes/wordsgroup-r128/results.md</c>
+/// §3, which seated it against the WW8 reader.
+/// </para>
+/// <para>
+/// <b>And that seat is closed, by the <c>.doc</c> half of this pair.</b> The WW8 walk dropped the
+/// anchor character of every frame it made, floating or as-character, so two adjacent inline pictures
+/// arrived at the layout with <em>one</em> offset between them — and an inline object's offset is a
+/// boundary, so there was nothing for the measurer to break at. <c>inline-object-pair.doc</c> is
+/// 26.2.4.2's own DOC export of two 4.4 in pictures in one paragraph on a 6.925 in measure; at the base
+/// of round 130 this tree drew them at <c>y</c> 84.9–171.3 and 70.5–171.3, sharing a bottom edge, and it
+/// now draws 70.5–156.9 and 156.9–257.7 against the reference's 70.6–157.0 and 157.0–257.6.
 /// </para>
 /// </remarks>
 public sealed class InlineObjectPairTests
 {
     /// <summary>Each object on its own line, and the second below the first.</summary>
-    [Fact]
-    public void TwoWideInlineObjectsTakeTwoLines()
+    [Theory]
+    [InlineData("inline-object-pair.docx")]
+    [InlineData("inline-object-pair.doc")]
+    public void TwoWideInlineObjectsTakeTwoLines(string name)
     {
         RecordingDrawingSink sink = new();
 
-        using (DocumentSource source = DocumentSource.FromFile(
-                   Corpus.Require("inline-object-pair.docx")))
+        using (DocumentSource source = DocumentSource.FromFile(Corpus.Require(name)))
         {
             using IDocument document = new WordProcessingReader().Read(source);
 
