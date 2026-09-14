@@ -164,6 +164,42 @@ internal static class SheetTextLayout
     private static Colour Ink(Colour? portion, Colour fallback, bool field)
         => field ? LinkColour : portion ?? fallback;
 
+    /// <summary>The rule under one run: the one it states, or the one a field always takes.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The link's underline and the link's colour come out of one function call</strong>,
+    /// and this tree modelled only the colour half. <c>ScEditUtil::GetCellFieldValue</c>
+    /// (<c>sc/source/core/tool/editutil.cxx:209-244</c>) handles a
+    /// <c>text::textfield::Type::URL</c> by writing <em>both</em>
+    /// <c>*ppTextColor = …GetColorValue(LINKS)</c> and
+    /// <c>*ppFldLineStyle = FontLineStyle::LINESTYLE_SINGLE</c>; <c>ScFieldEditEngine</c> passes
+    /// both out through <c>CalcFieldValue</c> (<c>:895-906</c>), <c>ImpEditEngine::UpdateFields</c>
+    /// stores them on the field's own character attribute
+    /// (<c>editeng/source/editeng/impedit2.cxx:3229-3231</c>), and
+    /// <c>EditCharAttribField::SetFont</c> (<c>editeng/source/editeng/editattr.cxx:349-350</c>)
+    /// applies them to the font the run is drawn with. So the two travel together and neither is
+    /// conditional on what the file says — see <see cref="LinkColour"/> for the colour half.
+    /// </para>
+    /// <para>
+    /// <c>SetUnderline</c> <em>replaces</em> whatever the run's own font asked for, so a field
+    /// takes exactly one line even where the cell states two. That is why this returns the style
+    /// rather than the maximum of the two.
+    /// </para>
+    /// <para>
+    /// <strong>The reference's own flat export cannot see this and says the opposite.</strong>
+    /// <c>ScXMLExport</c> resolves a field with <c>GetCellFieldValue(*pField, &amp;rDoc, nullptr,
+    /// nullptr)</c> (<c>sc/source/filter/xml/xmlexprt.cxx:3062</c>) — both out-parameters null —
+    /// so a <c>--convert-to fods</c> of a workbook with a hyperlink cell prints
+    /// <c>style:text-underline-style="none"</c> and the cell's stated colour on the very cells
+    /// 26.2.4.2's own PDF draws navy and underlined. Measured on
+    /// <c>084_Service_invoice_Use_this_template</c>: the flat export gives cell B13
+    /// <c>underline=none, colour=#000000</c>, the PDF a <c>#000080</c> stroke 0.51 pt thick from
+    /// x 83.8 to 193.3. The resolved view is the wrong instrument for this one attribute.
+    /// </para>
+    /// </remarks>
+    private static SheetUnderline Line(SheetUnderline stated, bool field)
+        => field ? SheetUnderline.SingleLine : stated;
+
     private static readonly ConcurrentDictionary<string, ParagraphLayouter> Layouters =
         new(StringComparer.Ordinal);
 
@@ -251,12 +287,15 @@ internal static class SheetTextLayout
                     foreach (SheetTextSegment segment in line.Run.Segments)
                     {
                         DecorateSegment(
-                            sink, segment, line, Ink(segment.Colour, fallback, cell.IsField));
+                            sink, segment, line, Ink(segment.Colour, fallback, cell.IsField),
+                            cell.IsField);
                     }
                 }
                 else
                 {
-                    Decorate(sink, cell.Format, face, line, Ink(null, fallback, cell.IsField));
+                    Decorate(
+                        sink, cell.Format, face, line, Ink(null, fallback, cell.IsField),
+                        cell.IsField);
                 }
             }
         }
@@ -409,8 +448,9 @@ internal static class SheetTextLayout
     /// </para>
     /// </remarks>
     private static void Decorate(
-        IDrawingSink sink, SheetCellFormat format, SheetFace face, PlacedLine line, Colour colour)
-        => Rules(sink, format.Underline, format.IsStruckThrough, face, line.Run.Size,
+        IDrawingSink sink, SheetCellFormat format, SheetFace face, PlacedLine line, Colour colour,
+        bool field)
+        => Rules(sink, Line(format.Underline, field), format.IsStruckThrough, face, line.Run.Size,
                  line.X, line.Run.Width, line.Baseline, colour);
 
     /// <summary>
@@ -423,9 +463,9 @@ internal static class SheetTextLayout
     /// to be the reason this was done per line.
     /// </remarks>
     private static void DecorateSegment(
-        IDrawingSink sink, SheetTextSegment segment, PlacedLine line, Colour colour)
-        => Rules(sink, segment.Underline, segment.StruckThrough, segment.Face, segment.Size,
-                 line.X + segment.Offset, segment.Width, line.Baseline, colour);
+        IDrawingSink sink, SheetTextSegment segment, PlacedLine line, Colour colour, bool field)
+        => Rules(sink, Line(segment.Underline, field), segment.StruckThrough, segment.Face,
+                 segment.Size, line.X + segment.Offset, segment.Width, line.Baseline, colour);
 
     private static void Rules(
         IDrawingSink sink,
