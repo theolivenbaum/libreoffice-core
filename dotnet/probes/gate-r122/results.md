@@ -61,6 +61,14 @@ uppercased.
 character-count-stable and still not reproducible. Where a round needs the reference to be stable
 in what it *says*, diff the extracted text, not its length.
 
+## Superseded: the two-state claim below is wrong
+
+**Gate r129 refuted this.** This file says the document has two states and that two fresh renders
+"named both". It has at least **three** — 278866, 278868 and **278870** — because there are two
+*independent* ß/ss sites, `Janßen`/`Janssen` and the `Meß`/`Mess` found here, and this write-up
+treated them as one. Two renders that agree sample the same corner twice and bound nothing. See
+`probes/gate-r129/results.md`; the numbers below are correct as observations and wrong as a bound.
+
 ## An instrument error of mine, recorded so it is not re-derived
 
 My first count of the two runs gave **277247 and 277243**, a difference of 4, and I nearly wrote

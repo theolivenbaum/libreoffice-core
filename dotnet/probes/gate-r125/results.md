@@ -38,7 +38,7 @@ column identical, the reference moving by 2.
 recorded this document as a C11 oscillator and named both of its states from two fresh reference
 renders on the same UTC day: **278868 and 278866**. Those are exactly the two values here, and the
 mechanism is recorded there too — `Mess,` / `Meß,` twice, a face resolving differently between
-runs, the same class as C1. The oscillator has simply returned its other value. Our column has now
+runs, the same class as C1. The oscillator has simply returned its other value. **Corrected at r129: "its other value" is wrong — there is no pair. The document reaches at least three totals from two independent ß/ss sites, and r129 observed 278870.** Our column has now
 held 278869 across r119, r122 and r125.
 
 ## What this establishes, stated narrowly
