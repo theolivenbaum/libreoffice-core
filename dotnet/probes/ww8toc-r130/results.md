@@ -283,10 +283,24 @@ project scores an invisible-to-the-gate change on):
 inside the instrument's own resolution — 512 px on the long edge, where ±0.02 is one region's
 antialiasing — and they move because the anchor character changes a paragraph's offsets, not its ink.
 
-**Slides and sheets cannot move**, and it is structural rather than measured: the two changed reader
-files are in `Paperless.WordProcessing/Ww8`, `git grep` says the only type any other reader borrows
-from that folder is `Ww8DateTime`, and the third change's guard is unreachable without inline
-objects, which only the word-processing layout passes.
+**The third change is in a shared layer, so the other two word-processing formats were swept too**,
+from the converted ODF corpus at `/home/user/corpus-odf/words` (`sweep-tree.py`, 338 of 338 on each
+leg of each column, 0 failures):
+
+| column | documents | renderings that move |
+|---|--:|--:|
+| `.odt`, 26.2.4.2's own conversion of the words track | 338 | **0** |
+| `.rtf`, the same | 338 | **0** |
+
+Byte-identical, both columns, both legs — which is what the `InlineAscent` census predicts: an
+as-character object's ascent is its whole height in every reader but the WW8 `SHAPE`-field one, so
+the new guard changes nothing where no object's ascent is below the paragraph font's.
+
+**Slides and sheets cannot move at all**, and that is structural rather than measured: `objects` is
+an optional parameter of `MeasuredParagraph.Measure` and the only callers that pass one are
+`PageContent` and `DocxLayoutSource`, so `_objects.Length > 0` is false for every `SlideTextLayout`
+and `SheetTextLayout` measurement. The two reader files are in `Paperless.WordProcessing/Ww8`, and
+`git grep` says the only type any other reader borrows from that folder is `Ww8DateTime`.
 
 ---
 
