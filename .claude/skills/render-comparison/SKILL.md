@@ -746,6 +746,41 @@ experiment, and it also removes anything else the flat format cannot carry. Use 
 *"is this the renderer's own drawing"*, not to establish what the renderer's drawing looks
 like in the original document.
 
+## A box a tool hands you may not be the box that was drawn
+
+`pdf-ops.py` reports what the operators say. Higher-level libraries often report something
+else — a *declared* extent — and the two diverge exactly where the interesting defects live.
+
+Measured, and it cost a round its headline. PyMuPDF's `page.get_image_info()` returns an image
+XObject's **placement box**, which is where the full bitmap would land if nothing clipped it.
+For a cropped picture that box is *deliberately* much larger than the visible frame: a picture
+showing the middle tenth of its source is placed ten times the frame's width and then clipped
+back. Read as drawn geometry, that looks exactly like a renderer scaling an image wildly and
+hanging it off the paper.
+
+A round reported two documents drawing a nested group's members **"~8.85x too wide and mostly
+off the paper"** on that basis. The next round found 8.85 was `1/(1 - l - r)` of each picture's
+own `a:srcRect` — four crops predicting 8.8176 / 8.7928 / 8.7291 / 8.9190 against measured
+boxes of 8.820 / 8.795 / 8.729 / 8.917. The clip rectangles agreed with the reference's own
+image placements to **0.09 pt**. Nothing was 8.85x anything; the transform had been right all
+along, and a model was nearly "fixed" by a factor derived from a number that was never a
+defect.
+
+**The general form:** *a defect whose magnitude is suspiciously close to a ratio the file
+states somewhere is probably that ratio, arriving through your instrument rather than through
+the renderer.* Before believing a gross geometric factor, try to reconstruct it from the
+document's own numbers. If you can, you have found your tool's convention, not a bug.
+
+Two habits:
+
+- When a tool reports a rectangle, know whether it is the **declared** extent or the
+  **effective** one. If the page has a clip, `re W n` in the operators is the box that matters,
+  and a raster crop tells you what actually landed.
+- The real defect was underneath the artefact and smaller: a `pic:pic` stating
+  `a:prstGeom prst="ellipse"` was clipped to its bounding box rather than to the ellipse. The
+  artefact was not hiding *nothing* — it was hiding something a tenth its apparent size, which
+  is the usual arrangement.
+
 ## The C++ in this tree is not the reference binary
 
 The checkout is a development branch; the `soffice` generating your references is a release

@@ -282,6 +282,40 @@ the candidates the image cannot decide between* and then go and measure. A readi
 promotes itself into a diagnosis is worse than no reading, because it is cited later as though
 it were one.
 
+### Readers who DISAGREE are doing the job — and a reader who bounds itself is worth more than one that does not
+
+Two results from a ten-reader run, both worth more than any single reading in it.
+
+**Disagreement is a finding, not noise.** Two readers, on two different dense spreadsheet
+pages, both reported a text-weight difference — and reported it in **opposite directions**:
+one said ours was darker, the other said the reference was. Three readers independently named
+*downsampling in the compositor* as a candidate cause. A property that two uncontaminated
+readers describe with opposite signs is almost certainly in the instrument, not in either
+renderer. Had one reader seen both pages, it would have reported a consistent story and been
+believed. Run them separately and let them contradict each other; that contradiction is the
+control paying out.
+
+**Ask every reader to state its own resolution limit, and to say which of its claims that
+voids.** Every reader in that run did, unprompted beyond the instruction, and it changed what
+was usable:
+
+- one computed ~115 dpi and voided its own "no header rule / no footer rule / no image border"
+  claims as unresolvable, *and then argued past the limit for the one claim that survived*: the
+  reference half plainly renders a one-pixel header rule, so the rasterization **can** show
+  hairlines there, so ~43 missing table-of-contents underlines are a real absence and not a
+  thin-line dropout. That reasoning is what made it the strongest finding of the ten;
+- one refused to state a direction at all on row heights, because two of its own measurements
+  contradicted each other and both sat inside its error bar. "No direction established" is a
+  better answer than a coin flip dressed as an observation;
+- one noted its corner estimates carried ±5-8 px because the shape's gradient faded toward the
+  background at exactly the corners it needed, and insisted the ratio be recomputed from the
+  operators before anyone used it. It was right to: the stored adjustment settled the geometry
+  exactly, and the eyeballed ratio would not have.
+
+So put both in the brief: **state your resolution limit, and say explicitly which of your own
+claims it voids.** A reader that marks half its observations unreliable has made the other half
+usable.
+
 ### `pdftotext -bbox` reports an ink box, not a baseline
 
 Its `yMin` is derived from the **font descriptor**, not from the text-positioning operator. So two
