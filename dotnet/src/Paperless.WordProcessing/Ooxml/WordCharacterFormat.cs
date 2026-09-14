@@ -143,18 +143,32 @@ public sealed record WordCharacterFormat
     /// Which of <c>ST_Underline</c>'s values a <c>w:u</c> asks for.
     /// </summary>
     /// <remarks>
-    /// <c>double</c> and <c>wavyDouble</c> are the only two of the eighteen that draw two lines
-    /// (ECMA-376 17.18.99), and <c>writerfilter</c> maps them to <c>LINESTYLE_DOUBLE</c> and
-    /// <c>LINESTYLE_DOUBLEWAVE</c> — the second of which this engine draws as a double line
-    /// because it draws no wave at all. An unstated <c>w:val</c> is one line: the attribute
-    /// defaults to <c>single</c>.
+    /// <para>
+    /// <c>DomainMapper::handleUnderlineType</c>
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:5046-5106) maps ST_Underline's
+    /// eighteen values onto nine <c>FontLineStyle</c>s, and the two distinctions this engine keeps
+    /// are the ones that change the geometry: how many lines, and how thick.
+    /// </para>
+    /// <para>
+    /// <c>double</c> and <c>wavyDouble</c> draw two. <c>thick</c> and the six heavy forms —
+    /// <c>dottedHeavy</c>, <c>dashedHeavy</c>, <c>dashLongHeavy</c>, <c>dashDotHeavy</c>,
+    /// <c>dashDotDotHeavy</c>, <c>wavyHeavy</c> — draw one at about twice the weight. The other
+    /// nine draw one ordinary line, and an unstated <c>w:val</c> is one too: the attribute defaults
+    /// to <c>single</c>.
+    /// </para>
     /// </remarks>
     internal static TextUnderline UnderlineOf(WordProperty property)
-        => !property.HasValue || property.Value == "none"
-            ? TextUnderline.None
-            : property.Value is "double" or "wavyDouble"
-                ? TextUnderline.DoubleLine
-                : TextUnderline.SingleLine;
+    {
+        if (!property.HasValue || property.Value == "none") return TextUnderline.None;
+
+        return property.Value switch
+        {
+            "double" or "wavyDouble" => TextUnderline.DoubleLine,
+            "thick" or "dottedHeavy" or "dashedHeavy" or "dashLongHeavy" or "dashDotHeavy"
+                or "dashDotDotHeavy" or "wavyHeavy" => TextUnderline.BoldLine,
+            _ => TextUnderline.SingleLine,
+        };
+    }
 
     /// <summary>
     /// The Latin family the innermost layer to name one gives, or null when none does.

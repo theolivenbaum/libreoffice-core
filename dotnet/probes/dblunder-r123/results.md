@@ -1,7 +1,9 @@
-# Round 123 — a double underline is two thinner lines, and none of the three rules was where the reference puts it
+# Round 123 — a double underline is two thinner lines, and no rule at all was where the reference puts it
 
-Seat `agent/dblunder`, based on `d98c8be24`. The register's **O68**, and out of it two more: **O69**,
-seated as nil reach, and the offset half of O64, which is folded into this round rather than seated.
+Seat `agent/dblunder`, based on `d98c8be24`. The register's **O68**, and out of it three more: **O69**,
+seated as nil reach; the offset half of O64; and a bold underline. The last two are folded into this
+round rather than seated, in both cases because the model that closes them was already built and
+measured here and a later round would have to re-derive it.
 
 Every arm below is confirmed twice, once in the 27.2 tree and once against the installed 26.2.4.2's
 own output, per `dotnet/CLAUDE.md`'s rule 1.
@@ -24,7 +26,10 @@ own output, per `dotnet/CLAUDE.md`'s rule 1.
    `drawStraightTextLine` centres the first line and then centres the second *and adds a whole
    further thickness*. `SheetTextLayout` drew them two apart, so **O64's "the Calc path is exact"
    was a statement about the thickness and about nothing else**.
-6. **And no rule of any of the three kinds was where the reference puts it.** Round 120 quantised
+6. **A BOLD underline is a fourth size and it had none.** `((descent x 50) + 50) / 100` against the
+   single's `x 25`, plus a guard nobody has ever met. Reach **6 rules in 2 of 947 documents** —
+   twice this seat's own — so it is landed rather than seated.
+7. **And no rule of any of the four kinds was where the reference puts it.** Round 120 quantised
    the thickness onto the device and left the offset a fraction of the em. Measured over 126
    authored rules per module, a single underline was **0.067 pt** out on average and **0.139 pt** at
    worst. The same device chain answers the offsets, and with it this tree reproduces
@@ -237,12 +242,9 @@ of its own run, where a border spans its cell — and scores it.
 
 Two exclusions, both stated rather than quietly dropped:
 
-- **Scaled pages.** A slide, a shrunk cell or a sheet printed to a scale is drawn through a
-  transform, so the page states the reference's number multiplied by something this instrument
-  cannot see. O64 is what separates them: an unscaled rule's thickness is a whole logical unit and a
-  scaled one is not. **1184 rules.** A half-point test on the *size* does not do it — a scale of
-  0.975 turns a 5.13 pt em into a clean 5.00, which is how the first cut of this scan produced 1116
-  spurious misses.
+- **Scaled pages, 1184 rules.** A slide, a shrunk cell or a sheet printed to a scale is drawn
+  through a transform, so the page states the reference's number multiplied by something this
+  instrument cannot see. They cannot be *predicted*; §3.5 shows they can still be *compared*.
 - **Document-embedded faces**, whose metrics are the file's rather than the machine's: **151 rules**
   across Roboto, Montserrat, Rubik, Verdana, Arial Narrow, Alegreya Sans, Play and Noto Sans
   Armenian. Plus 84 rules on faces that resolve to a file this reader cannot parse.
@@ -253,6 +255,26 @@ Two exclusions, both stated rather than quietly dropped:
 | strikethrough | 5978 | **5978** |
 | | 15 103 | **15 062** (99.73 %) |
 
+#### A scaled page is not detected by looking for round numbers, and the first cut of this scan proved it
+
+**This is worth its own paragraph because it produced a wrong answer that looked entirely
+plausible.** The first cut separated scaled pages from unscaled ones by testing the reported em
+against a half-point grid — every stated font size is a whole or half point, and a Calc cell's is
+that snapped to a whole hundredth of a millimetre, which stays within 0.006 pt of it. That test
+reported **1116 misses**, 148 of them on the `.xls` track alone, in a tidy pattern of faces and
+sizes that read exactly like a real defect in the model.
+
+It is not a defect. **A scale factor multiplies the size too**, and it lands on a clean number as
+often as any other: 0.975 turns a 5.13 pt em into 5.00, and `015_Free_Gantt_Chart_Template`'s
+`LiberationSans-Italic 5.0000` is a scaled 5.13 pt run whose thickness is 0.304 pt — which is not a
+whole hundredth of a millimetre and therefore not a thickness the reference can draw unscaled. So
+the test to make is on the **thickness** and not on the size: O64 says an unscaled rule's thickness
+is a whole logical unit of the map mode its page was painted in, and a scaled one is not. That test
+moves the count from 1116 to 41 and every one of the 41 is explained.
+
+The general form: **a page transform is invisible in every number on the page, so it has to be
+detected by a quantity that is quantised rather than by one that looks round.**
+
 By track: docx 2394 of 2410, doc 613 of 621, pptx 661 of 661, ppt 246 of 260, xlsx 7590 of 7593,
 xls 3526 of 3526, xlsm 15 of 15.
 
@@ -262,7 +284,7 @@ xls 3526 of 3526, xlsm 15 of 15.
 |---:|---|
 | 14 | `ws_prod-…-European-Safety-Strategy-Initiative.ppt`: a shadowed run draws its rule twice, and this scanner matches both to both spans |
 | 6 | `RobertQ_Service.doc`'s own **double** underlines, which the scanner classifies as two singles — the model predicts them exactly (§3.4) |
-| 6 | a **bold** underline, `LINESTYLE_BOLD`, on `License App Instructions 2-22.docx` and `OM template for non-complex NCC operators.docx`. `nBLineHeight = ((descent x 50) + 50) / 100` reproduces both to the digit — Liberation Serif at 12 pt gives 13 px = 1.3 pt against a drawn 1.3, Liberation Sans Bold at 17 pt gives 18 px = 1.8 pt against a drawn 1.8. **This engine has no state for a bold underline and draws it at the single thickness.** Reach: 6 rules in 2 of 947 documents |
+| 6 | a **bold** underline, `LINESTYLE_BOLD`, on `License App Instructions 2-22.docx` and `OM template for non-complex NCC operators.docx`. `nBLineHeight = ((descent x 50) + 50) / 100` reproduces both to the digit — Liberation Serif at 12 pt gives 13 px = 1.3 pt centred at 28 twips against a drawn 1.3 at 1.4, Liberation Sans at 17 pt gives 18 px = 1.8 pt centred at 38 twips against a drawn 1.8 at 1.9, and the same four numbers come out of the Bold face files as out of the Regular ones. **Landed in this round** — see §4.4 — so these six are no longer misses of the model, only of this scanner, which cannot know a run's underline style from the page |
 | 6 | a glyph-fallback face: the rule's metric is the run's own face and this scanner reads the face the *span* was subset under, which for a fallback run is DejaVu Sans or FreeSerif |
 | 9 | a paragraph or cell border that happens to underrun a full-width run, plus two rows whose thickness lands on a whole unit by luck on a scaled page |
 
@@ -275,6 +297,36 @@ exactly 3 x thickness. Hand-computing the chain for 16 pt Liberation Serif Bold:
 35, `n2LineHeight` 6, `n2LineDY` max(6, 5) = 6, offsets 9 and 21, `nOffset` 3, so `HCONV(12)` = 24
 twips = **1.2 pt** and `HCONV(24) + HCONV(6)` = 48 + 12 twips = **3.0 pt**. Four of four to the
 digit, on a document nobody authored for the purpose.
+
+### 3.5 And the 1184 scaled rules, which can be compared even though they cannot be predicted
+
+Both sides scale by the same factor, so a *comparison* needs no knowledge of it even though a
+*prediction* does. `compare-rules.py` renders each of the **31 documents that hold a scaled rule**
+with this tree, extracts text lines from both renderings with the same filter, and pairs them by
+page, left edge and depth within 1 pt — an unpaired rule is reported as unpaired rather than quietly
+dropped, since a rule drawn somewhere else is a finding and not a pass.
+
+| | |
+|---|---:|
+| reference text rules on those 31 documents | 1762 |
+| paired | 1418 |
+| **agree to 0.0015 pt on thickness and depth** | **544** |
+| agree to 0.02 pt on both | **1412** |
+| mean \|difference\|, thickness | 0.0051 pt |
+| mean \|difference\|, depth | 0.0055 pt |
+| worst | 0.1992 pt thickness, 0.3975 pt depth |
+
+**So a scaled rule is close but not exact, and the reason is the order of two operations.** On
+`RMP 2011-2014 and Inventory.xls` the reference draws 0.306 pt at 0.697 below the baseline and this
+tree draws **0.3118 at 0.7086** — and 0.3118 is exactly `11/100 mm`, the *unscaled* answer for the
+6.004 pt em the page states. The reference quantises at the size before the transform and then
+scales the whole page; this tree quantises at the size after it. The 544 that agree are the
+unscaled rules that share those pages.
+
+The residue is **0.005 pt on average**, an order of magnitude below the offset error this round
+removed and two below the double underline's. **Seated as O70** rather than fixed here: closing it
+means the rule metric knowing the page transform before it is computed, which is a different change
+in three layout models, and the number that sizes it is above.
 
 ---
 
@@ -332,7 +384,43 @@ Resolving the type independently would have double-underlined all seven.
 | `SheetTextLayout.Rules` | `MetricGrid.TextLine` | right thickness, **wrong offsets** — the single underline's for line 1 and twice the thickness below it for line 2 |
 | `SlideTextLayout.Rules` | `MetricGrid.TextLine` | design-unit offsets; no double state, and none added (O69) |
 
-### 4.4 O64's row overstates itself, and this is the correction
+### 4.4 A bold underline, landed on the same argument as the double one
+
+The corpus has **two** documents with a bold underline and **one** with a double, so declining the
+first while implementing the second would make the rule *how tired the round is* rather than *what
+the corpus contains*. `TextUnderline.BoldLine` and `RuleWidths.BoldUnderline` /
+`BoldUnderlineOffset`:
+
+```
+HarfBuzz   mnBUnderlineSize   = ceil(underlineThickness x scale x 2)            :232
+           mnBUnderlineOffset = ceil(-underlineOffset x scale - size/2)         :234
+descent    nBLineHeight       = ((nDescent x 50) + 50) / 100                    :289
+           if (nBLineHeight == nLineHeight) nBLineHeight++                  :290-291
+           mnBUnderlineOffset = nUnderlineOffset - nBLineHeight/2               :323
+```
+
+Spellings: `w:u`'s `thick` and its six heavy forms (`DomainMapper.cxx`:5076-5101),
+RTF's `\ulth` family and `\ulhwave` (`rtfdocumentimpl.cxx`:2085-2102), `sprmCKul` operands 6, 20,
+23, 25, 26, 27 and 55 (`ww8par6.cxx`:3610-3618), and ODF's `style:text-underline-width="bold"` or
+`"thick"` — a **third** attribute of the same one item, so it joins the style and the type in
+`ResolveTogether`, and `undlihdl.cxx`:135-136's *"a double line style has priority over a bold line
+style"* decides the order in which they are asked.
+
+**The equality guard is in and it is unwitnessed.** `nBLineHeight++` fires only where
+`((d x 50) + 50) / 100` equals `((d x 25) + 50) / 100`, which on a 720 dpi device needs a descent of
+one or two pixels — sub-point text that no corpus document contains and that neither probe reaches.
+It is implemented because it is in the source: a model that drops a branch because the probe never
+touched it is the failure the whole face census was meant to prevent.
+
+**Both witnesses reproduce to the digit**, and from the Bold face files as well as the Regular ones,
+which matters because `pdffonts` names the subset and not the metric source: Liberation Serif at
+12 pt gives 26 twips centred at 28, Liberation Sans at 17 pt gives 36 centred at 38, against a
+reference that draws 1.3 pt at 1.4 and 1.8 pt at 1.9. `RuleWidthTests.ABoldUnderlineIsItsOwnThicknessAndItsOwnOffset`.
+
+**Not done for a bold *strikethrough*.** `mnBStrikeout*` exists in the same function and no format
+in scope states one, so there is nothing to read it from.
+
+### 4.5 O64's row overstates itself, and this is the correction
 
 O64 closed on **810 of 810**, and that figure is a *median thickness*: `read-rules.py` takes the
 median of the rules it finds in a window and reports no position at all, so the sweep it was scored
@@ -353,7 +441,40 @@ on **structurally could not see** where a rule sat. Two consequences:
 
 ### 5.1 Round 120's own sweep, all 810 rules
 
-<!--SWEEP810-->
+`probes/quantise-r120`'s three fixtures, regenerated from its own `make-sweep.py`, rendered by both
+binaries and scored by its own `score.py` against its banked reference readings. The base leg
+reproduces round 120's figure exactly, which is the check that the harness still measures what it
+measured.
+
+| leg | Writer | Calc | Impress | total |
+|---|---:|---:|---:|---:|
+| base, `d98c8be24` | 180 / 270 | 270 / 270 | 180 / 270 | **630 of 810** |
+| after | **270 / 270** | 270 / 270 | 180 / 270 | **720 of 810** |
+
+Per kind, and the last column is the number of rules actually drawn — which `score.py` does not check
+and which is half of what a double underline is:
+
+| leg | module | kind | exact | mean \|error\| | worst | rules drawn |
+|---|---|---|---:|---:|---:|---:|
+| base | Writer | double | 0 of 90 | 0.3822 pt | 1.5000 pt | 90 |
+| after | Writer | double | **90 of 90** | **0.0000 pt** | **0.0000 pt** | **180** |
+| reference | Writer | double | — | — | — | 180 |
+| base / after | Impress | double | 0 of 90 | 0.3814 pt | 1.5021 pt | 90 |
+| base / after | Calc | double | 90 of 90 | 0.0002 pt | 0.0005 pt | 180 |
+| base / after | all three | single | 270 of 270 | 0.0001 pt | 0.0005 pt | 270 |
+| base / after | all three | strikethrough | 270 of 270 | 0.0001 pt | 0.0005 pt | 270 |
+
+**Single and strikethrough are 540 of 540 on both legs, so no regression is hiding under the
+improvement.** The 0.0002 pt on the Calc and Impress legs is the channel's own floor: the reference
+states a thickness in thousandths of a point.
+
+**The 90 still out are the Impress double rows and they have no corpus witness** — 0 of 302 `.odp`
+and 0 of 251 `.pptx`, and a `.ppt` cannot state one. That is O69, and 720 of 810 with the reason is
+worth more than 810 of 810 reached by writing code for a path no document takes.
+
+*What this sweep still cannot see:* `score.py` scores a median thickness and no position, which is
+how O64 closed at 810 of 810 while every rule on the page sat in the wrong place. §3 is the
+instrument for that and this one is kept only for continuity with round 120.
 
 ### 5.2 The position probe, ours against the reference
 
@@ -369,25 +490,115 @@ Mean absolute offset error before: single 0.0633 pt (Writer) / 0.0670 (Calc), st
 
 ### 5.3 Reach
 
-<!--REACH-->
+`probes/quantise-r120/sweep.py` renders the whole corpus with one binary and banks path, status,
+page count, alphanumeric characters and the PDF's sha256, deleting each render as soon as the four
+numbers are taken. Two legs on **2026-09-14 UTC**, both with `SOURCE_DATE_EPOCH=1700000000`, one
+temporary directory per *document*, three workers, and **no build in flight in either** — both
+binaries were captured to a directory outside the tree first, so nothing could be swapped under a
+sweep.
+
+| leg | binary | rows | failed |
+|---|---|---:|---:|
+| `reach-base.tsv` | this tree at `d98c8be24` | 947 | 0 |
+| `reach-after.tsv` | + this round | 947 | 0 |
+
+**368 of 947 renderings change. 0 page counts. 0 alphanumeric characters.**
+
+| track | moved | of |
+|---|---:|---:|
+| words | 147 | 338 |
+| slides | 133 | 302 |
+| sheets | 88 | 307 |
+
+By extension: docx 106, pptx 94, xlsx 73, doc 41, ppt 39, xls 13, xlsm 2. `moved.txt`.
+
+**That is the same 368 O64 moved, track for track and extension for extension**, which is the
+cross-check it looks like: these are the same rules seen from the offset side rather than the
+thickness side, so the set of renderings carrying one is necessarily identical. It also says how
+little of the 368 is this seat's own subject — **one** of them holds a double underline and **two**
+hold a bold one; the other 365 move because their ordinary underlines and strikethroughs are now
+where the reference puts them.
+
+A rule is ink, so no gate column can see one: the gate's three checks are page count, alphanumeric
+characters and font embedding. C13 is not a hazard on this pair either — both legs are ours, both
+pinned by `SOURCE_DATE_EPOCH`, and the reference takes no part in the comparison.
 
 ---
 
 ## 6. Tests
 
-<!--TESTS-->
+### 6.1 New
+
+| test | what it pins |
+|---|---|
+| `RuleWidthTests.EveryMeasuredCalcRuleSitsWhereTheDeviceChainPutsIt` | 42 (face, size) pairs × four rules, offsets in whole hundredths of a millimetre read off the reference |
+| `RuleWidthTests.EveryMeasuredWriterRuleSitsWhereTheDeviceChainPutsIt` | the same 42 in whole twips |
+| `RuleWidthTests.ABoldUnderlineIsItsOwnThicknessAndItsOwnOffset` | both corpus witnesses, 26 twips centred at 28 and 36 centred at 38, with the single underline of the same face and size asserted beside each so a doubling cannot pass |
+| `UnderlineTests.ADoubleUnderlineIsTwoThinnerLinesThreeThicknessesApart` | two rules, 8 twips thick, tops at 16 and 42 twips — the gap is 18, more than twice the thickness, so a reader that put the second one thickness below the first fails it |
+| `UnderlineTests.EachLineOfADoubleUnderlineIsThinnerThanASingleOne` | the half of O68's seat that was right |
+| `RtfDoubleUnderlineTests.EachUnderlineControlWordAsksForItsOwnNumberOfLines` | twelve control words, including all four of `\uld`, `\uldash`, `\uldashd`, `\uldashdd` that a prefix match would double-underline |
+| `RtfDoubleUnderlineTests.ADoubleUnderlinedRunDrawsTwoRules` | 2 / 1 / 0 rules for `\uldb` / `\ul` / nothing |
+| `OdfUnderlineTypeTests.TheLevelDecidesBeforeTheAttribute` | five styles: inheriting both, restating the style alone, restating the type alone, turning it off, and stating neither |
+| `OdfUnderlineTypeTests.ASpanRestatingTheStyleAloneBeatsTheParagraphsType` | the same rule one level out, which is where `OdfFontNamePrecedenceTests`' bug lived |
+| `OdfUnderlineTypeTests` — the `Bold` and `BoldAndDouble` rows | the width as a third attribute of the one item, and that a double line beats a bold one |
+| `UnderlineTests.AWordUnderlineIsReadAsAStyleAndNotAsASwitch` | extended to the tri-state, `double` and `wavyDouble` included |
+| `UnderlineTests.AWordBinaryUnderlineIsAStyleAndThreeStylesAreNoLine` | extended to operands **3** and **43** |
+
+### 6.2 One test changed, and it was pinning the old wrong number
+
+`UnderlineTests.TheRuleIgnoresAPostTableLibreOfficeRefusesToBelieve` asserted the underline's top
+edge inside a **0.94-1.01 pt** band, which is what a design-unit offset deserves. The reference draws
+it at **1.05 pt** — 28 twips to the stroke's centre, less 7 for half the thickness — so the band was
+not merely loose, it excluded the right answer. It is now that constant, and the band is gone because
+the offset is no longer an approximation. The test still discriminates against the `post` branch,
+which is what it was written for.
+
+### 6.3 The full run
+
+| project | passed | failed | skipped |
+|---|---:|---:|---:|
+| `Paperless.Core.Tests` | 591 | 0 | 0 |
+| `Paperless.Text.Tests` | 744 | 0 | 0 |
+| `Paperless.Containers.Tests` | 109 | 0 | 0 |
+| `Paperless.Vector.Tests` | 309 | 0 | 0 |
+| `Paperless.Markup.Tests` | 259 | 0 | 0 |
+| `Paperless.OpenDocument.Tests` | 169 | 0 | 0 |
+| `Paperless.WordProcessing.Tests` | 1965 | 0 | 0 |
+| `Paperless.Spreadsheets.Tests` | 1387 | 0 | 0 |
+| `Paperless.Presentations.Tests` | 1203 | 0 | 0 |
+| `Paperless.Rendering.Tests` | 164 | 0 | 0 |
+| **subtotal** | **6900** | **0** | **0** |
+| `Paperless.Fidelity.Tests` | 542 | **10** | 0 |
+
+**The ten are the same ten by name that round 120 recorded**, and none of them is a rule:
+
+```
+TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop  (doc, docx, fodt, odt)
+PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt  (doc, docx, fodt, rtf)
+JustificationShrinkComparisonTests.TheParagraphBreaksWhereLibreOfficeBreaksIt  (justify-shrink-2013.docx)
+SheetDrawingComparisonTests.APictureIsDrawnWhereLibreOfficeDrawsIt  (sheet-rich-text.xlsx)
+```
+
+The first eight are the advance-channel family `dotnet/CLAUDE.md` leaves failing on purpose — they
+compare a position N glyphs deep inside one reference text object, where the channel's own resolution
+exceeds the tolerance — and the last two carry their own remarks.
+
+0 skipped, so the fidelity project covered what it claims to.
 
 ---
 
 ## 7. What this round did not do
 
-- **The slides double underline.** Seated as **O69**, nil reach, with both legs.
-- **A bold underline** (`w:u w:val="thick"`, `\ulth`, `sprmCKul` operand 6, ODF
-  `style:text-underline-width="bold"`), which the reference draws at
-  `((descent x 50) + 50) / 100` — about twice the single thickness — and this engine draws at the
-  single thickness. Measured at **6 rules in 2 of 947 documents** in §3.3, and the arithmetic that
-  would close it is already written down there. Not seated as its own row: it is a line of
-  `ResolveRuleWidths` and a fourth enum member whenever a document asks for it.
+- **The slides double underline.** Seated as **O69**, nil reach, with both legs. `SlideTextLayout`
+  gets no `TextUnderline` at all, and its single underline and strikeout **offsets** were corrected
+  with everyone else's.
+- **A bold underline on a slide or in a cell.** Same reason for the slide; for a cell,
+  `SheetUnderline` is SpreadsheetML's and BIFF's vocabulary and neither has a bold underline —
+  Excel's two *accounting* forms are a width rule on the rule's length, not on its weight.
+- **A bold *strikethrough*.** `mnBStrikeoutSize` and `mnBStrikeoutOffset` are computed in the same
+  function and no format in scope has a way to ask for one, so there is nothing to read it from.
 - **A wave, a dot or a dash.** Every pattern is still drawn solid, which is unchanged and is what
-  the four readers' comments already said.
+  the four readers' comments already said. What did change is that the *weight* half of the
+  vocabulary is no longer folded away with the pattern half: `dashDotDotHeavy` is now a bold line
+  drawn solid rather than an ordinary line drawn solid.
 - **The `above` variants** (`ImplInitAboveTextLineSize`), which nothing in this engine draws.

@@ -2456,16 +2456,21 @@ public sealed partial class Ww8DocumentReader
     /// byte for non-zero matters in both directions: 5 is "hidden" and 8 is a dot style Word never
     /// writes, and neither has a case in that switch, so both fall to <c>LINESTYLE_NONE</c> and draw
     /// nothing. 255 is the cancelling value and is likewise absent. Every value that <em>is</em> listed
-    /// is drawn as one plain rule apart from the two that are drawn with <em>two</em>: <c>3</c> is
-    /// <c>LINESTYLE_DOUBLE</c> and <c>43</c> is <c>LINESTYLE_DOUBLEWAVE</c>
-    /// (<c>ww8par6.cxx</c>:3605, :3619), and this engine draws no wave, so both come out as a
-    /// double line. The remaining fifteen are one line whatever pattern they name.
+    /// is drawn as one plain rule apart from two groups. <c>3</c> is <c>LINESTYLE_DOUBLE</c> and
+    /// <c>43</c> is <c>LINESTYLE_DOUBLEWAVE</c> (<c>ww8par6.cxx</c>:3605, :3619), and this engine
+    /// draws no wave, so both come out as a double line; <c>6</c>, <c>20</c>, <c>23</c>, <c>25</c>,
+    /// <c>26</c>, <c>27</c> and <c>55</c> are the <c>BOLD</c> weights (:3610-3618). The remaining
+    /// eight are one ordinary line whatever pattern they name.
     /// </remarks>
     internal static TextUnderline UnderlineOf(int kul) => kul switch
     {
         3 or 43 => TextUnderline.DoubleLine,
-        1 or 2 or 4 or 6 or 7 or 9 or 10 or 11
-            or 20 or 23 or 25 or 26 or 27 or 39 or 55 => TextUnderline.SingleLine,
+
+        // The heavy weights: 6 is `LINESTYLE_BOLD` and 20, 23, 25, 26, 27 and 55 are its patterned
+        // siblings (`ww8par6.cxx`:3610-3618).
+        6 or 20 or 23 or 25 or 26 or 27 or 55 => TextUnderline.BoldLine,
+
+        1 or 2 or 4 or 7 or 9 or 10 or 11 or 39 => TextUnderline.SingleLine,
         _ => TextUnderline.None,
     };
 

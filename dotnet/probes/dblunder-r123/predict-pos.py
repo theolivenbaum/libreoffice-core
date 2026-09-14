@@ -94,6 +94,8 @@ def device_metrics(m, family, size_pt, upi):
         d_off1 = math.ceil(n_off - n_size / 2.0)
         out['single'] = (math.ceil(n_size), [math.ceil(n_off)])
         out['double'] = (d_size, [d_off1, d_off1 + d_size * 2])
+        # mnBUnderlineSize = ceil(nSize * 2), sharing the double's own offset (:232-234)
+        out['bold'] = (math.ceil(n_size * 2.0), [d_off1])
         s_size = math.ceil(m['strikeSize'] * scale)
         out['strike'] = (s_size, [math.ceil(-m['strikePos'] * scale)])
         out['branch'] = 'harfbuzz'
@@ -122,7 +124,13 @@ def device_metrics(m, family, size_pt, upi):
     strike_off = -((asc - int_leading) // 3)        # negative: above the baseline
 
     d_off1 = under_off - two_dy2 - two_h
+    bold_h = ((clamped * 50) + 50) // 100
+    if bold_h == line_h:
+        bold_h += 1
+    bold_h2 = max(1, bold_h // 2)
+
     out['single'] = (line_h, [under_off - line_h2])
+    out['bold'] = (bold_h, [under_off - bold_h2])
     out['double'] = (two_h, [d_off1, d_off1 + two_dy + two_h])
     out['strike'] = (line_h, [strike_off - line_h2])
     out['branch'] = 'descent'

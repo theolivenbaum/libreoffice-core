@@ -221,6 +221,39 @@ public class RuleWidthTests
 
     private static Length Centre(Length top, Length thickness) => top + (thickness / 2);
 
+    /// <summary>
+    /// A BOLD underline is a third size, and both corpus witnesses are pinned here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>((descent × 50) + 50) / 100</c> against the single's <c>× 25</c>
+    /// (<c>vcl/source/font/fontmetric.cxx</c>:289), with a guard bumping it by one where the two
+    /// come out equal (:290-291). The numbers below were read off 26.2.4.2's own banked renderings
+    /// of the only two corpus documents that ask for one — `License App Instructions 2-22.docx`
+    /// draws Liberation Serif at 12 pt with a 1.3 pt rule whose stroke centre is 1.4 pt below the
+    /// baseline, and `OM template for non-complex NCC operators_August 2016.docx` draws Liberation
+    /// Sans at 17 pt with a 1.8 pt rule centred at 1.9.
+    /// </para>
+    /// <para>
+    /// Both are on a Writer page, so the unit is the twip. The single underline of the same face
+    /// and size is 14 and 18 twips, so the bold is not a rounding away from it in either case.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("Liberation Serif", 12, 26, 28, 14)]
+    [InlineData("Liberation Sans", 17, 36, 38, 18)]
+    public void ABoldUnderlineIsItsOwnThicknessAndItsOwnOffset(
+        string family, int size, int thickness, int centre, int ordinary)
+    {
+        OpenTypeFace face = Require(family);
+        LineSpacing.RuleWidths got = LineSpacing.ResolveRuleWidths(
+            face, LineSpacing.Resolve(face), Length.FromPoints(size), MetricGrid.WriterTextLine);
+
+        got.BoldUnderline.ShouldBe(Length.FromTwips(thickness));
+        Centre(got.BoldUnderlineOffset, got.BoldUnderline).ShouldBe(Length.FromTwips(centre));
+        got.Underline.ShouldBe(Length.FromTwips(ordinary));
+    }
+
     /// <summary>Every measured Calc offset, in the whole hundredth of a millimetre it was drawn at.</summary>
     [Fact]
     public void EveryMeasuredCalcRuleSitsWhereTheDeviceChainPutsIt()

@@ -1065,6 +1065,13 @@ public static class LineSpacing
     /// both of the reference's branches and was drawn at the single thickness here.
     /// </param>
     /// <param name="Strikeout">The line through the text.</param>
+    /// <param name="BoldUnderline">
+    /// The single line of a <em>bold</em> underline, which is about twice an ordinary one:
+    /// <c>ceil(2 × underlineThickness × scale)</c> on the HarfBuzz branch and
+    /// <c>((descent × 50) + 50) / 100</c> on the descent one, with a guard bumping it by one where
+    /// that comes out equal to the single (<c>fontmetric.cxx</c>:289-291).
+    /// </param>
+    /// <param name="BoldUnderlineOffset">Where its top edge sits, below the baseline.</param>
     /// <param name="UnderlineOffset">
     /// How far below the baseline the <em>top edge</em> of a single underline sits.
     /// <para>
@@ -1107,6 +1114,8 @@ public static class LineSpacing
         Length Underline,
         Length DoubleUnderline,
         Length Strikeout,
+        Length BoldUnderline = default,
+        Length BoldUnderlineOffset = default,
         Length UnderlineOffset = default,
         Length StrikeoutOffset = default,
         Length DoubleUnderlineFirst = default,
@@ -1202,11 +1211,17 @@ public static class LineSpacing
             long singleSize = (long)Math.Ceiling(single);
             long strikeSize = (long)Math.Ceiling(os2!.Value.StrikeoutSize * scale);
 
+            // `mnBUnderlineSize = ceil(nBSize)` with `nBSize = nSize * 2`, and a bold underline
+            // shares the double's own offset — both are `mnBUnderlineOffset` (fontmetric.cxx:232-237).
+            long boldSize = (long)Math.Ceiling(single * 2.0);
+
             return DoublePositions(
                 new RuleWidths(
                     grid.ToLength(singleSize),
                     grid.ToLength(doubleSize),
                     grid.ToLength(strikeSize),
+                    grid.ToLength(boldSize),
+                    Stroked(boldSize, first, grid),
                     Stroked(singleSize, (long)Math.Ceiling(-post.UnderlinePosition * scale), grid),
                     Stroked(
                         strikeSize,
@@ -1248,11 +1263,23 @@ public static class LineSpacing
 
         long halfLine = Math.Max(1, lineHeight / 2);
 
+        // `nBLineHeight = ((nDescent * 50) + 50) / 100`, and then the guard that makes this a
+        // branch rather than a doubling: **where that comes out equal to the single, it is bumped
+        // by one** (fontmetric.cxx:289-291). It bites only at a descent of one or two device
+        // pixels, where the single's own `!nLineHeight -> 1` clamp has already floored both at 1 —
+        // sub-point text on a 720 dpi device, which no corpus document reaches. It is here because
+        // it is in the source, and it is recorded as UNWITNESSED.
+        long boldHeight = ((descent * 50) + 50) / 100;
+        if (boldHeight == lineHeight) boldHeight++;
+        long halfBold = Math.Max(1, boldHeight / 2);
+
         return DoublePositions(
             new RuleWidths(
                 grid.ToLength(lineHeight),
                 grid.ToLength(doubleHeight),
                 grid.ToLength(lineHeight),
+                grid.ToLength(boldHeight),
+                Stroked(boldHeight, underlineOffset - halfBold, grid),
                 Stroked(lineHeight, underlineOffset - halfLine, grid),
                 Stroked(lineHeight, strikeoutOffset - halfLine, grid)),
             doubleHeight, firstOffset, firstOffset + gap + doubleHeight, grid);

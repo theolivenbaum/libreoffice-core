@@ -36,6 +36,9 @@ public sealed class RtfDoubleUnderlineTests
     [InlineData(@"\uldashd", TextUnderline.SingleLine)]
     [InlineData(@"\uldashdd", TextUnderline.SingleLine)]
     [InlineData(@"\ulwave", TextUnderline.SingleLine)]
+    [InlineData(@"\ulth", TextUnderline.BoldLine)]
+    [InlineData(@"\ulthdashdd", TextUnderline.BoldLine)]
+    [InlineData(@"\ulhwave", TextUnderline.BoldLine)]
     [InlineData(@"\ulnone", TextUnderline.None)]
     [InlineData("", TextUnderline.None)]
     // Every one of the family takes a parameter, and nought turns it off.

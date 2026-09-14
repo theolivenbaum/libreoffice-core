@@ -61,6 +61,7 @@ def rules_on(page):
 def main(root):
     table = font_files()
     cache = {}
+    scaled_docs = set()
     print('doc\tpage\tface\tsize\tkind\tbranch\tdrawn_off\tdrawn_w\twant_off\twant_w\tverdict')
     tally = collections.Counter()
 
@@ -131,6 +132,7 @@ def main(root):
                             tally[bucket] += 1
                             tally['%s|%s' % (ext, bucket)] += 1
                             if scaled:
+                                scaled_docs.add(name)
                                 continue
                             if not ok:
                                 print('%s\t%d\t%s\t%.4f\t%s\t%s\t%.4f\t%.4f\t%.4f\t%.4f\tMISS'
@@ -140,6 +142,9 @@ def main(root):
 
     for k, v in sorted(tally.items()):
         print('# %s\t%d' % (k, v), file=sys.stderr)
+    with open('scaled-docs.txt', 'w') as fh:
+        for name in sorted(scaled_docs):
+            fh.write(name + '\n')
 
 
 if __name__ == '__main__':

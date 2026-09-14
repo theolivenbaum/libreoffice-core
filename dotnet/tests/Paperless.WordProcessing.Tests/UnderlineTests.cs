@@ -290,12 +290,16 @@ public sealed class UnderlineTests
     /// </remarks>
     [Theory]
     [InlineData("single", TextUnderline.SingleLine)]
-    [InlineData("wavyHeavy", TextUnderline.SingleLine)]
+    [InlineData("dotDotDash", TextUnderline.SingleLine)]
     [InlineData("none", TextUnderline.None)]
     // The two of ST_Underline's eighteen values that draw two lines. `wavyDouble` is
     // `LINESTYLE_DOUBLEWAVE`, and this engine draws no wave, so it comes out as a double line.
     [InlineData("double", TextUnderline.DoubleLine)]
     [InlineData("wavyDouble", TextUnderline.DoubleLine)]
+    // `thick` and the six heavy forms are one line at about twice the weight.
+    [InlineData("thick", TextUnderline.BoldLine)]
+    [InlineData("wavyHeavy", TextUnderline.BoldLine)]
+    [InlineData("dashDotDotHeavy", TextUnderline.BoldLine)]
     public void AWordUnderlineIsReadAsAStyleAndNotAsASwitch(string value, TextUnderline expected)
         => Resolved("u", value).Underline.ShouldBe(expected);
 
@@ -320,6 +324,9 @@ public sealed class UnderlineTests
     [InlineData(1, TextUnderline.SingleLine)]
     [InlineData(2, TextUnderline.SingleLine)]
     [InlineData(5, TextUnderline.None)]
+    // 6 is `LINESTYLE_BOLD` and 27 `LINESTYLE_BOLDWAVE`; both draw one heavy line.
+    [InlineData(6, TextUnderline.BoldLine)]
+    [InlineData(27, TextUnderline.BoldLine)]
     [InlineData(8, TextUnderline.None)]
     [InlineData(11, TextUnderline.SingleLine)]
     [InlineData(255, TextUnderline.None)]

@@ -64,9 +64,10 @@ public sealed record OdfTextFormat
 
     /// <summary>How the run is underlined, if it is.</summary>
     /// <remarks>
-    /// ODF splits an underline into a <em>style</em> and a <em>type</em> —
-    /// <c>style:text-underline-style</c> says solid, dotted or none and
-    /// <c>style:text-underline-type</c> says single or double — and LibreOffice merges both into
+    /// ODF splits an underline into a <em>style</em>, a <em>type</em> and a <em>width</em> —
+    /// <c>style:text-underline-style</c> says solid, dotted or none,
+    /// <c>style:text-underline-type</c> says single or double, and
+    /// <c>style:text-underline-width</c> says bold or not — and LibreOffice merges all three into
     /// one <c>CharUnderline</c> item. They therefore have to be read at the same level; see
     /// <c>OdfStyles.ResolveTogether</c>.
     /// </remarks>
@@ -188,6 +189,7 @@ public sealed record OdfTextFormat
     [
         (OdfNamespaces.Style, "text-underline-style"),
         (OdfNamespaces.Style, "text-underline-type"),
+        (OdfNamespaces.Style, "text-underline-width"),
     ];
 
     /// <summary>
@@ -222,13 +224,24 @@ public sealed record OdfTextFormat
     {
         string? style = stated[0];
         string? type = stated[1];
+        string? width = stated[2];
 
         if (style is "none" || type is "none") return TextUnderline.None;
+
+        // "A double line style has priority over a bold line style, but not over the line style
+        // itself" -- XMLUnderlineTypePropHdl::importXML, undlihdl.cxx:135-136. So the type is
+        // asked before the width.
         if (type is "double") return TextUnderline.DoubleLine;
 
-        // A level stating the type alone turns the line on, because the type handler writes its
-        // own value where nothing has been merged into the item yet.
-        return style is null && type is null ? TextUnderline.None : TextUnderline.SingleLine;
+        // `pXML_UnderlineWidth_Enum` maps `bold` onto the BOLD family and `thick` onto BOLD
+        // outright (undlihdl.cxx:80-102); `auto`, `thin` and `medium` are the ordinary weight.
+        if (width is "bold" or "thick") return TextUnderline.BoldLine;
+
+        // A level stating the type or the width alone turns the line on, because each handler
+        // writes its own value where nothing has been merged into the item yet.
+        return style is null && type is null && width is null
+            ? TextUnderline.None
+            : TextUnderline.SingleLine;
     }
 
     private static OdfTextPosition ParsePosition(string? value)

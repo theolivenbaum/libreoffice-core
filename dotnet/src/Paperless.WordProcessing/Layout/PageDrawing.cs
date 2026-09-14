@@ -1641,6 +1641,17 @@ public static class PageDrawing
                     run.ColourOn(background)));
             }
         }
+        else if (run.Underline == TextUnderline.BoldLine)
+        {
+            Length thickness = widths.BoldUnderline;
+            if (thickness > Length.Zero)
+            {
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun + widths.BoldUnderlineOffset, extent, thickness),
+                    run.ColourOn(background)));
+            }
+        }
         else if (run.Underline == TextUnderline.DoubleLine)
         {
             // Both the thickness AND the two offsets come off the device here, where a single

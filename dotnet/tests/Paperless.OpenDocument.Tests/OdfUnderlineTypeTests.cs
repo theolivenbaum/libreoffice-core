@@ -46,6 +46,10 @@ public sealed class OdfUnderlineTypeTests
     [InlineData("TurnsOff", TextUnderline.None)]
     // A style stating neither attribute anywhere in its chain has no underline at all.
     [InlineData("Plain", TextUnderline.None)]
+    // The width is a third attribute of the same item, and a double line beats a bold one:
+    // "A double line style has priority over a bold line style" (undlihdl.cxx:135-136).
+    [InlineData("Bold", TextUnderline.BoldLine)]
+    [InlineData("BoldAndDouble", TextUnderline.DoubleLine)]
     public void TheLevelDecidesBeforeTheAttribute(string style, TextUnderline expected)
         => OdfTextFormat.UnderlineIn(BuildStyles(), [Reference(style)]).ShouldBe(expected);
 
@@ -99,6 +103,15 @@ public sealed class OdfUnderlineTypeTests
                 <style:style style:name="TurnsOff" style:family="paragraph"
                              style:parent-style-name="Doubled">
                   <style:text-properties style:text-underline-style="none"/>
+                </style:style>
+                <style:style style:name="Bold" style:family="paragraph">
+                  <style:text-properties style:text-underline-style="solid"
+                                         style:text-underline-width="bold"/>
+                </style:style>
+                <style:style style:name="BoldAndDouble" style:family="paragraph">
+                  <style:text-properties style:text-underline-style="solid"
+                                         style:text-underline-type="double"
+                                         style:text-underline-width="bold"/>
                 </style:style>
                 <style:style style:name="SolidSpan" style:family="text">
                   <style:text-properties style:text-underline-style="solid"/>
