@@ -160,9 +160,45 @@ internal static class SheetTextLayout
     /// </remarks>
     private static readonly Colour LinkColour = Colour.FromRgb(0x000080);
 
-    /// <summary>The ink one run is painted with: its own colour, the cell's, or the link's.</summary>
-    private static Colour Ink(Colour? portion, Colour fallback, bool field)
-        => field ? LinkColour : portion ?? fallback;
+    /// <summary>The ink one run is painted with: its own colour, the cell's, or the field's.</summary>
+    /// <param name="portion">The rich portion's own colour, or null for the cell's.</param>
+    /// <param name="fallback">The cell's colour.</param>
+    /// <param name="field">
+    /// What a hyperlink field paints the whole cell in, from <see cref="FieldInk"/>, or null when
+    /// the cell holds no field.
+    /// </param>
+    private static Colour Ink(Colour? portion, Colour fallback, Colour? field)
+        => field ?? portion ?? fallback;
+
+    /// <summary>
+    /// What a hyperlink cell's text is painted in — one colour for the whole cell — or null when
+    /// it holds no field.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>One colour for the whole cell, because the reference collapses the cell to one
+    /// character.</strong> Both importers replace the cell's text with a single
+    /// <c>EE_FEATURE_FIELD</c> — <c>lclInsertUrl</c> with
+    /// <c>QuickInsertField(…, ESelection::All())</c> and <c>insertHyperlink</c> after
+    /// <c>rEE.Clear()</c> — so there are no per-run colours left to paint with, and the attribute
+    /// that decides the colour is whichever <c>EE_CHAR_COLOR</c> survives at position zero. That
+    /// is the <em>first</em> portion's where the cell is rich and the cell's own where it is not.
+    /// </para>
+    /// <para>
+    /// <see cref="SheetCellFormat.ColourIsHard"/> is the test, and it is what makes the answer
+    /// differ by format on identical content: measured on 26.2.4.2, an <c>.xlsx</c> hyperlink cell
+    /// stated <c>#FF0000</c> is drawn <c>#000080</c> and the <c>.xls</c> the reference itself
+    /// converts that file to draws the same cell <c>#FF0000</c>. <c>probes/quantise-r120/</c> §5.
+    /// </para>
+    /// </remarks>
+    private static Colour? FieldInk(in SheetCellText cell)
+    {
+        if (!cell.IsField) return null;
+
+        SheetCellFormat at = cell.Portions is { Count: > 0 } ? cell.Portions[0].Format : cell.Format;
+
+        return at.ColourIsHard ? at.Colour : LinkColour;
+    }
 
     /// <summary>The rule under one run: the one it states, or the one a field always takes.</summary>
     /// <remarks>
@@ -275,7 +311,7 @@ internal static class SheetTextLayout
                     // it has taken its height already and there is nothing to draw or underline.
                     if (run.Glyphs.Count == 0) continue;
 
-                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
+                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, FieldInk(cell))));
                 }
 
                 // A rich cell answers per segment, because a run may underline part of a line and
@@ -287,14 +323,14 @@ internal static class SheetTextLayout
                     foreach (SheetTextSegment segment in line.Run.Segments)
                     {
                         DecorateSegment(
-                            sink, segment, line, Ink(segment.Colour, fallback, cell.IsField),
+                            sink, segment, line, Ink(segment.Colour, fallback, FieldInk(cell)),
                             cell.IsField);
                     }
                 }
                 else
                 {
                     Decorate(
-                        sink, cell.Format, face, line, Ink(null, fallback, cell.IsField),
+                        sink, cell.Format, face, line, Ink(null, fallback, FieldInk(cell)),
                         cell.IsField);
                 }
             }
@@ -484,11 +520,19 @@ internal static class SheetTextLayout
         int unitsPerEm = face.Face.UnitsPerEm > 0 ? face.Face.UnitsPerEm : 1000;
         FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(face.Face, face.Metrics);
 
+        // The offsets come from the design units and the THICKNESSES do not -- see
+        // `LineSpacing.ResolveRuleWidths`, which answers the whole hundredth of a millimetre the
+        // reference's own device quantises each of the three to (O64).
+        LineSpacing.RuleWidths widths =
+            LineSpacing.ResolveRuleWidths(face.Face, face.Metrics, size, MetricGrid.TextLine);
+
         Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
 
         if (underline != SheetUnderline.None)
         {
-            Length thickness = Scaled(metrics.UnderlineThickness);
+            Length thickness = underline == SheetUnderline.DoubleLine
+                ? widths.DoubleUnderline
+                : widths.Underline;
 
             // The font records the underline's offset as negative below the baseline.
             Length top = baseline - Scaled(metrics.UnderlinePosition);
@@ -500,8 +544,8 @@ internal static class SheetTextLayout
 
         if (struckThrough)
         {
-            Length thickness = Scaled(metrics.StrikeoutThickness);
-            Rule(sink, x, baseline - Scaled(metrics.StrikeoutPosition), width, thickness, colour);
+            Rule(sink, x, baseline - Scaled(metrics.StrikeoutPosition), width, widths.Strikeout,
+                 colour);
         }
     }
 
@@ -1944,7 +1988,7 @@ internal static class SheetTextLayout
                 {
                     if (run.Glyphs.Count == 0) continue;
 
-                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
+                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, FieldInk(cell))));
                 }
 
                 down += line.Run.LineHeight;
@@ -2034,7 +2078,7 @@ internal static class SheetTextLayout
 
             Length x = cell.Box.X + ((cell.Box.Width - glyph.Width) / 2);
             foreach ((GlyphRun run, Colour? colour) in glyph.At(new DocPoint(x, y)))
-                sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
+                sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, FieldInk(cell))));
             y += pitch;
         }
     }

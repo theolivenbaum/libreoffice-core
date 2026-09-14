@@ -1619,8 +1619,15 @@ public static class PageDrawing
         if (run.EmSize <= Length.Zero || extent <= Length.Zero) return;
 
         int unitsPerEm = run.Face.UnitsPerEm > 0 ? run.Face.UnitsPerEm : 1000;
-        FontVerticalMetrics metrics =
-            LineSpacing.ResolveDecorations(run.Face, LineSpacing.Resolve(run.Face));
+        LineMetrics line = LineSpacing.Resolve(run.Face);
+        FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(run.Face, line);
+
+        // The offsets are design units and the thicknesses are not: a rule's weight is a whole
+        // number of the PDF writer's own 720 dpi pixels rounded to a whole unit of the map mode
+        // the page is painted in, which on a Writer page is the TWIP. See
+        // `LineSpacing.ResolveRuleWidths` and `MetricGrid.WriterTextLine`.
+        LineSpacing.RuleWidths widths =
+            LineSpacing.ResolveRuleWidths(run.Face, line, run.EmSize, MetricGrid.WriterTextLine);
 
         Length Scaled(int designUnits) => run.EmSize * ((double)designUnits / unitsPerEm);
 
@@ -1631,7 +1638,7 @@ public static class PageDrawing
         if (run.IsUnderlined)
         {
             // The face records the underline's offset as negative below the baseline.
-            Length thickness = Scaled(metrics.UnderlineThickness);
+            Length thickness = widths.Underline;
             if (thickness > Length.Zero)
             {
                 rules.Add((
@@ -1643,7 +1650,7 @@ public static class PageDrawing
 
         if (run.IsStruckThrough)
         {
-            Length thickness = Scaled(metrics.StrikeoutThickness);
+            Length thickness = widths.Strikeout;
             if (thickness > Length.Zero)
             {
                 rules.Add((

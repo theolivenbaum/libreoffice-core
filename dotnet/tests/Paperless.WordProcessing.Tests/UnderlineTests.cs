@@ -104,13 +104,22 @@ public sealed class UnderlineTests
     /// Liberation Serif is on LibreOffice's shipped <c>FontsDontUseUnderlineMetrics</c> list because its
     /// <c>post</c> table is not to be believed, so the rule has to come from the descent instead. The two
     /// answers are close, which is exactly why this asserts narrowly: at 12 pt this face's
-    /// <c>post</c> gives 0.721 pt below the baseline and 0.586 pt thick, and the descent gives 0.973 pt
-    /// and 0.651 pt. A band wide enough to hold both would pass either way and prove nothing — a first
+    /// <c>post</c> gives 0.721 pt below the baseline and 0.600 pt thick, and the descent gives 0.973 pt
+    /// and 0.700 pt. A band wide enough to hold both would pass either way and prove nothing — a first
     /// draft of this test did precisely that.
     /// </para>
     /// <para>
-    /// Design units against LibreOffice's device-rounded arithmetic differ by about 0.03 pt, which is
-    /// what the tolerance here allows and is a tenth of the gap between the two candidate answers.
+    /// <b>The thickness is no longer a fraction of the em and the band here is the reference's own
+    /// measurement.</b> A rule's weight is a whole number of the PDF writer's 720 dpi pixels
+    /// rounded to a whole unit of the map mode the page is painted in, which on a Writer page is
+    /// the twip — so this face at 12 pt is drawn at exactly <b>14 twips, 0.700 pt</b>, read off
+    /// 26.2.4.2's own PDF (<c>probes/quantise-r120/</c>, the Writer table in
+    /// <c>Paperless.Text.Tests.RuleWidthTests</c>). The <c>post</c> branch would give 6 pixels,
+    /// 12 twips, 0.600 pt, so the two candidate answers are still a tenth of a point apart and
+    /// this still discriminates between them.
+    /// </para>
+    /// <para>
+    /// The offset is still design units and still carries the ~0.03 pt the older note describes.
     /// </para>
     /// </remarks>
     [Fact]
@@ -124,8 +133,8 @@ public sealed class UnderlineTests
         below.ShouldBeGreaterThan(Length.FromPoints(0.94));
         below.ShouldBeLessThan(Length.FromPoints(1.01));
 
-        rules[0].Area.Height.ShouldBeGreaterThan(Length.FromPoints(0.62));
-        rules[0].Area.Height.ShouldBeLessThan(Length.FromPoints(0.68));
+        // 14 twips, exactly, because the device answers a whole number of them.
+        rules[0].Area.Height.ShouldBe(Length.FromTwips(14));
     }
 
     /// <summary>
