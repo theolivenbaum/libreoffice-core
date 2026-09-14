@@ -350,6 +350,14 @@ problem:
 | 9 a | y 40.750 (bottom) | y 403.125 (top) | y 403.143 (top) | 0.035 pt |
 | 9 b | y 402.000 (bottom) | y 39.625 (top) | y 39.628 (top) | 0.038 pt |
 
+**The flags settle it outright.** Read out of the two documents' OLE2 streams, the five type-8
+shapes' `msofbtSp` flag words are `0x0a00`, `0x0a80`, `0x0a00`, `0x0a80` and `0x0a82` — so **two of
+the European deck's four state `fFlipV` and two do not**, and after the fix the two that do are
+drawn wide-edge-down (pages 8 and 9 b) and the two that do not wide-edge-up (pages 7 and 9 a),
+each agreeing with 26.2.4.2. A defect in how the flag is read could not produce that; a mirrored
+base applied under both settings does. `trapezoid-flags.tsv`. (Round 124's "3 of the 5" is right —
+the third is the Nigerian deck's, §4.1.)
+
 **Scope.** Both fixes are `.ppt`-only, and not by choice of population: `PptShapeGeometry` is
 reached from `PptSlideLayout` and nowhere else (`git grep PptShapeGeometry -- src`), because the
 `.ppt` reader is the only one that maps a numbered Escher type onto a DrawingML preset name. The
@@ -486,4 +494,5 @@ round can compare them rather than only the colour.
 | `escher-defaults.tsv` | source table against the binary's `draw:modifiers`, 148 rows |
 | `adjust-conversion-outofrange.tsv` | the discarded out-of-range pass's eleven moved rows |
 | `trapezoid-corners.tsv` | the four drawn trapezoids, before / after / 26.2.4.2 |
+| `trapezoid-flags.tsv` | the five type-8 shapes' `fFlipV`, against which way up each is drawn |
 | `witness-ink.tsv` | the witness deck page by page, before and after, against the reference |
