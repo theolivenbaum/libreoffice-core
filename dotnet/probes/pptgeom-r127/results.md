@@ -472,7 +472,16 @@ made under a load average above 20 with two other rounds' fidelity suites in fli
 condition `CLAUDE.md` warns can drop tests or invent failures; the counts are stated so the next
 round can compare them rather than only the colour.
 
-`Paperless.Fidelity.Tests` **cannot see either fix**: its only two `.ppt` fixtures are
+`Paperless.Fidelity.Tests`: **552 total, 542 passed, 10 failed, 0 skipped.** All ten are the
+word-processing and sheets families this tree leaves failing on purpose and every one of them is
+named as such in `CLAUDE.md` or in its own remarks — four `PageDrawingComparisonTests`
+(`paginated.docx/.doc/.rtf/.fodt`) and four `TabStopComparisonTests`
+(`list-label-overrun.docx/.doc/.odt/.fodt`), which are the PDF-writer truncation family; one
+`JustificationShrinkComparisonTests`; and one `SheetDrawingComparisonTests`, whose own remark
+classifies it as 26.2.4.2 clamping a full-cell anchor offset. **No slides test is among them and
+none of the ten touches a `.ppt` at all.**
+
+And it **cannot see either fix** in any case: its only two `.ppt` fixtures are
 `shape-geometry-ppt.ppt` and `slides-ppt.ppt`, and a type histogram of the first over its own
 Escher streams is `{0: 12, 1: 31, 202: 8, 4095: 4}` — freeforms and groups, plain rectangles, text
 boxes and `mso_sptNil`. No preset with an adjustment, and no trapezoid. Two new unit tests in
