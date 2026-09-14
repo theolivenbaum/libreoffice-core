@@ -253,12 +253,18 @@ internal static class BiffChartFixture
     /// <param name="colourIndex">The palette index the line is drawn in.</param>
     /// <param name="pattern">0 for solid; <c>EXC_CHLINEFORMAT_NONE</c> is 5 and draws nothing.</param>
     /// <param name="automatic">Sets <c>EXC_CHLINEFORMAT_AUTO</c>.</param>
-    public static byte[] LineFormat(ushort colourIndex, ushort pattern = 0, bool automatic = false)
+    /// <param name="weight">
+    /// <c>EXC_CHLINEFORMAT_HAIR</c> is −1, <c>SINGLE</c> 0, <c>DOUBLE</c> 1 and <c>TRIPLE</c> 2 —
+    /// signed, and the default here stays at 1 so that every case written before the weight was
+    /// read keeps the bytes it was written against.
+    /// </param>
+    public static byte[] LineFormat(
+        ushort colourIndex, ushort pattern = 0, bool automatic = false, short weight = 1)
         => Record(ChLineFormat,
         [
             .. Dword(0x00000000),
             .. Word(pattern),
-            .. Word(1),                                    // weight
+            .. Word(unchecked((ushort)weight)),
             .. Word(automatic ? (ushort)1 : (ushort)0),
             .. Word(colourIndex),
         ]);

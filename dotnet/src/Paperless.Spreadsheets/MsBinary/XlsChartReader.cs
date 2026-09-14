@@ -176,6 +176,12 @@ internal sealed class XlsChartBuilder
     /// <summary>The colour of each axes set's major gridlines, by axes set and axis, or none.</summary>
     private readonly BiffChartColour?[,] _gridColours = new BiffChartColour?[2, 2];
 
+    /// <summary>The width of each axes set's axis lines, beside <see cref="_axisLineColours"/>.</summary>
+    private readonly Length?[,] _axisLineWidths = new Length?[2, 2];
+
+    /// <summary>The width of each axes set's major gridlines, beside <see cref="_gridColours"/>.</summary>
+    private readonly Length?[,] _gridWidths = new Length?[2, 2];
+
     /// <summary>
     /// The <c>ifmt</c> each axes set's value axis states through its own <c>CHFORMAT</c>, or none.
     /// </summary>
@@ -666,14 +672,19 @@ internal sealed class XlsChartBuilder
                 ? ValueFormatOf(SecondaryAxesSet, sourceFormats, formats)
                 : null,
             ValueGrid = _valueGrid
-                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisY, fonts))
+                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisY, fonts),
+                                _gridWidths[PrimaryAxesSet, AxisY] ?? Length.Zero)
                 : null,
             CategoryGrid = _categoryGrid
-                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisX, fonts))
+                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisX, fonts),
+                                _gridWidths[PrimaryAxesSet, AxisX] ?? Length.Zero)
                 : null,
-            ValueAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisY, fonts)),
-            CategoryAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisX, fonts)),
-            SecondaryAxisLine = new ChartGrid(AxisLineColour(SecondaryAxesSet, AxisY, fonts)),
+            ValueAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisY, fonts),
+                                          _axisLineWidths[PrimaryAxesSet, AxisY] ?? Length.Zero),
+            CategoryAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisX, fonts),
+                                             _axisLineWidths[PrimaryAxesSet, AxisX] ?? Length.Zero),
+            SecondaryAxisLine = new ChartGrid(AxisLineColour(SecondaryAxesSet, AxisY, fonts),
+                                              _axisLineWidths[SecondaryAxesSet, AxisY] ?? Length.Zero),
             ValueTicks = _ticks[PrimaryAxesSet, AxisY],
             CategoryTicks = _ticks[PrimaryAxesSet, AxisX],
             SecondaryTicks = _ticks[SecondaryAxesSet, AxisY],
@@ -879,6 +890,7 @@ internal sealed class XlsChartBuilder
                 numbers,
                 Fill: series.Fill?.Resolve(fonts),
                 Line: series.Line?.Resolve(fonts),
+                LineWidth: series.LineWidth,
                 Kind: KindOf(series.Group))
             {
                 AxisIndex = axis,
@@ -1025,7 +1037,7 @@ internal sealed class XlsChartBuilder
     {
         uint rgb = stream.ReadUInt32();
         ushort pattern = stream.ReadUInt16();
-        stream.Skip(2);                              // the weight, in Excel's four steps
+        short weight = (short)stream.ReadUInt16();
         ushort flags = stream.ReadUInt16();
 
         int index = stream.Version == BiffVersion.Biff8 && stream.RecordLeft >= 2
@@ -1035,22 +1047,68 @@ internal sealed class XlsChartBuilder
         int target = _axisLineTarget;
         _axisLineTarget = NoAxisLine;
 
-        if ((flags & AutomaticFormat) != 0 || pattern == LineNone)
+        bool automatic = (flags & AutomaticFormat) != 0;
+        if (automatic || pattern == LineNone)
         {
+            // An automatic series outline still has a width — a *single* one, where every piece
+            // of a chart's furniture is automatically a hairline. So the width is recorded for
+            // the one object type whose automatic weight is not zero and the colour is left to
+            // the series' own automatic colour, which is resolved elsewhere.
+            if (automatic && pattern != LineNone && InSeriesFormat() && _series.Count > 0)
+            {
+                _series[^1].LineWidth = WeightWidth(AutomaticSeriesWeight);
+            }
+
             return;
         }
 
         if (target != NoAxisLine && Inside(BiffChartRecords.Axis) && Indexable())
         {
-            if (target == AxisLineItself) _axisLineColours[_axesSet, _axis] = new(rgb, index);
-            else if (target == MajorGridLine) _gridColours[_axesSet, _axis] = new(rgb, index);
+            if (target == AxisLineItself)
+            {
+                _axisLineColours[_axesSet, _axis] = new(rgb, index);
+                _axisLineWidths[_axesSet, _axis] = WeightWidth(weight);
+            }
+            else if (target == MajorGridLine)
+            {
+                _gridColours[_axesSet, _axis] = new(rgb, index);
+                _gridWidths[_axesSet, _axis] = WeightWidth(weight);
+            }
+
             return;
         }
 
         if (!InSeriesFormat() || _series.Count == 0) return;
 
         _series[^1].Line = new BiffChartColour(rgb, index);
+        _series[^1].LineWidth = WeightWidth(weight);
     }
+
+    /// <summary>
+    /// The width one of a BIFF chart line's four weights is drawn at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclChPropSetHelper::WriteLineProperties</c>
+    /// (<c>sc/source/filter/excel/xlchart.cxx:906-925</c>) turns the <c>CHLINEFORMAT</c> weight
+    /// straight into an API width in <strong>hundredths of a millimetre</strong>: it starts at
+    /// <c>nApiWidth = 0</c>, <em>"0 is the width of a hair line"</em>, and switches
+    /// <c>EXC_CHLINEFORMAT_SINGLE</c> to 35, <c>DOUBLE</c> to 70 and <c>TRIPLE</c> to 105.
+    /// <c>EXC_CHLINEFORMAT_HAIR</c> is −1 and every other value falls through to the hairline,
+    /// which is what an unrecognised weight should do.
+    /// </para>
+    /// <para>
+    /// So the whole of a BIFF chart's line weights is four numbers, and the same 35 hundredths of
+    /// a millimetre that O63 recorded as unexplained on the OOXML side.
+    /// </para>
+    /// </remarks>
+    private static Length WeightWidth(short weight) => weight switch
+    {
+        SingleWeight => Length.FromMm100(35),
+        DoubleWeight => Length.FromMm100(70),
+        TripleWeight => Length.FromMm100(105),
+        _ => Length.Zero,
+    };
 
     /// <summary>Reads one <c>CHTICK</c> into the open axis' major tick mark.</summary>
     /// <remarks>
@@ -1588,6 +1646,14 @@ internal sealed class XlsChartBuilder
         /// <summary>Its outline, from the <c>CHLINEFORMAT</c> beside that.</summary>
         public BiffChartColour? Line { get; set; }
 
+        /// <summary>That outline's width, from the same record's weight.</summary>
+        /// <remarks>
+        /// Separate from <see cref="Line"/> because an <em>automatic</em> outline states a weight
+        /// this reader can use and a colour it cannot — the automatic colour is the series index'
+        /// own, resolved far from here — so the two arrive by different routes.
+        /// </remarks>
+        public Length LineWidth { get; set; }
+
         public XlsChartRange? Values { get; set; }
 
         public XlsChartRange? Categories { get; set; }
@@ -1670,6 +1736,30 @@ internal sealed class XlsChartBuilder
 
     /// <summary>A line that draws nothing — <c>EXC_CHLINEFORMAT_NONE</c>.</summary>
     private const ushort LineNone = 5;
+
+    /// <summary><c>EXC_CHLINEFORMAT_SINGLE</c>, <c>xlchart.hxx:261</c>. Zero, not one.</summary>
+    private const short SingleWeight = 0;
+
+    /// <summary><c>EXC_CHLINEFORMAT_DOUBLE</c>, <c>xlchart.hxx:262</c>.</summary>
+    private const short DoubleWeight = 1;
+
+    /// <summary><c>EXC_CHLINEFORMAT_TRIPLE</c>, <c>xlchart.hxx:263</c>.</summary>
+    private const short TripleWeight = 2;
+
+    /// <summary>
+    /// The weight an automatic line takes when it belongs to a series.
+    /// </summary>
+    /// <remarks>
+    /// <c>spFmtInfos</c> (<c>sc/source/filter/excel/xlchart.cxx:420-440</c>) gives every object
+    /// type its own automatic weight, and <strong>all but four of the sixteen are
+    /// <c>EXC_CHLINEFORMAT_HAIR</c></strong> — the background, the plot frame, the walls, the
+    /// text, the legend, the axis line, the gridline, the connector, the hi-lo line and both drop
+    /// bars. The exceptions are <c>LINEARSERIES</c>, <c>FILLEDSERIES</c> and <c>ERRORBAR</c> at
+    /// <c>SINGLE</c> and <c>TRENDLINE</c> at <c>DOUBLE</c>. So an automatic width is a hairline
+    /// everywhere this reader models except a series, and only that one is applied here; a
+    /// trendline is not modelled at all.
+    /// </remarks>
+    private const short AutomaticSeriesWeight = SingleWeight;
 
     /// <summary>
     /// What a category axis states when it carries no <c>CHLABELRANGE</c> at all.

@@ -165,10 +165,14 @@ public sealed record SheetCellFormat
     /// <c>Hyperlink</c> style is an underlined blue font, and a column heading ruled off from its
     /// data is the other common case.
     /// <para>
-    /// <strong>The underline survives that style and the colour does not.</strong> A hyperlink
-    /// cell is drawn as an <c>SvxURLField</c> in the application's <c>LINKS</c> colour whatever
-    /// <see cref="Colour"/> says — see <c>SheetTextLayout</c>'s <c>LinkColour</c> — so the blue
-    /// half of "underlined blue font" never reaches the page and this half always does.
+    /// <strong>Neither half of that style decides a hyperlink cell, and this property does not
+    /// either.</strong> A hyperlink cell is drawn as an <c>SvxURLField</c>, and
+    /// <c>ScEditUtil::GetCellFieldValue</c> gives the field's font the application's <c>LINKS</c>
+    /// colour <em>and</em> <c>LINESTYLE_SINGLE</c> in the same breath, over whatever
+    /// <see cref="Colour"/> and this property say — see <c>SheetTextLayout</c>'s
+    /// <c>LinkColour</c> and <c>Line</c>. So such a cell is drawn underlined whether or not this
+    /// property says so, and one stating <see cref="SheetUnderline.DoubleLine"/> is drawn with a
+    /// single line. This property is what an <em>unlinked</em> cell is underlined by.
     /// </para>
     /// </remarks>
     public SheetUnderline Underline { get; init; }
