@@ -877,9 +877,18 @@ public static class PageDrawing
         List<Edge> loose = [];
         int columns = table.Table.ColumnWidths.Count;
 
+        IReadOnlyList<PageTableRow> shared = table.Table.RowsWithSharedEdges;
+
         foreach (PlacedTableCell cell in table.Cells)
         {
-            CellBorders borders = cell.Cell.Borders;
+            // The shared-edge borders rather than the cell's own, which is what closes the hole a page
+            // break leaves: a row stating `w:top w:val="nil"` under a row stating a bottom border draws
+            // nothing of its own, and where the two are on the same page the row above's bottom covers
+            // the line, so the hole appears only at the top of a table's continuation page. See
+            // `PageTable.RowsWithSharedEdges`. The row *heights* are deliberately not on it — the same
+            // probe says they should be, and the corpus says our height model has other errors that
+            // change interacts with; `probes/wordstable-r131/results.md` §4.
+            CellBorders borders = Shared(shared, cell);
             DocRect area = cell.Area;
 
             // Which of a cell's edges belong to the table's outline, taken from where the cell sits
@@ -918,6 +927,23 @@ public static class PageDrawing
         }
 
         return merged;
+    }
+
+    /// <summary>One placed cell's borders, with the horizontal edges it shares resolved.</summary>
+    /// <remarks>
+    /// Matched on the row the cell starts in and the column it starts at, which is how a placed cell
+    /// names itself; a cell the resolution did not touch comes back as the row stated it.
+    /// </remarks>
+    private static CellBorders Shared(IReadOnlyList<PageTableRow> rows, PlacedTableCell cell)
+    {
+        if (cell.Row < 0 || cell.Row >= rows.Count) return cell.Cell.Borders;
+
+        foreach (PageTableCell other in rows[cell.Row].Cells)
+        {
+            if (other.Column == cell.Cell.Column) return other.Borders;
+        }
+
+        return cell.Cell.Borders;
     }
 
     /// <summary>Joins the runs along one grid line that touch or overlap.</summary>

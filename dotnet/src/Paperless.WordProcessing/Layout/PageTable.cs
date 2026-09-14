@@ -221,6 +221,166 @@ public sealed record PageTable : PageBlock
     /// <summary>The rows, top to bottom.</summary>
     public required IReadOnlyList<PageTableRow> Rows { get; init; }
 
+    /// <summary>
+    /// The rows with every horizontal edge two cells share resolved to the one border both sides get.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A grid line between two rows is one line, and the two cells either side of it can disagree about it.
+    /// The document is not read twice here: the winner is the <em>wider</em> of the two facing edges and it
+    /// is written back to both, so a cell stating <c>w:top w:val="nil"</c> under a cell stating a bottom
+    /// border ends up with that border. <see cref="Rows"/> keeps what the file said.
+    /// </para>
+    /// <para>
+    /// This is not a drawing nicety — the two consumers are the <em>height</em> of the row, since half the
+    /// resolved border is charged to each of the rows it separates, and the <em>drawing</em>, which without
+    /// it leaves a hole wherever the two facing cells are on different pages and only one of them states
+    /// the edge.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 on <c>probes/wordstable-r131/borderprobe.docx</c>, eight two-row arms rendered
+    /// three times into separate profiles: <c>bottom=1pt / top=nil</c> and <c>bottom=nil / top=1pt</c> both
+    /// draw the line and are the same height as the arm that states both, <c>nil/nil</c> draws nothing and
+    /// is a point shorter, and a 3 pt facing a 0.5 pt draws 3 pt whichever side states which. It is
+    /// ECMA-376 Part 1 §17.4.62's conflict resolution as far as width goes; the style half of that
+    /// precedence is not modelled, and a tie keeps the cell's own.
+    /// </para>
+    /// <para>
+    /// Horizontal edges only. A vertical edge's two cells are always drawn on the same page, so the
+    /// consolidation in <c>PageDrawing.Edges</c> already produces one stroke for them, and no row height
+    /// depends on them.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<PageTableRow> RowsWithSharedEdges => _shared ??= ShareHorizontalEdges(Rows);
+
+    private IReadOnlyList<PageTableRow>? _shared;
+
+    /// <summary>Resolves each horizontal edge two cells share, giving both of them the wider border.</summary>
+    private static IReadOnlyList<PageTableRow> ShareHorizontalEdges(IReadOnlyList<PageTableRow> rows)
+    {
+        int count = Math.Min(rows.Count, MaxRows);
+        if (count < 2) return rows;
+
+        // Which cell covers each column of each row, named by the row it was declared in and its place in
+        // that row's list — a cell spanning rows appears in every row it covers but belongs to one.
+        Dictionary<(int Row, int Column), Where> grid = [];
+        for (int row = 0; row < count; row++)
+        {
+            IReadOnlyList<PageTableCell> cells = rows[row].Cells;
+            for (int index = 0; index < cells.Count; index++)
+            {
+                PageTableCell cell = cells[index];
+                int span = Math.Min(Math.Max(1, cell.RowSpan), count - row);
+                for (int down = 0; down < span; down++)
+                {
+                    for (int column = cell.Column; column < cell.ColumnEnd; column++)
+                    {
+                        grid[(row + down, column)] = new Where(row, index, down == span - 1);
+                    }
+                }
+            }
+        }
+
+        // The border facing each cell across each of its two horizontal edges, gathered before anything
+        // is written back so that no cell is resolved against an already-resolved neighbour — and taken
+        // as the NARROWEST over the columns the cell covers, not the widest. A cell facing three cells
+        // of which one states nothing is separated from that one by nothing, and this model carries one
+        // border per edge rather than one per column: taking the widest would draw a line across the
+        // whole cell where the reference draws it across part, which on `A_320.doc` is 75 pt a page.
+        Dictionary<(int Row, int Index, bool Top), Length> facing = [];
+
+        foreach (((int row, int column), Where here) in grid)
+        {
+            // `below.Row == row + 1` is what says the cell under this one STARTS there: a cell spanning
+            // rows appears in every row it covers and is declared in one, so a cell running past this
+            // boundary faces nothing across it.
+            bool under = grid.TryGetValue((row + 1, column), out Where below) && below.Row == row + 1;
+            bool joins = here.Last && under;
+
+            if (here.Last)
+            {
+                Narrow((here.Row, here.Index, false),
+                    joins ? rows[below.Row].Cells[below.Index].Borders.Top.Width : Length.Zero);
+            }
+
+            if (joins)
+            {
+                Narrow((below.Row, below.Index, true),
+                    rows[here.Row].Cells[here.Index].Borders.Bottom.Width);
+            }
+            else if (under)
+            {
+                Narrow((below.Row, below.Index, true), Length.Zero);
+            }
+        }
+
+        void Narrow((int, int, bool) key, Length width)
+        {
+            facing[key] = facing.TryGetValue(key, out Length least) && least < width ? least : width;
+        }
+
+        if (facing.Count == 0) return rows;
+
+        List<PageTableRow> resolved = new(rows.Count);
+        for (int row = 0; row < rows.Count; row++)
+        {
+            IReadOnlyList<PageTableCell> cells = rows[row].Cells;
+            List<PageTableCell>? replaced = null;
+
+            for (int index = 0; row < count && index < cells.Count; index++)
+            {
+                PageTableCell cell = cells[index];
+                CellBorders borders = cell.Borders;
+                int last = Math.Min(row + Math.Max(1, cell.RowSpan), count) - 1;
+
+                if (facing.TryGetValue((row, index, true), out Length above)
+                    && above > borders.Top.Width)
+                {
+                    borders = borders with { Top = Facing(rows, row - 1, cell, above, bottom: true) };
+                }
+
+                if (facing.TryGetValue((row, index, false), out Length under)
+                    && under > borders.Bottom.Width)
+                {
+                    borders = borders with { Bottom = Facing(rows, last + 1, cell, under, bottom: false) };
+                }
+
+                if (borders == cell.Borders) continue;
+
+                replaced ??= [.. cells];
+                replaced[index] = cell with { Borders = borders };
+            }
+
+            resolved.Add(replaced is null ? rows[row] : rows[row] with { Cells = replaced });
+        }
+
+        return resolved;
+    }
+
+    /// <summary>Where one cell of the grid was declared, and whether this is the last row it covers.</summary>
+    private readonly record struct Where(int Row, int Index, bool Last);
+
+    /// <summary>
+    /// The border a cell inherits across one of its horizontal edges: the widest facing one, carrying the
+    /// colour and line of the neighbour it came from rather than a made-up black.
+    /// </summary>
+    private static TableBorder Facing(
+        IReadOnlyList<PageTableRow> rows, int row, PageTableCell cell, Length width, bool bottom)
+    {
+        if (row >= 0 && row < rows.Count)
+        {
+            foreach (PageTableCell other in rows[row].Cells)
+            {
+                if (other.ColumnEnd <= cell.Column || other.Column >= cell.ColumnEnd) continue;
+
+                TableBorder edge = bottom ? other.Borders.Bottom : other.Borders.Top;
+                if (edge.Width == width) return edge;
+            }
+        }
+
+        return new TableBorder(width, Colour.Black);
+    }
+
     /// <summary>How far the table's left edge sits from the body area's.</summary>
     /// <remarks>
     /// Its own value rather than a paragraph indent, because a table is indented as a whole and can be
