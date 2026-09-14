@@ -488,6 +488,11 @@ internal static class OdsCellFormats
                     Span(styleName, "text-line-through-style", OdfNamespaces.Style))
                     ?? cellFormat.IsStruckThrough,
                 Colour = colour ?? cellFormat.Colour,
+
+                // A span's own `fo:color` is a hard character attribute and a cell-level one is
+                // an engine default, which is what makes only the first of them beat a hyperlink
+                // field's colour. See `SheetCellFormat.ColourIsHard`.
+                ColourIsHard = colour is not null,
             };
         }
 

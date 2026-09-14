@@ -200,6 +200,10 @@ internal sealed class XlsCellFormats
             Underline = font.Underline,
             IsStruckThrough = font.IsStruckThrough,
             Colour = ColourAt(font.ColourIndex),
+
+            // BIFF is the format where a stated colour beats a hyperlink field's, and 0x7FFF is
+            // the only index that means automatic — index 64 is a hard black.
+            ColourIsHard = font.ColourIndex != AutomaticColour,
             Horizontal = alignment.Horizontal,
             Vertical = alignment.Vertical,
             Wraps = alignment.Wraps,
@@ -250,6 +254,7 @@ internal sealed class XlsCellFormats
             Underline = font.Underline,
             IsStruckThrough = font.IsStruckThrough,
             Colour = ColourAt(font.ColourIndex),
+            ColourIsHard = font.ColourIndex != AutomaticColour,
         };
     }
 
