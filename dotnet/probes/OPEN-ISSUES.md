@@ -175,6 +175,37 @@ Reference is **26.2.4.2** (`/opt/libreoffice26.2/program/soffice`) throughout.
 | O49 | **`055_Project_timeline_with_milestones`' date axis is RIGHT, and the row that said otherwise is refuted — NOT WORK.** Round 111 recorded it as *"a `c:dateAx` whose range and step differ — 14 labels at 10-day steps against the reference's 38 at 30-day"*. It is C12. With the thirteen `<f ca="1">` elements of C20:C32 alone removed — at the cached 2023 serials **and** at the 2026 serials the reference itself recalculates to, so the freeze and not the year is the variable — 26.2.4.2 draws **exactly the fifteen upright 10-day labels this tree draws**, `5 Apr` to `23 Aug`, label for label, on both variants. (Ours is 15, not the 14 r111 counted.) **Its 85-character gate shortfall decomposes into +111 and −26 and neither half is a scale**: +111 is C12's extra labels, −26 is O50. **Its verdict cannot move from this seat** and is 960/1045 before and after round 112. Closing it means evaluating `TODAY()` *and* keeping the import-time cache, which is a spreadsheet seat and a strange one. | `probes/chart-axis-r112` §1, `freeze.tsv`, `freeze-055.py`. `ChartDateScaleTests.TheProjectTimelineAxisIsFifteenTicksTenDaysApart` pins the refutation. **Round 113 shipped the −26 (O50) and the row is now 960 → 934 of 1045, still a mismatch and still unmovable from here** — but on the frozen variants this tree and 26.2.4.2 now read 934 apiece, exact. |
 ---
 
+## Merging this file: audit for what you were NOT counting
+
+This file is edited by every round in parallel, so it conflicts on almost every merge, and the
+resolution is nearly always *keep both sides* — two rounds appending rows in the same place. Three
+distinct ways that has gone wrong here, all found afterwards by someone else:
+
+- **A seat closed by one round while another round's base still had it seated.** Keep-both then
+  writes the row twice, once in *Fixed* and once in *Open — seated*. Happened to O68, O71, O72,
+  O73 and O74. The stale copy reads as live work.
+- **A refuted seat left in *Open — seated* stating its refuted mechanism as fact.** Round 128
+  refuted O75, added a struck-through row to nil reach, and the original seated row survived the
+  merge anyway — carrying a witness and a reach figure, so the next round would have implemented
+  the change round 128 had already built, measured at zero effect and reverted.
+- **Empty conflict markers committed and pushed.** Three lines of `<<<<<<< HEAD` / `=======` /
+  `>>>>>>>` sat in the seated table for two merges. Nothing was between them, so nothing was lost
+  and nothing looked wrong.
+
+The third is the one that says what the check has to be. The audit run after those merges counted
+seat numbers and looked for duplicates, and it was *right every time* — 80 seats, no duplicates —
+because markers are not seat rows. **An audit that counts the thing you were thinking about cannot
+see the thing you were not.** So after resolving a merge of this file, run all three:
+
+```sh
+git grep -n '^<<<<<<< \|^=======$\|^>>>>>>> ' -- .          # markers, anywhere in the tree
+# every seat number appears exactly once, across ALL sections
+# every row in "Open — seated" is still open — check none was closed or refuted elsewhere
+```
+
+The last of those is the one no script has caught yet: a seat is closed by *another branch*, so
+nothing in your diff mentions it.
+
 ## How to close an entry
 
 1. **Fixed here** — cite the C++ rule, show the reach, show confinement by building both ways
