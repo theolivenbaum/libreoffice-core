@@ -484,11 +484,19 @@ internal static class SheetTextLayout
         int unitsPerEm = face.Face.UnitsPerEm > 0 ? face.Face.UnitsPerEm : 1000;
         FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(face.Face, face.Metrics);
 
+        // The offsets come from the design units and the THICKNESSES do not -- see
+        // `LineSpacing.ResolveRuleWidths`, which answers the whole hundredth of a millimetre the
+        // reference's own device quantises each of the three to (O64).
+        LineSpacing.RuleWidths widths =
+            LineSpacing.ResolveRuleWidths(face.Face, face.Metrics, size, MetricGrid.TextLine);
+
         Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
 
         if (underline != SheetUnderline.None)
         {
-            Length thickness = Scaled(metrics.UnderlineThickness);
+            Length thickness = underline == SheetUnderline.DoubleLine
+                ? widths.DoubleUnderline
+                : widths.Underline;
 
             // The font records the underline's offset as negative below the baseline.
             Length top = baseline - Scaled(metrics.UnderlinePosition);
@@ -500,8 +508,8 @@ internal static class SheetTextLayout
 
         if (struckThrough)
         {
-            Length thickness = Scaled(metrics.StrikeoutThickness);
-            Rule(sink, x, baseline - Scaled(metrics.StrikeoutPosition), width, thickness, colour);
+            Rule(sink, x, baseline - Scaled(metrics.StrikeoutPosition), width, widths.Strikeout,
+                 colour);
         }
     }
 
