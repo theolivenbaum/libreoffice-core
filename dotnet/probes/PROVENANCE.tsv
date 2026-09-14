@@ -2184,3 +2184,17 @@ dotnet/probes/underline-r118/rules-final.tsv	2026-09-13	current	26.2.4.2	present
 dotnet/probes/underline-r118/sweep.py	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/underline-r118/results.md
 dotnet/probes/underline-r118/xml-census.py	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/underline-r118/results.md
 dotnet/probes/underline-r118/xml-census.tsv	2026-09-13	current	26.2.4.2	present	current	dotnet/probes/underline-r118/results.md
+dotnet/probes/o2-audit-r121/banner-geometry.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/banner-geometry.tsv	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/esch.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/metafile-base-rate.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/metafile-base-rate.txt	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/ole-transform.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/ole-transform.txt	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/ole.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/oleobj-census.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/oleobj-census.tsv	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/results.md	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/ticap-blip-merge.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/ticap-blip-reach.txt	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
+dotnet/probes/o2-audit-r121/xls-blip-reach.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/o2-audit-r121/results.md
