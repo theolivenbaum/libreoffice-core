@@ -349,6 +349,7 @@ public sealed partial class DocxLayoutSource
         _sectionIndex = 0;
         _blocksInSection = 0;
         _pendingBelowTarget = -1;
+        _indexFieldDepth = 0;
         _sectionLeftMargins = LeftMargins(body);
 
         // The body is where the document's lists start counting. Reset rather than assumed clean,
@@ -491,10 +492,23 @@ public sealed partial class DocxLayoutSource
         // body's count, which is the same rule the extraction reader applies between flows.
         _numbering.ResetCounters();
 
-        List<PageBlock> blocks = [];
-        Walk(element, blocks, depth: 0);
-        ParagraphBorderJoin.Apply(blocks);
-        return blocks;
+        // Saved rather than merely cleared, because a text frame's content comes through here too and
+        // a frame can sit inside a body paragraph — so an unbalanced field in the frame must not leave
+        // the body's own depth raised, and the body's must not reach into the frame.
+        int outerIndexFields = _indexFieldDepth;
+        _indexFieldDepth = 0;
+
+        try
+        {
+            List<PageBlock> blocks = [];
+            Walk(element, blocks, depth: 0);
+            ParagraphBorderJoin.Apply(blocks);
+            return blocks;
+        }
+        finally
+        {
+            _indexFieldDepth = outerIndexFields;
+        }
     }
 
     /// <summary>
@@ -863,8 +877,14 @@ public sealed partial class DocxLayoutSource
         _pageBreakPending = false;
 
         RunWalker walker = new(
-            CitationOf, Symbol, _constants, _footnoteNumber, _endnoteNumber, StyleReferenceText);
+            CitationOf, Symbol, _constants, _footnoteNumber, _endnoteNumber, StyleReferenceText,
+            _indexFieldDepth);
         walker.Walk(element, citation);
+
+        // Carried to the paragraph after this one, exactly as the note counters are: a `TOC` field's
+        // result is dozens of paragraphs and the flag that strips its entries' character style has to
+        // live as long as the field does. See `RunWalker.IndexFieldDepth`.
+        _indexFieldDepth = walker.IndexFieldDepth;
 
         // Where the note's own number landed, for a renumbering pass that has to find it again. A field
         // rather than an out parameter because this method reads an ordinary paragraph and a note's first
@@ -1030,6 +1050,18 @@ public sealed partial class DocxLayoutSource
 
     /// <summary>How many footnotes the walk has passed, counted across the document.</summary>
     private int _footnoteNumber;
+
+    /// <summary>
+    /// How many <c>TOC</c>, <c>INDEX</c> or <c>BIBLIOGRAPHY</c> results the walk is inside.
+    /// </summary>
+    /// <remarks>
+    /// Document-level rather than per paragraph, because the field is: its <c>fldChar begin</c> shares a
+    /// paragraph with the first contents entry and its <c>end</c> with the last, and everything between
+    /// has to know it is inside an index result or it takes the <c>Hyperlink</c> character style Word
+    /// wrote on it. LibreOffice keeps the same flag on the import state — see
+    /// <c>RunWalker._indexResults</c> for the citations and for what it costs to get wrong.
+    /// </remarks>
+    private int _indexFieldDepth;
 
     /// <summary>
     /// Where the last note body's own citation was emitted, or −1 when it emitted none.
@@ -1501,13 +1533,20 @@ public sealed partial class DocxLayoutSource
         /// What a <c>STYLEREF</c> naming a style quotes, or null when nothing has been read in that
         /// style yet. Supplied by the source because the answer is a paragraph this walker never sees.
         /// </param>
+        /// <param name="indexFieldDepth">
+        /// How many index fields' results were still open when the paragraph before this one ended.
+        /// A walker is built per paragraph and a <c>TOC</c> field's result is dozens of them, so
+        /// without this the suppression below would reach only the entry that shares a paragraph with
+        /// the field's own <c>fldChar begin</c>. See <see cref="_indexResults"/>.
+        /// </param>
         internal RunWalker(
             Func<bool, int, string> citation,
             Func<string?, char, (string Text, OpenTypeFace Face, FontReference? Font)?> symbol,
             ConstantFields constants = default,
             int footnote = 0,
             int endnote = 0,
-            Func<string, string?>? styleReference = null)
+            Func<string, string?>? styleReference = null,
+            int indexFieldDepth = 0)
         {
             _citationOf = citation;
             _symbolOf = symbol;
@@ -1515,6 +1554,8 @@ public sealed partial class DocxLayoutSource
             _footnote = footnote;
             _endnote = endnote;
             _styleReference = styleReference;
+            _indexResults = indexFieldDepth;
+            _inheritedIndexResults = indexFieldDepth;
         }
 
         /// <summary>What a <c>STYLEREF</c> quotes, or null when the source cannot answer.</summary>
@@ -1665,8 +1706,32 @@ public sealed partial class DocxLayoutSource
         /// <c>pContext-&gt;GetTOC().is()</c>), so the <c>PAGEREF</c> fields nested inside each entry do
         /// not end it.
         /// </para>
+        /// <para>
+        /// <b>And it outlives the paragraph, which is the whole of why the suppression did not work.</b>
+        /// A walker is built per paragraph; a <c>TOC</c> field's <c>fldChar begin</c>, its instruction
+        /// and its <c>separate</c> sit in the <em>first</em> entry's paragraph and its <c>end</c> in the
+        /// last, so a counter reset at every paragraph boundary suppressed the style on entry one and on
+        /// nothing else. On <c>150-5370-10H.docx</c> that is one of 43 contents lines. LibreOffice's own
+        /// <c>m_bStartTOC</c> is on the document-level import state for exactly this reason, so the depth
+        /// is seeded from the source and handed back to it — see
+        /// <see cref="DocxLayoutSource._indexFieldDepth"/>.
+        /// </para>
         /// </remarks>
         private int _indexResults;
+
+        /// <summary>
+        /// How much of <see cref="_indexResults"/> was inherited rather than opened by this paragraph.
+        /// </summary>
+        /// <remarks>
+        /// The field stack is per paragraph, so the <c>fldChar end</c> that closes a multi-paragraph
+        /// index field arrives with nothing of that field's on the stack to pop. The inherited depth is
+        /// what such an end closes instead — the nested <c>PAGEREF</c> fields inside an entry open and
+        /// close within their own paragraph, so an unmatched end is the outer field's and no other.
+        /// </remarks>
+        private int _inheritedIndexResults;
+
+        /// <summary>How many index fields' results are still open where this paragraph ended.</summary>
+        internal int IndexFieldDepth => _indexResults;
 
         /// <summary>True while the walk is inside an index field's result.</summary>
         private bool InIndexField => _indexResults > 0;
@@ -1854,6 +1919,16 @@ public sealed partial class DocxLayoutSource
 
                             case "end":
                                 _inInstruction = false;
+
+                                // An end with nothing of its own on the stack closes a field that began
+                                // in an earlier paragraph, and the only such field this walk tracks is
+                                // an index one. See `_inheritedIndexResults`.
+                                if (_fields.Count == 0 && _inheritedIndexResults > 0)
+                                {
+                                    _inheritedIndexResults--;
+                                    _indexResults--;
+                                }
+
                                 if (_fields.Count > 0)
                                 {
                                     OpenField closing = _fields.Pop();

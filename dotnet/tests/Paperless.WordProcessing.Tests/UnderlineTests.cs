@@ -338,6 +338,87 @@ public sealed class UnderlineTests
     public void AWordBinaryUnderlineIsAStyleAndThreeStylesAreNoLine(int kul, TextUnderline expected)
         => Ww8.Ww8DocumentReader.UnderlineOf(kul).ShouldBe(expected);
 
+    /// <summary>
+    /// A tab between two decorated stretches is bridged, because Writer paints it as blanks.
+    /// </summary>
+    /// <remarks>
+    /// <c>SwTabPortion::Paint</c> (<c>sw/source/core/text/txttab.cxx</c>:626-641) draws
+    /// <c>Width() / GetTextSize(' ')</c> literal blanks in the font at the tab whenever
+    /// <c>SwFont::IsPaintBlank()</c>, so the line the font carries runs across the tab. Measured on
+    /// 26.2.4.2 over 96 authored rows — four faces, three sizes, two decorations, four tab widths —
+    /// which draw one contiguous rule where this tree drew two. <c>probes/wordsdec-r126</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void ATabBetweenTwoDecoratedStretchesIsBridged(bool underline, bool strike)
+    {
+        (List<(GlyphRun Run, Colour Colour)> runs, List<(DocRect Area, Colour Colour)> rules) =
+            Draw(Tabbed("left\tright", underline, strike, from: 0));
+
+        // Three: the text before the tab, the tab itself, and the text after it — contiguous.
+        rules.Count.ShouldBe(3);
+        List<(DocRect Area, Colour Colour)> ordered = [.. rules.OrderBy(rule => rule.Area.X)];
+
+        ordered[0].Area.Right.ShouldBe(ordered[1].Area.X);
+        ordered[1].Area.Right.ShouldBe(ordered[2].Area.X);
+        ordered[1].Area.Width.ShouldBeGreaterThan(Length.FromPoints(50));
+
+        // All three sit on the same rule band, which is what makes them one line rather than three.
+        ordered[1].Area.Y.ShouldBe(ordered[0].Area.Y);
+        ordered[2].Area.Y.ShouldBe(ordered[0].Area.Y);
+        runs.Count.ShouldBe(2);
+    }
+
+    /// <summary>The font that decides is the one at the tab itself, not the one after it.</summary>
+    /// <remarks>
+    /// <c>SwTabPortion::Paint</c> asks <c>rInf.GetFont()</c>, which is the font in force at the tab
+    /// character — the same position <c>PageDrawing.Leader</c> reads for a dot leader's face. So a
+    /// decoration beginning <em>at</em> the tab bridges it and one beginning after it does not: a
+    /// contents line whose title is underlined and whose page number is not must not grow a rule
+    /// across the blank between them merely because the title has one.
+    /// </remarks>
+    [Theory]
+    // `left\tright`: index 4 is the tab, 5 is the `r` after it.
+    [InlineData(4, 2)]
+    [InlineData(5, 1)]
+    public void ThePlaceTheDecorationStartsDecidesWhetherTheTabIsBridged(int from, int expected)
+    {
+        (_, List<(DocRect Area, Colour Colour)> rules) =
+            Draw(Tabbed("left\tright", underline: true, strike: false, from));
+
+        rules.Count.ShouldBe(expected);
+
+        // The trailing stretch is ruled either way, at the stop; what changes is whether the blank
+        // before it is.
+        List<(DocRect Area, Colour Colour)> ordered = [.. rules.OrderBy(rule => rule.Area.X)];
+        ordered[^1].Area.X.ShouldBe(Length.FromPoints(200));
+        (ordered[0].Area.X < Length.FromPoints(200)).ShouldBe(expected == 2);
+    }
+
+    /// <summary>A tab narrower than one blank of the current font draws no rule at all.</summary>
+    /// <remarks>
+    /// <c>nChar = Width() / nCharWidth</c> is an integer division of two whole-twip lengths, so a tab
+    /// under one blank wide gives nought, the string handed to <c>DrawText</c> is empty and
+    /// <c>SwTextPaintInfo::DrawText_</c> returns on <c>!nLength</c>. Bracketed at 26.2.4.2 in
+    /// Liberation Mono at 10 pt, whose blank is 120 twips to the twip: tabs of 30, 90 and 119 twips
+    /// carry no rule and 121, 180 and 361 carry one.
+    /// </remarks>
+    [Theory]
+    [InlineData(119, false)]
+    [InlineData(121, true)]
+    public void ATabNarrowerThanOneBlankCarriesNoRule(int twips, bool bridged)
+    {
+        PageParagraph paragraph = Tabbed(
+            "MMMMMMMMMM\tR", underline: true, strike: false, from: 0,
+            face: Mono, size: Length.FromPoints(10),
+            stop: Length.FromTwips(1200 + twips));
+
+        (_, List<(DocRect Area, Colour Colour)> rules) = Draw(paragraph);
+
+        rules.Count.ShouldBe(bridged ? 3 : 2);
+    }
+
     /// <summary>The character formatting of a run whose <c>w:rPr</c> names one element.</summary>
     private static Ooxml.WordTextStyle Resolved(string name, string? value)
     {
@@ -385,6 +466,43 @@ public sealed class UnderlineTests
                 ],
         };
 
+    /// <summary>A paragraph holding one tab, with a stop far enough out to make a wide blank.</summary>
+    private static PageParagraph Tabbed(
+        string text,
+        bool underline,
+        bool strike,
+        int from,
+        OpenTypeFace? face = null,
+        Length size = default,
+        Length stop = default)
+    {
+        OpenTypeFace resolved = face ?? Face;
+        Length em = size == default ? Size : size;
+        Length position = stop == default ? Length.FromPoints(200) : stop;
+
+        return new PageParagraph
+        {
+            Text = text,
+            Face = resolved,
+            EmSize = em,
+            Format = new ParagraphFormat { TabStops = [new TabStop(position)] },
+            Runs = from > 0
+                ?
+                [
+                    new PageRun(0, from, resolved, em, Colour: Colour.Black),
+                    new PageRun(
+                        from, text.Length - from, resolved, em, Colour: Colour.Black,
+                        Underline: Ruled(underline), IsStruckThrough: strike),
+                ]
+                :
+                [
+                    new PageRun(
+                        0, text.Length, resolved, em, Colour: Colour.Black,
+                        Underline: Ruled(underline), IsStruckThrough: strike),
+                ],
+        };
+    }
+
     private static PlacedLine Line(PageParagraph paragraph)
         => new(
             ParagraphIndex: 0,
@@ -402,10 +520,16 @@ public sealed class UnderlineTests
     /// <summary>A real face, since a rule's offset and thickness are measurements rather than constants.</summary>
     private static OpenTypeFace Face { get; } = Resolve();
 
-    private static OpenTypeFace Resolve()
+    /// <summary>
+    /// A monospaced face, whose blank is a whole number of twips at 10 pt and so brackets the cliff.
+    /// </summary>
+    private static OpenTypeFace Mono { get; } = ResolveFace("Liberation Mono");
+
+    private static OpenTypeFace Resolve() => ResolveFace("Liberation Serif");
+
+    private static OpenTypeFace ResolveFace(string family)
     {
         SystemFontResolver resolver = new(SystemFontIndex.Build());
-        return resolver.LoadOpenType(
-            resolver.Resolve(new FontRequest("Liberation Serif", 400, false)));
+        return resolver.LoadOpenType(resolver.Resolve(new FontRequest(family, 400, false)));
     }
 }
