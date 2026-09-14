@@ -2223,3 +2223,7 @@ dotnet/probes/quantise-r120/results.md	2026-09-14	current	26.2.4.2	present	curre
 dotnet/probes/quantise-r120/score.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/quantise-r120/results.md
 dotnet/probes/quantise-r120/sweep.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/quantise-r120/results.md
 dotnet/probes/quantise-r120/xls-linkcolour-census.py	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/quantise-r120/results.md
+dotnet/probes/gate-r122/rows.tsv	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/gate-r122/results.md
+dotnet/probes/gate-r122/results.md	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/gate-r122/results.md
+dotnet/probes/gate-r122/alle-einzeln-ref-run-a.txt	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/gate-r122/results.md
+dotnet/probes/gate-r122/alle-einzeln-ref-run-b.txt	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/gate-r122/results.md
