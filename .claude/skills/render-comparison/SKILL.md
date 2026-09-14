@@ -687,6 +687,24 @@ The same export settles rounding questions that no amount of source-reading will
 workbooks came back 111.50 → 111 and 121.64 → 121 but 139.97 → 140 and 152.70 → 153, which
 says a device's quantisation decides them rather than a rounding rule.
 
+### It is a *second* leg, not the truth, and it has at least one blind spot
+
+The flat export is LibreOffice answering with its own importer and its own layout — but through
+its **ODF exporter**, which is a third piece of code and can drop what the other two computed.
+
+Measured: `ScXMLExport` calls `ScEditUtil::GetCellFieldValue(*pField, &rDoc, nullptr, nullptr)`
+(`sc/source/filter/xml/xmlexprt.cxx`:3062) with **both out-parameters null** — and that function
+is where a hyperlink cell's colour *and* its underline are decided
+(`sc/source/core/tool/editutil.cxx`:209-244). So on a Calc cell whose text is a hyperlink field,
+the `.fods` prints `underline=none` and `#000000` on the very cells the same binary's **PDF**
+draws navy and underlined. Two instruments over 307 documents agreed on hyperlinks 243 of 243 and
+disagreed on underlines on 17.
+
+So when the flat export and the rendered PDF disagree, **the PDF is the reference and the export is
+a witness that may have lost the attribute**. Use the export to find out what was computed; confirm
+anything it says is *absent* against the rendering before believing it. That disagreement is
+sometimes the finding — it was here.
+
 ## What is drawn may not be the renderer's drawing at all
 
 An OLE object arrives with a **replacement picture** the authoring application stored beside
