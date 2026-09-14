@@ -361,6 +361,23 @@ reference. The mechanism is in the WW8 reader's handling of as-char frames, not 
 | `Paperless.Vector.Tests` | 309 | 0 | 0 |
 | `Paperless.WordProcessing.Tests` | 1333 | 0 | 0 |
 | **total, excluding fidelity** | **6268** | **0** | **0** |
+
+> **Corrected at merge — this table's total is a TRUNCATED RUN and is not to be quoted.**
+> The 6268 is 632 short, and the whole shortfall is in `Paperless.WordProcessing.Tests`,
+> reported here as 1333. Measured at the merge head with every project reporting
+> `Passed == Total`, that project is **1980** and the eleven projects together are **7469
+> discovered, 7459 passed, 10 failed** — the ten standing fidelity failures.
+>
+> This is exactly the hazard `dotnet/CLAUDE.md` records: a run can report a Passed count
+> well below the discovered count and still exit cleanly. Round 126 hit the same thing in
+> the same project on the same day (1408 passed against 1974 discovered), caught it with a
+> discovered-vs-passed check, discarded the run and banked it in its `test-run.txt`. This
+> round did not check, and reported the short number as its result.
+>
+> Nothing is wrong with the round's work: its diff **adds** two test files and deletes
+> nothing, which is how the shortfall was identified as an instrument failure rather than
+> lost tests. **Compare discovered against passed on every project before quoting a total.**
+
 | `Paperless.Fidelity.Tests` | 542 | 10 | 0 |
 
 The fidelity project's ten failures are the set `CLAUDE.md` records as left failing on purpose: the
