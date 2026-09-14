@@ -3,6 +3,7 @@ using Paperless.Core.Extraction;
 using Paperless.Core.Globalization;
 using Paperless.Core.Graphics;
 using Paperless.Text.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Rtf;
 
@@ -152,7 +153,13 @@ public sealed partial class RtfDocumentReader
         /// not the colour table's first entry.
         /// </remarks>
         public int? HighlightColourIndex { get; set; }
-        public bool Underline { get; set; }
+        /// <summary>How the <c>\ul…</c> words in force underline the run.</summary>
+        /// <remarks>
+        /// Two of the seventeen draw two lines — <c>\uldb</c> and <c>\ululdbwave</c>, which
+        /// <c>writerfilter</c> maps to <c>LINESTYLE_DOUBLE</c> and <c>LINESTYLE_DOUBLEWAVE</c> — and
+        /// the rest one. See <see cref="TextUnderline"/>.
+        /// </remarks>
+        public TextUnderline Underline { get; set; }
         public bool Strike { get; set; }
         public bool Hidden { get; set; }
 
@@ -356,7 +363,7 @@ public sealed partial class RtfDocumentReader
             TabStops = [];
             PendingTabAlignment = TabAlignment.Left;
             PendingTabLeader = '\0';
-            Underline = false;
+            Underline = TextUnderline.None;
             Strike = false;
             Hidden = false;
             Capitals = false;
@@ -931,7 +938,7 @@ public sealed partial class RtfDocumentReader
         RunEmphasis emphasis = RunEmphasis.None;
         if (state.Bold) emphasis |= RunEmphasis.Bold;
         if (state.Italic) emphasis |= RunEmphasis.Italic;
-        if (state.Underline) emphasis |= RunEmphasis.Underline;
+        if (state.Underline != TextUnderline.None) emphasis |= RunEmphasis.Underline;
         if (state.Strike) emphasis |= RunEmphasis.Strikethrough;
         if (state.VerticalPosition > 0) emphasis |= RunEmphasis.Superscript;
         if (state.VerticalPosition < 0) emphasis |= RunEmphasis.Subscript;
@@ -2108,7 +2115,7 @@ public sealed partial class RtfDocumentReader
         if (f.FontSizeHalfPoints is not null) state.FontSizeHalfPoints = null;
         if (f.Bold is not null) state.Bold = false;
         if (f.Italic is not null) state.Italic = false;
-        if (f.Underline is not null) state.Underline = false;
+        if (f.Underline is not null) state.Underline = TextUnderline.None;
         if (f.Strike is not null) state.Strike = false;
         if (f.Capitals is not null) state.Capitals = false;
         if (f.SmallCapitals is not null) state.SmallCapitals = false;

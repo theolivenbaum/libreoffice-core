@@ -8,6 +8,7 @@ using Paperless.Core.Numbering;
 using Paperless.Text.Encodings;
 using Paperless.Text.Layout;
 using Paperless.WordProcessing.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Rtf;
 
@@ -915,13 +916,31 @@ public sealed partial class RtfDocumentReader
             case "i":
                 state.Italic = token.Parameter != 0;
                 return;
-            case "ul" or "uld" or "uldash" or "uldashd" or "uldashdd" or "uldb" or "ulhwave"
-                 or "ulldash" or "ulth" or "ulthd" or "ulthdash" or "ulthdashd" or "ulthdashdd"
-                 or "ulthldash" or "ululdbwave" or "ulw" or "ulwave":
-                state.Underline = token.Parameter != 0;
+            // `\uldb` and `\ululdbwave` are the two that draw TWO lines; the other fifteen draw
+            // one, whatever pattern they name, because nothing below this draws a pattern.
+            case "uldb" or "ululdbwave":
+                state.Underline = token.Parameter != 0
+                    ? TextUnderline.DoubleLine
+                    : TextUnderline.None;
+                return;
+            // The `\ulth` family and `\ulhwave` are the heavy forms —
+            // `RTFDocumentImpl` maps them to `thick`, `dottedHeavy`, `dashedHeavy`,
+            // `dashDotHeavy`, `dashDotDotHeavy`, `dashLongHeavy` and `wavyHeavy`
+            // (`rtfdocumentimpl.cxx`:2085-2102) — so they are one line at about twice the weight.
+            case "ulth" or "ulthd" or "ulthdash" or "ulthdashd" or "ulthdashdd" or "ulthldash"
+                 or "ulhwave":
+                state.Underline = token.Parameter != 0
+                    ? TextUnderline.BoldLine
+                    : TextUnderline.None;
+                return;
+            case "ul" or "uld" or "uldash" or "uldashd" or "uldashdd"
+                 or "ulldash" or "ulw" or "ulwave":
+                state.Underline = token.Parameter != 0
+                    ? TextUnderline.SingleLine
+                    : TextUnderline.None;
                 return;
             case "ulnone":
-                state.Underline = false;
+                state.Underline = TextUnderline.None;
                 return;
             case "strike" or "striked":
                 state.Strike = token.Parameter != 0;

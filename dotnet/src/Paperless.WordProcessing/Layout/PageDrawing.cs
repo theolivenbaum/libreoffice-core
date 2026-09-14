@@ -1618,32 +1618,57 @@ public static class PageDrawing
     {
         if (run.EmSize <= Length.Zero || extent <= Length.Zero) return;
 
-        int unitsPerEm = run.Face.UnitsPerEm > 0 ? run.Face.UnitsPerEm : 1000;
         LineMetrics line = LineSpacing.Resolve(run.Face);
-        FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(run.Face, line);
 
-        // The offsets are design units and the thicknesses are not: a rule's weight is a whole
-        // number of the PDF writer's own 720 dpi pixels rounded to a whole unit of the map mode
-        // the page is painted in, which on a Writer page is the TWIP. See
-        // `LineSpacing.ResolveRuleWidths` and `MetricGrid.WriterTextLine`.
+        // A rule's weight AND its offset are whole numbers of the PDF writer's own 720 dpi pixels
+        // rounded to whole units of the map mode the page is painted in, which on a Writer page is
+        // the TWIP. See `LineSpacing.ResolveRuleWidths` and `MetricGrid.WriterTextLine`.
         LineSpacing.RuleWidths widths =
             LineSpacing.ResolveRuleWidths(run.Face, line, run.EmSize, MetricGrid.WriterTextLine);
-
-        Length Scaled(int designUnits) => run.EmSize * ((double)designUnits / unitsPerEm);
 
         // The rise carries the rules with the text, exactly as it carries the band: a struck-through
         // superscript is struck where it is drawn rather than where it would have sat unraised.
         Length baselineOfRun = baseline - run.Rise;
 
-        if (run.IsUnderlined)
+        if (run.Underline == TextUnderline.SingleLine)
         {
-            // The face records the underline's offset as negative below the baseline.
             Length thickness = widths.Underline;
             if (thickness > Length.Zero)
             {
                 rules.Add((
                     new DocRect(
-                        pen, baselineOfRun - Scaled(metrics.UnderlinePosition), extent, thickness),
+                        pen, baselineOfRun + widths.UnderlineOffset, extent, thickness),
+                    run.ColourOn(background)));
+            }
+        }
+        else if (run.Underline == TextUnderline.BoldLine)
+        {
+            Length thickness = widths.BoldUnderline;
+            if (thickness > Length.Zero)
+            {
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun + widths.BoldUnderlineOffset, extent, thickness),
+                    run.ColourOn(background)));
+            }
+        }
+        else if (run.Underline == TextUnderline.DoubleLine)
+        {
+            // Both the thickness AND the two offsets come off the device here, where a single
+            // underline still takes its offset from the design units: a double underline's lines
+            // straddle where a single one would sit, their separation is floored on the device
+            // rather than scaled with the em, and the second carries the writer's extra thickness.
+            // See `LineSpacing.RuleWidths.DoubleUnderlineSecond`.
+            Length thickness = widths.DoubleUnderline;
+            if (thickness > Length.Zero)
+            {
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun + widths.DoubleUnderlineFirst, extent, thickness),
+                    run.ColourOn(background)));
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun + widths.DoubleUnderlineSecond, extent, thickness),
                     run.ColourOn(background)));
             }
         }
@@ -1655,7 +1680,7 @@ public static class PageDrawing
             {
                 rules.Add((
                     new DocRect(
-                        pen, baselineOfRun - Scaled(metrics.StrikeoutPosition), extent, thickness),
+                        pen, baselineOfRun + widths.StrikeoutOffset, extent, thickness),
                     run.ColourOn(background)));
             }
         }

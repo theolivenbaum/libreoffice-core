@@ -2423,26 +2423,23 @@ public static partial class SlideTextLayout
 
         int unitsPerEm = face.UnitsPerEm > 0 ? face.UnitsPerEm : 1000;
         LineMetrics line = LineSpacing.Resolve(face);
-        FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(face, line);
 
-        // The offsets are design units and the thicknesses are not -- a rule's weight comes off
-        // the PDF writer's own 720 dpi device and is a whole hundredth of a millimetre, for a
-        // slide exactly as for a sheet. See `LineSpacing.ResolveRuleWidths`.
+        // BOTH the thickness and the offset come off the PDF writer's own 720 dpi device, in whole
+        // hundredths of a millimetre, for a slide exactly as for a sheet. Round 120 took only the
+        // thickness from there and left the offset in design units; round 123 measured what that
+        // costs and moved it. See `LineSpacing.ResolveRuleWidths`.
         LineSpacing.RuleWidths widths =
             LineSpacing.ResolveRuleWidths(face, line, size, MetricGrid.TextLine);
-
-        Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
 
         List<DocRect> rules = [];
 
         if (decoration.Underline)
         {
-            // The face records the underline's offset as negative below the baseline.
             Length thickness = widths.Underline;
             if (thickness > Length.Zero)
             {
                 rules.Add(new DocRect(
-                    left, baseline - Scaled(metrics.UnderlinePosition), width, thickness));
+                    left, baseline + widths.UnderlineOffset, width, thickness));
             }
         }
 
@@ -2452,7 +2449,7 @@ public static partial class SlideTextLayout
             if (thickness > Length.Zero)
             {
                 rules.Add(new DocRect(
-                    left, baseline - Scaled(metrics.StrikeoutPosition), width, thickness));
+                    left, baseline + widths.StrikeoutOffset, width, thickness));
             }
         }
 

@@ -3,6 +3,7 @@ using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.WordProcessing.OpenDocument;
@@ -35,8 +36,10 @@ namespace Paperless.WordProcessing.OpenDocument;
 /// where a Word highlighter lands after a round trip: LibreOffice exports both its character highlight
 /// and its character shading to the one ODF attribute.
 /// </param>
-/// <param name="IsUnderlined">
-/// True when <c>style:text-underline-style</c> names a style other than <c>none</c>.
+/// <param name="Underline">
+/// How the run is underlined, from <c>style:text-underline-style</c> and
+/// <c>style:text-underline-type</c> read at one level. See <see cref="TextUnderline"/> and
+/// <c>OdfStyles.ResolveTogether</c> for why the level comes before the attribute.
 /// </param>
 /// <param name="IsStruckThrough">
 /// True when <c>style:text-line-through-style</c> names a style other than <c>none</c>.
@@ -73,7 +76,7 @@ public readonly record struct OdfTextStyle(
     Layout.Escapement Escapement = default,
     Layout.PageCaseMap CaseMap = Layout.PageCaseMap.None,
     Colour? Highlight = null,
-    bool IsUnderlined = false,
+    TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
     bool AutoKerning = true)
 {
@@ -263,10 +266,13 @@ internal static class OdfParagraphFormats
             CaseMapIn(styles, cascade),
             Cascaded(styles, cascade, OdfNamespaces.FoCompatible, "background-color").AsColour(),
             // ODF names the *pattern* rather than switching a flag, so "any value but none" is the
-            // reading — the same one `OdfTextFormat` takes of the same two attributes. The width and
+            // reading — the same one `OdfTextFormat` takes of the same attributes. The width and
             // colour attributes beside them are not read: nothing below this can draw a rule other than
-            // one text-coloured line, so honouring them would be a promise the model cannot keep.
-            IsLineOn(Cascaded(styles, cascade, OdfNamespaces.Style, "text-underline-style").Value),
+            // one text-coloured line per line of the underline, so honouring them would be a promise
+            // the model cannot keep. The underline's *count* is read, and it cannot go through
+            // `Cascaded`: the style and the type are two attributes of one item, so an outer style's
+            // type must not be merged with an inner style's style. See `OdfStyles.ResolveTogether`.
+            OdfTextFormat.UnderlineIn(styles, cascade),
             IsLineOn(Cascaded(styles, cascade, OdfNamespaces.Style, "text-line-through-style").Value),
             Cascaded(styles, cascade, OdfNamespaces.Style, "letter-kerning").Value is not "false");
     }

@@ -517,35 +517,33 @@ internal static class SheetTextLayout
         if (underline == SheetUnderline.None && !struckThrough) return;
         if (size <= Length.Zero || width <= Length.Zero) return;
 
-        int unitsPerEm = face.Face.UnitsPerEm > 0 ? face.Face.UnitsPerEm : 1000;
-        FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(face.Face, face.Metrics);
-
-        // The offsets come from the design units and the THICKNESSES do not -- see
-        // `LineSpacing.ResolveRuleWidths`, which answers the whole hundredth of a millimetre the
-        // reference's own device quantises each of the three to (O64).
+        // Thickness AND offset, both from the device -- see `LineSpacing.ResolveRuleWidths`, which
+        // answers the whole hundredth of a millimetre the reference's own 720 dpi device quantises
+        // each of them to (O64 for the thickness, round 123 for the offset).
         LineSpacing.RuleWidths widths =
             LineSpacing.ResolveRuleWidths(face.Face, face.Metrics, size, MetricGrid.TextLine);
 
-        Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
-
-        if (underline != SheetUnderline.None)
+        if (underline == SheetUnderline.DoubleLine)
         {
-            Length thickness = underline == SheetUnderline.DoubleLine
-                ? widths.DoubleUnderline
-                : widths.Underline;
-
-            // The font records the underline's offset as negative below the baseline.
-            Length top = baseline - Scaled(metrics.UnderlinePosition);
-            Rule(sink, x, top, width, thickness, colour);
-
-            if (underline == SheetUnderline.DoubleLine)
-                Rule(sink, x, top + (thickness * 2), width, thickness, colour);
+            // Both lines AND both offsets come off the device. Round 120 gave this the right
+            // thickness and kept the single underline's offset for the first line and twice the
+            // thickness below it for the second, which is wrong in both places: the pair straddles
+            // where a single rule would sit, its separation is floored on the device rather than
+            // scaled with the em, and the writer adds a further whole thickness to the second.
+            // See `LineSpacing.RuleWidths.DoubleUnderlineSecond`.
+            Rule(sink, x, baseline + widths.DoubleUnderlineFirst, width, widths.DoubleUnderline,
+                 colour);
+            Rule(sink, x, baseline + widths.DoubleUnderlineSecond, width, widths.DoubleUnderline,
+                 colour);
+        }
+        else if (underline != SheetUnderline.None)
+        {
+            Rule(sink, x, baseline + widths.UnderlineOffset, width, widths.Underline, colour);
         }
 
         if (struckThrough)
         {
-            Rule(sink, x, baseline - Scaled(metrics.StrikeoutPosition), width, widths.Strikeout,
-                 colour);
+            Rule(sink, x, baseline + widths.StrikeoutOffset, width, widths.Strikeout, colour);
         }
     }
 

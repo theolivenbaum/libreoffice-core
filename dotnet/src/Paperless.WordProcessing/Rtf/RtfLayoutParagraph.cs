@@ -1,6 +1,7 @@
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Text.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Rtf;
 
@@ -27,7 +28,8 @@ namespace Paperless.WordProcessing.Rtf;
 /// </param>
 /// <param name="CaseMap">The case <c>\caps</c> or <c>\scaps</c> draws the run in.</param>
 /// <param name="Highlight">The band <c>\highlight</c> draws behind the run, or null when it has none.</param>
-/// <param name="IsUnderlined">True when one of the <c>\ul…</c> words draws a rule under the run.</param>
+/// <param name="Underline">How the <c>\ul…</c> words in force rule the run — <c>\uldb</c> and
+/// <c>\ululdbwave</c> with two lines and the other fifteen with one.</param>
 /// <param name="IsStruckThrough">True when <c>\strike</c> or <c>\striked</c> draws one through it.</param>
 /// <param name="AutoKerning">
 /// True when a nonzero <c>\kerning</c> asks for the run's pairs to be kerned. Off unless it does.
@@ -44,7 +46,7 @@ public readonly record struct RtfLayoutRun(
     Layout.Escapement Escapement = default,
     Layout.PageCaseMap CaseMap = Layout.PageCaseMap.None,
     Colour? Highlight = null,
-    bool IsUnderlined = false,
+    TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
     bool AutoKerning = false)
 {
@@ -69,7 +71,7 @@ public readonly record struct RtfLayoutRun(
            && Escapement == other.Escapement
            && CaseMap == other.CaseMap
            && Highlight == other.Highlight
-           && IsUnderlined == other.IsUnderlined
+           && Underline == other.Underline
            && IsStruckThrough == other.IsStruckThrough
            && AutoKerning == other.AutoKerning;
 }

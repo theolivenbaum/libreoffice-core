@@ -3,6 +3,7 @@ using System.Text;
 using Paperless.Core.Globalization;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.WordProcessing.Ww8;
@@ -238,7 +239,10 @@ public sealed partial class Ww8DocumentReader
     /// </param>
     /// <param name="CaseMap">The case <c>sprmCFCaps</c> or <c>sprmCFSmallCaps</c> draws the run in.</param>
     /// <param name="Highlight">The band drawn behind the run, or null when it has none.</param>
-    /// <param name="IsUnderlined">True when <c>sprmCKul</c> asks for a rule under the run.</param>
+    /// <param name="Underline">
+    /// How <c>sprmCKul</c> rules the run — operands 3 and 43 with two lines, fifteen more with one,
+    /// and every other operand with none. See <see cref="TextUnderline"/>.
+    /// </param>
     /// <param name="IsStruckThrough">
     /// True when <c>sprmCFStrike</c> or <c>sprmCFDStrike</c> asks for one through it.
     /// </param>
@@ -268,7 +272,7 @@ public sealed partial class Ww8DocumentReader
         Layout.Escapement Escapement = default,
         Layout.PageCaseMap CaseMap = Layout.PageCaseMap.None,
         Colour? Highlight = null,
-        bool IsUnderlined = false,
+        TextUnderline Underline = TextUnderline.None,
         bool IsStruckThrough = false,
         bool AutoKerning = false,
         char? SymbolSlot = null,
@@ -1535,7 +1539,7 @@ public sealed partial class Ww8DocumentReader
                 format.Escapement ?? Layout.Escapement.None,
                 format.CaseMap,
                 format.Highlight,
-                format.IsUnderlined ?? false,
+                format.Underline ?? TextUnderline.None,
                 format.IsStruckThrough ?? false,
                 format.AutoKerning ?? false,
                 format.SymbolSlot,
@@ -1573,7 +1577,7 @@ public sealed partial class Ww8DocumentReader
            && a.Escapement == b.Escapement
            && a.CaseMap == b.CaseMap
            && a.Highlight == b.Highlight
-           && a.IsUnderlined == b.IsUnderlined
+           && a.Underline == b.Underline
            && a.IsStruckThrough == b.IsStruckThrough
            && a.AutoKerning == b.AutoKerning
            && a.Tracking == b.Tracking;
@@ -2360,7 +2364,7 @@ public sealed partial class Ww8DocumentReader
                     break;
 
                 case LayoutSprms.Underline:
-                    format = format with { IsUnderlined = IsUnderlineStyle(sprm.Byte) };
+                    format = format with { Underline = UnderlineOf(sprm.Byte) };
                     break;
 
                 // Not a toggle: the operand is the threshold size, and only its being nonzero
@@ -2452,11 +2456,23 @@ public sealed partial class Ww8DocumentReader
     /// byte for non-zero matters in both directions: 5 is "hidden" and 8 is a dot style Word never
     /// writes, and neither has a case in that switch, so both fall to <c>LINESTYLE_NONE</c> and draw
     /// nothing. 255 is the cancelling value and is likewise absent. Every value that <em>is</em> listed
-    /// is drawn as one plain rule, because the page model carries no line style.
+    /// is drawn as one plain rule apart from two groups. <c>3</c> is <c>LINESTYLE_DOUBLE</c> and
+    /// <c>43</c> is <c>LINESTYLE_DOUBLEWAVE</c> (<c>ww8par6.cxx</c>:3605, :3619), and this engine
+    /// draws no wave, so both come out as a double line; <c>6</c>, <c>20</c>, <c>23</c>, <c>25</c>,
+    /// <c>26</c>, <c>27</c> and <c>55</c> are the <c>BOLD</c> weights (:3610-3618). The remaining
+    /// eight are one ordinary line whatever pattern they name.
     /// </remarks>
-    internal static bool IsUnderlineStyle(int kul) => kul
-        is 1 or 2 or 3 or 4 or 6 or 7 or 9 or 10 or 11
-        or 20 or 23 or 25 or 26 or 27 or 39 or 43 or 55;
+    internal static TextUnderline UnderlineOf(int kul) => kul switch
+    {
+        3 or 43 => TextUnderline.DoubleLine,
+
+        // The heavy weights: 6 is `LINESTYLE_BOLD` and 20, 23, 25, 26, 27 and 55 are its patterned
+        // siblings (`ww8par6.cxx`:3610-3618).
+        6 or 20 or 23 or 25 or 26 or 27 or 55 => TextUnderline.BoldLine,
+
+        1 or 2 or 4 or 7 or 9 or 10 or 11 or 39 => TextUnderline.SingleLine,
+        _ => TextUnderline.None,
+    };
 
     /// <summary>The layout sprms, from LibreOffice's <c>sprmids.hxx</c>.</summary>
     private static class LayoutSprms
@@ -2549,8 +2565,9 @@ public sealed partial class Ww8DocumentReader
         /// <c>sprmCKul</c>: the <em>style</em> of the rule drawn under the run, not a switch.
         /// </summary>
         /// <remarks>
-        /// See <see cref="IsUnderlineStyle"/> — nought, 255 and two values in between all mean no line,
-        /// so reading this byte as a boolean underlines text Word leaves plain.
+        /// See <see cref="UnderlineOf"/> — nought, 255 and two values in between all mean no line, so
+        /// reading this byte as a boolean underlines text Word leaves plain, and operands 3 and 43
+        /// mean <em>two</em> lines, so reading it as a boolean draws one where Word draws two.
         /// </remarks>
         internal const ushort Underline = 0x2A3E;
 

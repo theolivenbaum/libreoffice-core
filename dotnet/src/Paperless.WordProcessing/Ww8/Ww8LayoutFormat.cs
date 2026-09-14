@@ -2,6 +2,7 @@ using System.Globalization;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Text.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Ww8;
 
@@ -273,12 +274,13 @@ public readonly record struct Ww8LayoutFormat
     /// </summary>
     /// <remarks>
     /// Not a toggle and not a boolean: the operand is a <c>kul</c> naming the line's <em>style</em>, of
-    /// which nought is "none" and 255 is "none, and cancel whatever the style said". Every other value
-    /// is some kind of line, and all of them are drawn as one — <c>SwWW8ImplReader::Read_Underline</c>
-    /// (<c>sw/source/filter/ww8/ww8par6.cxx</c>) maps eleven <c>kul</c> values onto seven
-    /// <c>FontLineStyle</c>s, and nothing below this models more than one.
+    /// which nought is "none" and 255 is "none, and cancel whatever the style said".
+    /// <c>SwWW8ImplReader::Read_Underline</c> (<c>sw/source/filter/ww8/ww8par6.cxx</c>:3600-3620)
+    /// maps seventeen <c>kul</c> values onto nine <c>FontLineStyle</c>s, and the only distinction
+    /// this engine keeps is how many lines are drawn: operands <b>3</b> and <b>43</b> are
+    /// <c>LINESTYLE_DOUBLE</c> and <c>LINESTYLE_DOUBLEWAVE</c> and draw two.
     /// </remarks>
-    public bool? IsUnderlined { get; init; }
+    public TextUnderline? Underline { get; init; }
 
     /// <summary>
     /// True when <c>sprmCFStrike</c> or <c>sprmCFDStrike</c> draws a rule through the run.
