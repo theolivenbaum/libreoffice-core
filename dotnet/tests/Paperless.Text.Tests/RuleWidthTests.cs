@@ -378,6 +378,79 @@ public class RuleWidthTests
     }
 
     /// <summary>
+    /// A page drawn through a transform quantises its rule BEFORE the multiply, and the witness is
+    /// <c>RMP 2011-2014 and Inventory.xls</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// O70. The workbook prints at Calc's own 60% and states a 10 pt Arial, so the drawn em is
+    /// <c>353 × 0.6</c> hundredths of a millimetre — 6.004 pt, which is the size 26.2.4.2's PDF
+    /// states — the device sets 60 pixels for it, and the descent branch answers <b>3</b> pixels of
+    /// thickness at <b>7</b> of depth to the stroke's centre. Those two pixel counts are the same
+    /// on both sides of this test; what differs is which side of the transform they are converted
+    /// on.
+    /// </para>
+    /// <para>
+    /// Quantising after it gives <c>round(3 × 2540/720) = 11</c> hundredths and
+    /// <c>round(7 × 2540/720) = 25</c>, which are 0.3118 pt and 0.7086 — what this tree drew until
+    /// this round, and both are asserted below so that the two answers are visibly different
+    /// numbers rather than a tolerance apart. Quantising before it gives <c>18 × 0.6 = 10.8</c> and
+    /// <c>41 × 0.6 = 24.6</c>, which are 0.30614 pt and 0.69732; <c>appendMappedLength</c> writes
+    /// thousandths of a point, so the reference's own PDF says <b>0.306</b> and <b>0.697</b>, and
+    /// that is what was read off it.
+    /// </para>
+    /// <para>
+    /// Over the 31 corpus documents holding a scaled rule this moves 1418 paired reference rules
+    /// from 544 agreeing to 0.0015 pt to <b>1412</b>. <c>probes/rulescale-r132/</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AScaledPageQuantisesItsRuleBeforeTheTransformAndNotAfterIt()
+    {
+        OpenTypeFace face = Require("Liberation Sans");
+        LineMetrics line = LineSpacing.Resolve(face);
+
+        // What the Calc chain hands the rule metric for a 10 pt Arial at 60%: a whole hundredth of
+        // a millimetre of the unscaled page, multiplied by the print zoom. See
+        // `SheetDeviceUnits.SnapFontSize`.
+        Length drawn = Length.FromMm100(353) * 0.6;
+
+        LineSpacing.RuleWidths after = LineSpacing.ResolveRuleWidths(
+            face, line, drawn, MetricGrid.TextLine.Scaled(0.6));
+
+        after.Underline.ShouldBe(Length.FromMm100(18) * 0.6);
+        Centre(after.UnderlineOffset, after.Underline).ShouldBe(Length.FromMm100(41) * 0.6);
+        after.Underline.Points.ShouldBe(0.306, 0.0005);
+        Centre(after.UnderlineOffset, after.Underline).Points.ShouldBe(0.697, 0.0005);
+
+        // And the same call on an unscaled grid is the number this tree used to draw, so the two
+        // are separated by the change and not by a tolerance.
+        LineSpacing.RuleWidths before = LineSpacing.ResolveRuleWidths(
+            face, line, drawn, MetricGrid.TextLine);
+
+        before.Underline.ShouldBe(Length.FromMm100(11));
+        Centre(before.UnderlineOffset, before.Underline).ShouldBe(Length.FromMm100(25));
+    }
+
+    /// <summary>
+    /// A transform of one, and anything that is not a positive finite number, leaves the grid alone.
+    /// </summary>
+    /// <remarks>
+    /// The guard that keeps the change confined to the pages it is about: an unscaled sheet, a
+    /// slide and every word-processing page go through the identical arithmetic they did before,
+    /// so the 15 062 of 15 103 corpus rules round 123 scored cannot move. A zero or a NaN reaching
+    /// here would otherwise divide the whole page away.
+    /// </remarks>
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(0.0)]
+    [InlineData(-0.5)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void AGridWithNoUsableTransformIsTheGridItself(double scale)
+        => MetricGrid.TextLine.Scaled(scale).ShouldBe(MetricGrid.TextLine);
+
+    /// <summary>
     /// A face LibreOffice will read the metrics of and one it will not answer differently at the
     /// same size, and the discriminator is the name alone.
     /// </summary>

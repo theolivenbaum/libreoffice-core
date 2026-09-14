@@ -131,8 +131,40 @@ public enum MetricUnit
 /// <see cref="LineMetrics.ScaledLineHeight"/> is EditEngine's. See <see cref="EastAsianScaled"/>.
 /// </para>
 /// </param>
+/// <param name="PageScale">
+/// The page transform the device's map mode already carries, as a plain multiplier; 1.0 for a page
+/// drawn at its own size.
+/// <para>
+/// <b>A scale in the map mode moves the quantisation to the far side of the multiply, and that is
+/// the whole of it.</b> A sheet printed at a zoom, a slide scaled onto a page and a shrunk cell are
+/// all drawn through a scaled map mode, so <c>OutputDevice::ImplLogicHeightToDevicePixel</c> takes
+/// the scale <em>into</em> the device pixel count and <c>DevicePixelToLogicHeight</c> takes it back
+/// <em>out</em> again — and the <c>llround</c> at the end of that second conversion
+/// (<c>vcl/source/outdev/CoordinateMapper.cxx</c>:279) therefore lands on a whole logical unit of
+/// the <em>unscaled</em> page, which is then multiplied by the scale on its way to the paper. A
+/// renderer that scales first and quantises afterwards lands on a whole unit of the scaled page
+/// instead, which is a different number.
+/// </para>
+/// <para>
+/// Only <see cref="ToLength"/> reads it, because that is the only conversion that crosses the map
+/// mode in the outward direction. <see cref="ToPixelEm"/> needs no correction: the em it is handed
+/// is already the drawn size, so the scale is inside it — measured on the witness below, where the
+/// reference's own device pixel count and this tree's agree at 60 either way.
+/// </para>
+/// <para>
+/// <b>Measured.</b> <c>RMP 2011-2014 and Inventory.xls</c> prints at Calc's own 60% and states a
+/// 10 pt Arial, so the device sets 60 pixels and <c>ImplInitTextLineSize</c>'s descent branch
+/// answers 3 pixels of thickness at 7 of depth. Quantising after the scale gives
+/// <c>round(3 × 2540/720) = 11</c> hundredths of a millimetre — <b>0.3118 pt</b>, which is what
+/// this tree drew — and before it gives <c>round(3 × 2540/720 / 0.6) × 0.6 = 18 × 0.6 = 10.8</c>,
+/// which is <b>0.30614 pt</b> and is written <c>0.306</c>. 26.2.4.2 draws 0.306. The depth is the
+/// same arithmetic on 7 pixels: 25 hundredths against <c>41 × 0.6 = 24.6</c>, 0.7086 pt against
+/// 0.69732, and the reference draws 0.697. <c>probes/rulescale-r132/</c>.
+/// </para>
+/// </param>
 public readonly record struct MetricGrid(
-    int Dpi, bool QuantisesAdvances, MetricUnit Unit, bool ScalesEastAsianFaces = false)
+    int Dpi, bool QuantisesAdvances, MetricUnit Unit, bool ScalesEastAsianFaces = false,
+    double PageScale = 1.0)
 {
     /// <summary>A grid at a resolution in twips, quantising advances as a real device does.</summary>
     public MetricGrid(int dpi) : this(dpi, true, MetricUnit.Twip) { }
@@ -460,15 +492,48 @@ public readonly record struct MetricGrid(
             ? 0
             : (long)Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
 
-    /// <summary>Whole device pixels back in whole twips.</summary>
+    /// <summary>Whole device pixels back in whole logical units of this grid's map mode.</summary>
     /// <remarks>
+    /// <para>
     /// <c>CoordinateMapper::ViewToLogicDistanceY</c> is an <c>llround</c>
     /// (<c>vcl/source/outdev/CoordinateMapper.cxx</c>:279), which is again half away from zero.
+    /// </para>
+    /// <para>
+    /// <b>And the map mode carries the page transform, so the rounding happens on the unscaled
+    /// page.</b> See <see cref="PageScale"/>: the divide and the multiply do not cancel, because
+    /// there is a rounding between them.
+    /// </para>
     /// </remarks>
     public Length ToLength(long pixels)
-        => Dpi <= 0
-            ? Length.Zero
-            : FromLogical((long)Math.Round(pixels * UnitsPerPixel, MidpointRounding.AwayFromZero));
+    {
+        if (Dpi <= 0) return Length.Zero;
+
+        // The unscaled page is the early return and it is the ORIGINAL EXPRESSION, character for
+        // character, rather than the scaled one with a 1.0 in it. Every grid but Calc's zoomed one
+        // takes this branch, so the identity is the code's and not a claim about what dividing a
+        // double by one does. See `PageScale`.
+        double scale = double.IsFinite(PageScale) && PageScale > 0.0 ? PageScale : 1.0;
+
+        if (scale == 1.0)
+        {
+            return FromLogical(
+                (long)Math.Round(pixels * UnitsPerPixel, MidpointRounding.AwayFromZero));
+        }
+
+        return FromLogical((long)Math.Round(
+            pixels * UnitsPerPixel / scale, MidpointRounding.AwayFromZero)) * scale;
+    }
+
+    /// <summary>The same grid with a page transform in its map mode.</summary>
+    /// <remarks>
+    /// See <see cref="PageScale"/>. A scale of one, or anything that is not a positive finite
+    /// number, gives the grid back unchanged rather than a grid that quietly draws nothing.
+    /// </remarks>
+    /// <param name="scale">The multiplier the whole page is drawn through.</param>
+    public MetricGrid Scaled(double scale)
+        => !double.IsFinite(scale) || scale <= 0.0 || scale == 1.0
+            ? this
+            : this with { PageScale = scale };
 
     /// <summary>
     /// An advance width as the device measures it: the whole run's advance in device pixels,
