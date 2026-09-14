@@ -323,15 +323,15 @@ internal static class SheetTextLayout
                     foreach (SheetTextSegment segment in line.Run.Segments)
                     {
                         DecorateSegment(
-                            sink, segment, line, Ink(segment.Colour, fallback, FieldInk(cell)),
-                            cell.IsField);
+                            sink, context.Scale, segment, line,
+                            Ink(segment.Colour, fallback, FieldInk(cell)), cell.IsField);
                     }
                 }
                 else
                 {
                     Decorate(
-                        sink, cell.Format, face, line, Ink(null, fallback, FieldInk(cell)),
-                        cell.IsField);
+                        sink, context.Scale, cell.Format, face, line,
+                        Ink(null, fallback, FieldInk(cell)), cell.IsField);
                 }
             }
         }
@@ -484,10 +484,10 @@ internal static class SheetTextLayout
     /// </para>
     /// </remarks>
     private static void Decorate(
-        IDrawingSink sink, SheetCellFormat format, SheetFace face, PlacedLine line, Colour colour,
-        bool field)
-        => Rules(sink, Line(format.Underline, field), format.IsStruckThrough, face, line.Run.Size,
-                 line.X, line.Run.Width, line.Baseline, colour);
+        IDrawingSink sink, double scale, SheetCellFormat format, SheetFace face, PlacedLine line,
+        Colour colour, bool field)
+        => Rules(sink, scale, Line(format.Underline, field), format.IsStruckThrough, face,
+                 line.Run.Size, line.X, line.Run.Width, line.Baseline, colour);
 
     /// <summary>
     /// The rules one segment of a rich cell asks for, under that segment alone.
@@ -499,12 +499,14 @@ internal static class SheetTextLayout
     /// to be the reason this was done per line.
     /// </remarks>
     private static void DecorateSegment(
-        IDrawingSink sink, SheetTextSegment segment, PlacedLine line, Colour colour, bool field)
-        => Rules(sink, Line(segment.Underline, field), segment.StruckThrough, segment.Face,
+        IDrawingSink sink, double scale, SheetTextSegment segment, PlacedLine line, Colour colour,
+        bool field)
+        => Rules(sink, scale, Line(segment.Underline, field), segment.StruckThrough, segment.Face,
                  segment.Size, line.X + segment.Offset, segment.Width, line.Baseline, colour);
 
     private static void Rules(
         IDrawingSink sink,
+        double scale,
         SheetUnderline underline,
         bool struckThrough,
         SheetFace face,
@@ -520,8 +522,14 @@ internal static class SheetTextLayout
         // Thickness AND offset, both from the device -- see `LineSpacing.ResolveRuleWidths`, which
         // answers the whole hundredth of a millimetre the reference's own 720 dpi device quantises
         // each of them to (O64 for the thickness, round 123 for the offset).
-        LineSpacing.RuleWidths widths =
-            LineSpacing.ResolveRuleWidths(face.Face, face.Metrics, size, MetricGrid.TextLine);
+        //
+        // AND the print zoom goes into the grid rather than being left to multiply the answer, O70:
+        // Calc paints through a map mode carrying the zoom, so the whole hundredth of a millimetre
+        // is a hundredth of the UNSCALED page. `size` is already the drawn size and stays that way
+        // -- the device pixel count is taken from it and the scale is already inside it. See
+        // `MetricGrid.PageScale`.
+        LineSpacing.RuleWidths widths = LineSpacing.ResolveRuleWidths(
+            face.Face, face.Metrics, size, MetricGrid.TextLine.Scaled(scale));
 
         if (underline == SheetUnderline.DoubleLine)
         {
