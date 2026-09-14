@@ -1457,6 +1457,10 @@ public static class PageDrawing
                 runs.Add(filled);
             }
 
+            // Before the emptiness test for the same reason the leader is: a tab carries the decoration
+            // of the font at the tab whether or not anything follows it. See `TabRule`.
+            if (rules is not null) TabRule(paragraph, segment, lineLeft, baseline, rules, background);
+
             if (segment.IsEmpty) continue;
 
             // The justification belongs to the last stretch alone. A tab is a fixed portion whose glue is
@@ -1684,6 +1688,83 @@ public static class PageDrawing
                     run.ColourOn(background)));
             }
         }
+    }
+
+    /// <summary>
+    /// The rule a decorated tab carries across the blank it advanced over, if it carries one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Writer underlines the line, not the runs.</b> A tab is painted as a run of literal blanks in
+    /// the font at the tab itself, so whatever line that font carries is drawn across it —
+    /// <c>SwTabPortion::Paint</c> (<c>sw/source/core/text/txttab.cxx</c>:626-641), under the comment
+    /// <c>// Tabs should be underlined at once</c>. The switch is not "is it underlined":
+    /// <c>SwFntObj</c>'s constructor sets <c>m_bPaintBlank</c> from
+    /// <c>(underline || overline || strikeout) &amp;&amp; !IsWordLineMode()</c>
+    /// (<c>sw/source/core/txtnode/fntcache.cxx</c>:106-109), so a strikethrough spans a tab exactly as
+    /// an underline does. This model carries no overline, so two of the three arms are drawn here and
+    /// the third has nothing to draw.
+    /// </para>
+    /// <para>
+    /// <b>The rule spans the tab's whole width, and that is not what counting the blanks would give.</b>
+    /// The count is <c>Width() / GetTextSize(' ')</c>, an integer division of two whole-twip lengths,
+    /// and <em>n</em> blanks at their own advances would stop up to one space short of the stop. They do
+    /// not, because the call passes <c>bKern = true</c>: <c>SwTextPaintInfo::DrawText_</c> turns that
+    /// into <c>aDrawInf.SetKern(rPor.Width())</c> and routes it to <c>SwSubFont::DrawStretchText_</c>
+    /// (<c>inftxt.cxx</c>:798-808, <c>swfont.cxx</c>:1289-1345), which calls
+    /// <c>OutputDevice::DrawStretchText(aPos, rInf.GetWidth(), …)</c> — so the blanks are set onto the
+    /// portion's own width and the rule reaches the stop. It is the same <c>bKern</c>, and the same
+    /// compression, that <see cref="Leader"/> already models for a dot leader.
+    /// </para>
+    /// <para>
+    /// <b>This is the arm a fix taken from one witness gets wrong, so it is measured against its
+    /// alternative rather than merely agreed with.</b> On five Liberation Mono tabs at 10 pt whose
+    /// residue modulo the 120-twip blank is 80, 20, 100, 100 and 100 twips — where the two readings are
+    /// <b>1.00 to 5.00 pt apart</b> — 26.2.4.2 draws 16.00, 19.00, 23.00, 29.00 and 35.00 pt of cover,
+    /// which is the tab's full width at <b>5 of 5</b> and the truncated reading at 0 of 5.
+    /// </para>
+    /// <para>
+    /// <b>So the count decides one thing only: whether anything is drawn at all.</b> A tab narrower than
+    /// one blank gives <c>nChar == 0</c>, an empty string, and <c>DrawText_</c> returns on
+    /// <c>!nLength</c> — no rule. Measured at 26.2.4.2 rather than inferred, and the cliff falls exactly
+    /// where a whole-twip blank puts it: in Liberation Mono at 10 pt, whose blank is 120 twips to the
+    /// twip, tabs of 30, 90 and 119 twips carry no rule and 121, 180 and 361 carry one. And the width is
+    /// <em>truncated</em> to the twip rather than rounded, which Liberation Sans at 10 pt separates —
+    /// its blank is 55.566 twips, and a tab of exactly 55 twips draws a rule, which rounding to 56 would
+    /// refuse. <c>probes/wordsdec-r126</c>.
+    /// </para>
+    /// <para>
+    /// <b>What is deliberately not modelled is the switch.</b> <c>IsWordLineMode()</c> — Word's
+    /// <c>w:u w:val="words"</c>, RTF's <c>\ulw</c>, <c>sprmCKul</c> operand 2 and ODF's
+    /// <c>style:text-{underline,overline,line-through}-mode="skip-white-space"</c> — turns the whole of
+    /// this off, and no corpus document states it in any of the four spellings. See the round's
+    /// write-up for the census and the twelve authored rows that measure the cost of declining it.
+    /// </para>
+    /// </remarks>
+    private static void TabRule(
+        PageParagraph paragraph,
+        TabbedSegment segment,
+        Length lineLeft,
+        Length baseline,
+        List<(DocRect Area, Colour Colour)> rules,
+        Colour background = default)
+    {
+        if (segment.GapWidth <= Length.Zero) return;
+
+        // The font in effect AT the tab, which is what `rInf.GetFont()` means there — the same
+        // position `Leader` reads, and for the same reason.
+        PageRun at = RunAt(paragraph, segment.Start - 1);
+        if (!at.IsDecorated) return;
+
+        Length blank = TextShaper.Default
+            .Shape(at.Face, " ", at.EffectiveShaping)
+            .Width(at.EmSize);
+        if (blank <= Length.Zero) return;
+
+        Length unit = Length.FromTwips(blank.Emu / Length.EmuPerTwip);
+        if (unit <= Length.Zero || segment.GapWidth.Emu < unit.Emu) return;
+
+        Rules(at, lineLeft + segment.GapLeft, segment.GapWidth, baseline, rules, background);
     }
 
     /// <summary>
