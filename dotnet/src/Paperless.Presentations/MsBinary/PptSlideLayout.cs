@@ -964,10 +964,14 @@ internal sealed class PptSlideLayout
         local = Uprighted(local, rotation);
 
         string? preset = PptShapeGeometry.PresetOf(shape.ShapeType);
-        int? adjustment = shape.Properties.Has(PptShapeGeometry.AdjustValue)
-            ? PptShapeGeometry.Adjustment(
-                shape.ShapeType, shape.Properties.SignedValue(PptShapeGeometry.AdjustValue))
+
+        // The stated value is kept rather than the converted one because the conversion is not
+        // always a constant: a trapezoid's inset is a fraction of the shape's *width* here and a
+        // fraction of its shortest side there, so the answer moves when the shape is refitted.
+        int? stated = shape.Properties.Has(PptShapeGeometry.AdjustValue)
+            ? shape.Properties.SignedValue(PptShapeGeometry.AdjustValue)
             : null;
+        double? adjustment = Adjustment(shape.ShapeType, stated, local.Size);
 
         // The shape resizes itself around its own text before anything else is measured against
         // it: the fill, the outline, the picture and the text all sit in the *fitted* rectangle.
@@ -975,6 +979,7 @@ internal sealed class PptSlideLayout
         if (text is not null)
         {
             local = Fitted(shape, text, local, preset, adjustment);
+            adjustment = Adjustment(shape.ShapeType, stated, local.Size);
         }
 
         AffineTransform placement = Placement(
@@ -1008,7 +1013,7 @@ internal sealed class PptSlideLayout
             : null;
 
         CustomShapeGeometry.Geometry resolved = own is null
-            ? SlidePresetGeometry.Of(preset, local.Size, Guides(adjustment))
+            ? Mirrored(SlidePresetGeometry.Of(preset, local.Size, Guides(adjustment)), shape, local.Size)
             : new CustomShapeGeometry.Geometry(
                 own, new DocRect(Length.Zero, Length.Zero, local.Size.Width, local.Size.Height));
 
@@ -1032,7 +1037,7 @@ internal sealed class PptSlideLayout
             Fill = Fill(shape, context.Scheme, local, placement),
             Line = Line(shape, context.Scheme, context.InTable),
             Picture = Picture(shape, bounds),
-            Text = Text(text, local, preset, adjustment, placement),
+            Text = Text(text, local, shape, preset, adjustment, placement),
             Shadow = Shadow(shape, context.Scheme),
         };
     }
@@ -1438,7 +1443,7 @@ internal sealed class PptSlideLayout
     /// </para>
     /// </remarks>
     private DocRect Fitted(
-        EscherShape shape, PptShapeText text, DocRect local, string? preset, int? adjustment)
+        EscherShape shape, PptShapeText text, DocRect local, string? preset, double? adjustment)
     {
         // A turned body grows the shape's width instead, which this does not model.
         if (text.Flow != VerticalText.None) return local;
@@ -1449,7 +1454,7 @@ internal sealed class PptSlideLayout
             return local;
         }
 
-        DocRect frame = SlidePresetGeometry.TextRectangle(preset, local.Size, Guides(adjustment));
+        DocRect frame = TextRectangle(shape, preset, local.Size, adjustment);
         if (frame.Height <= Length.Zero || local.Height <= Length.Zero) return local;
 
         Margins insets = Insets(shape);
@@ -1554,8 +1559,9 @@ internal sealed class PptSlideLayout
     private PlacedText? Text(
         PptShapeText? text,
         DocRect local,
+        EscherShape shape,
         string? preset,
-        int? adjustment,
+        double? adjustment,
         AffineTransform placement)
     {
         if (text is null) return null;
@@ -1563,7 +1569,7 @@ internal sealed class PptSlideLayout
         SlideTextBody body = text.Body;
         VerticalText flow = text.Flow;
 
-        DocRect rectangle = SlidePresetGeometry.TextRectangle(preset, local.Size, Guides(adjustment));
+        DocRect rectangle = TextRectangle(shape, preset, local.Size, adjustment);
 
         // A body that turns its own text can never be laid out in the shape's own upright
         // rectangle: the lines run down the shape and break at its height, and the runs have to
@@ -2116,7 +2122,7 @@ internal sealed class PptSlideLayout
     /// first of several, and no preset declares both, so offering the value under each name
     /// hands it to whichever one the definition happens to use rather than guessing.
     /// </remarks>
-    private static Dictionary<string, double>? Guides(int? adjustment)
+    private static Dictionary<string, double>? Guides(double? adjustment)
         => adjustment is not { } value
             ? null
             : new Dictionary<string, double>(StringComparer.Ordinal)
@@ -2125,4 +2131,66 @@ internal sealed class PptSlideLayout
                 ["adj1"] = value,
             };
 
+    /// <summary>
+    /// The stated <c>adjustValue</c> in the units this shape's preset expects, at the size the
+    /// shape is finally drawn at.
+    /// </summary>
+    /// <remarks>
+    /// Taken at the size rather than once per shape because the conversion is not always a pure
+    /// scale — see <see cref="PptShapeGeometry.Adjustment"/> — and a shape that grows around its
+    /// own text changes its aspect ratio while it does so.
+    /// </remarks>
+    private static double? Adjustment(ushort shapeType, int? stated, DocSize size)
+        => stated is { } value ? PptShapeGeometry.Adjustment(shapeType, value, size) : null;
+
+    /// <summary>
+    /// The rectangle the shape's text is laid out in, turned over for the presets whose two
+    /// definitions are reflections of each other.
+    /// </summary>
+    private static DocRect TextRectangle(
+        EscherShape shape, string? preset, DocSize size, double? adjustment)
+    {
+        DocRect rectangle = SlidePresetGeometry.TextRectangle(preset, size, Guides(adjustment));
+
+        return PptShapeGeometry.MirrorsVertically(shape.ShapeType)
+            ? rectangle with { Y = size.Height - rectangle.Bottom }
+            : rectangle;
+    }
+
+    /// <summary>
+    /// The expanded preset, turned over when the binary vocabulary's definition of this shape type
+    /// is a vertical reflection of the DrawingML preset it is mapped to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reflection is applied to the geometry alone, in the shape's own coordinates, and
+    /// <em>before</em> the placement matrix — which is where <c>fFlipV</c> lives. That order is the
+    /// whole point: the flag is read correctly and always was, and applying it to a base that is
+    /// already upside down inverts the shape whether the flag is set or not.
+    /// </para>
+    /// <para>
+    /// The outline, its subpaths and the text rectangle turn over together, because the
+    /// <c>a:rect</c> a preset states is attached to its own geometry — <c>trapezoid</c>'s is
+    /// <c>r il it ir b</c>, which reaches the wide edge — and leaving it behind would put the text
+    /// against the edge the shape no longer has there. The shape's picture, fill and placement are
+    /// untouched: this mirror is a property of the <em>preset table</em>, not of the shape, and the
+    /// shape's own <c>fFlipV</c> is applied afterwards by <see cref="Placement"/>.
+    /// </para>
+    /// </remarks>
+    private static CustomShapeGeometry.Geometry Mirrored(
+        CustomShapeGeometry.Geometry geometry, EscherShape shape, DocSize size)
+    {
+        if (!PptShapeGeometry.MirrorsVertically(shape.ShapeType)) return geometry;
+
+        AffineTransform flip = new(1, 0, 0, -1, 0, size.Height.Emu);
+
+        IReadOnlyList<PresetSubpath>? subpaths = geometry.Subpaths is { Count: > 0 } parts
+            ? [.. parts.Select(part => part with { Outline = ShapeTransform.Apply(flip, part.Outline) })]
+            : geometry.Subpaths;
+
+        return new CustomShapeGeometry.Geometry(
+            ShapeTransform.Apply(flip, geometry.Outline),
+            geometry.TextRectangle with { Y = size.Height - geometry.TextRectangle.Bottom },
+            subpaths);
+    }
 }

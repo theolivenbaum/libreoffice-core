@@ -1,3 +1,5 @@
+using Paperless.Core.Geometry;
+using Paperless.Core.Units;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
 using Paperless.Presentations.MsBinary;
@@ -96,16 +98,57 @@ public class PptPresetShapeTypeTests
     [Fact]
     public void AnAdjustmentIsConvertedOnlyWhereTheTwoVocabulariesMeasureTheSameThing()
     {
-        // 21600ths to hundred-thousandths, for the two presets whose DrawingML adjustment means
-        // what the binary one does.
-        PptShapeGeometry.Adjustment(2, 10800).ShouldBe(50000);
-        PptShapeGeometry.Adjustment(5, 21600).ShouldBe(100000);
+        DocSize square = new(Length.FromMm100(4000), Length.FromMm100(4000));
+
+        // 21600ths to hundred-thousandths, for the presets whose DrawingML adjustment was measured
+        // to mean what the binary one does -- round 127's conversion census.
+        PptShapeGeometry.Adjustment(2, 10800, square).ShouldBe(50000);
+        PptShapeGeometry.Adjustment(5, 21600, square).ShouldBe(100000);
+        PptShapeGeometry.Adjustment(22, 10800, square).ShouldBe(50000);   // can
 
         // Everything else is drawn at the preset's stated defaults rather than fed a foreign
         // number. Passing one through would put an arrow's head where a rounded rectangle's corner
         // radius belongs.
-        PptShapeGeometry.Adjustment(13, 10800).ShouldBeNull();
-        PptShapeGeometry.Adjustment(109, 10800).ShouldBeNull();
+        PptShapeGeometry.Adjustment(13, 10800, square).ShouldBeNull();
+        PptShapeGeometry.Adjustment(109, 10800, square).ShouldBeNull();
+
+        // A connector that has no adjustment in `EnhancedCustomShapeGeometry` at all -- a straight
+        // connector is two points -- states one in 28 corpus shapes and the reference ignores it.
+        PptShapeGeometry.Adjustment(32, 8826, square).ShouldBeNull();
+
+        // And one that does have an adjustment is still discarded, because the reference replaces
+        // every connector with an SdrEdgeObj and routes it: `msdffimp.cxx`:4792-4888.
+        PptShapeGeometry.Adjustment(34, 8826, square).ShouldBeNull();
+        PptShapeGeometry.Adjustment(38, 8826, square).ShouldBeNull();
+    }
+
+    [Fact]
+    public void ATrapezoidsAdjustmentCrossesTheWidthAndTheDrawingMlPresetsCrossesTheShortSide()
+    {
+        // Escher insets the narrow edge by `adj/21600` of the WIDTH; `trapezoid` insets it by
+        // `ss x a/100000`. In a square box the two bases coincide and the conversion is the plain
+        // rescale...
+        DocSize square = new(Length.FromMm100(4000), Length.FromMm100(4000));
+        PptShapeGeometry.Adjustment(8, 10800, square)!.Value.ShouldBe(50000, 1e-6);
+
+        // ...and in a box half as tall as it is wide it is twice that, which is the whole of the
+        // 90.6 pt this tree used to inset `ws_prod-...-European-Safety-Strategy-Initiative.ppt`
+        // slide 8's trapezoid against the reference's 170.8.
+        DocSize wide = new(Length.FromMm100(8000), Length.FromMm100(4000));
+        PptShapeGeometry.Adjustment(8, 10800, wide)!.Value.ShouldBe(100000, 1e-6);
+    }
+
+    [Fact]
+    public void OnlyTheTrapezoidIsAReflectionOfTheDrawingMlPresetOfItsName()
+    {
+        // All 148 name-mapped types were expanded by 26.2.4.2 and here and compared under the
+        // identity and all three reflections: `probes/pptgeom-r127/preset-census.tsv`.
+        PptShapeGeometry.MirrorsVertically(8).ShouldBeTrue();
+
+        foreach (ushort type in (ushort[])[2, 5, 7, 9, 13, 34, 38, 43, 49, 63, 109])
+        {
+            PptShapeGeometry.MirrorsVertically(type).ShouldBeFalse();
+        }
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using Paperless.Core.Geometry;
+
 namespace Paperless.Presentations.MsBinary;
 
 /// <summary>
@@ -26,9 +28,19 @@ namespace Paperless.Presentations.MsBinary;
 /// that preset's own guides, and the binary vocabulary's are defined against
 /// <c>EnhancedCustomShapeGeometry</c>'s handles for the corresponding <c>MSO_SPT</c>, which for
 /// most shapes are neither the same quantity nor the same count. So a converted value is passed
-/// only for the two presets where the two definitions coincide, and every other preset is drawn at
-/// its stated defaults — a right arrow with a default head is right in outline and slightly wrong
-/// in proportion, where a right arrow fed a foreign adjustment is neither.
+/// only for the presets where the two definitions were <em>measured</em> to coincide, and every
+/// other preset is drawn at its stated defaults — a right arrow with a default head is right in
+/// outline and slightly wrong in proportion, where a right arrow fed a foreign adjustment is
+/// neither.
+/// </para>
+/// <para>
+/// <strong>Which those are is a measurement, not a reading.</strong> Round 127 expanded all 148
+/// name-mapped types twice — once by 26.2.4.2 itself, from a flat ODF naming each type and no
+/// path, and once here — at three in-range values of <c>adjustValue</c> and at two aspect ratios,
+/// and compared the drawn coordinates. <see cref="AdjustmentInViewBox"/> is the set where the
+/// plain rescale reproduced the reference at every one of those six points;
+/// <see cref="MirrorsVertically"/> is the one preset whose two definitions are reflections of
+/// each other. <c>probes/pptgeom-r127/adjust-conversion.tsv</c> and <c>preset-census.tsv</c>.
 /// </para>
 /// </remarks>
 internal static class PptShapeGeometry
@@ -327,14 +339,117 @@ internal static class PptShapeGeometry
     };
 
     /// <summary>
-    /// A binary adjustment value in the units the layouter's presets expect.
+    /// The shape types whose stated <c>adjustValue</c> means, to the reference's own drawn
+    /// coordinates, exactly what the same fraction means to the DrawingML preset of that name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured rather than argued. Each type was drawn by 26.2.4.2 from a flat ODF naming it and
+    /// stating only <c>draw:modifiers</c>, at <c>adjustValue</c> 2000, 5000 and 9000 — inside the
+    /// 0-10800 range a one-handle Escher preset's own handle declares — and in a square box and a
+    /// 2:1 box, the pair that separates a guide measured across the width from one measured across
+    /// <c>ss = min(w, h)</c>. A type is here only when this tree's preset, fed
+    /// <c>value x 100000/21600</c>, reproduced the reference's own drawn coordinates at all six
+    /// points, to within 1 % of the box across the whole outline.
+    /// </para>
+    /// <para>
+    /// <strong>A blanket rescale would be worse than discarding the value.</strong> Applied to all
+    /// 105 name-mapped types that have an Escher adjustment at all, it reproduces the reference on
+    /// a minority and breaks the rest, because most presets' two handles are not the same quantity:
+    /// a star's is an inner radius in one and a fraction of the box in the other, a callout's four
+    /// pairs are stated (x, y) in Escher and (y, x) in DrawingML, and a trapezoid's is measured
+    /// across a different edge — see <see cref="AdjustmentAcrossWidth"/>.
+    /// </para>
+    /// <para>
+    /// <strong>The connectors pass that test and are still not here, because a <c>.ppt</c>
+    /// connector is not drawn from its preset at all.</strong> For every type from
+    /// <c>mso_sptStraightConnector1</c> to <c>mso_sptCurvedConnector5</c> — 32 to 40 —
+    /// <c>SvxMSDffManager::ImportShape</c> (<c>filter/source/msfilter/msdffimp.cxx</c>:4391,
+    /// 4792-4888) builds the custom shape, takes its line geometry, and then <em>throws the object
+    /// away</em>: what is drawn is an <c>SdrEdgeObj</c> whose two ends are reset to the bounding
+    /// rectangle's corners and whose kind comes from <c>DFF_Prop_cxstyle</c>. Feeding the preset
+    /// the stated adjustment therefore moves a bend the reference routes for itself. Measured on
+    /// the three corpus decks holding 57 such shapes: the mean interior-vertex residual against
+    /// 26.2.4.2 went from 6.63 pt to 8.73 pt and the count agreeing within a point did not move
+    /// (6 of 11 paired polylines), so the arm is declined rather than taken. Seated as O76.
+    /// <c>probes/pptgeom-r127/connscore.py</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="shapeType">The <c>msofbtSp</c> record's instance.</param>
+    private static bool AdjustmentInViewBox(ushort shapeType) => shapeType switch
+    {
+        2 or 5 or 10 or 11 or 16 or 21 or 22 => true,     // roundRect, triangle, octagon .. can
+        84 or 85 or 86 or 184 or 185 => true,             // bevel, the brackets, moon, bracketPair
+        _ => false,
+    };
+
+    /// <summary>
+    /// The shape types whose <c>adjustValue</c> Escher measures across the shape's <em>width</em>
+    /// where the DrawingML preset of that name measures across <c>ss = min(w, h)</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>mso_sptTrapezoidCalc</c> insets the narrow edge from <c>adj</c> to <c>21600 - adj</c>
+    /// across the shape's own 21600-unit width; <c>trapezoid</c>'s <c>x2</c> is
+    /// <c>ss x a/100000</c>. So the value needs the extra factor <c>w/ss</c>, and a plain rescale
+    /// is right only where the shape happens to be square or taller than it is wide — which is why
+    /// these three read as correct in a square box and wrong in a wide one. With the factor they
+    /// are right in all three aspect ratios measured: 1:1, 2:1 and 1:2, at three values each.
+    /// <c>probes/pptgeom-r127/acrosswidth.py</c>.
+    /// </remarks>
+    /// <param name="shapeType">The <c>msofbtSp</c> record's instance.</param>
+    private static bool AdjustmentAcrossWidth(ushort shapeType) => shapeType is 7 or 8 or 9;
+
+    /// <summary>
+    /// The shape types whose Escher definition is a vertical reflection of the DrawingML preset
+    /// this maps them to, so the expanded outline has to be turned over before it is placed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>mso_sptTrapezoidVert</c> (<c>EnhancedCustomShapeGeometry.cxx</c>:345-348) is
+    /// <c>{0,0} {21600,0} {21600-adj,21600} {adj,21600}</c> — full width at the shape's
+    /// <em>top</em>. <c>trapezoid</c> in <c>PresetShapeGeometry.txt</c> is
+    /// <c>m l b / l x2 t / l x3 t / l r b</c> — full width at the <em>bottom</em>. Mapping the two
+    /// by name therefore draws the shape upside down whatever <c>fFlipV</c> says, because the flag
+    /// is applied to the wrong base.
+    /// </para>
+    /// <para>
+    /// <strong>And it is the only one.</strong> All 148 name-mapped types were expanded by
+    /// 26.2.4.2 itself and here, in a square box, and compared under the identity and under all
+    /// three reflections: 92 draw the same shape, 50 differ in some way no reflection accounts for,
+    /// one has no Escher definition at all, and five fit a reflection. Four of the five are the
+    /// <c>callout3</c> family, whose tail is drawn entirely from adjustment values the two
+    /// vocabularies default to opposite sides of the box — their path templates are identical —
+    /// leaving the trapezoid as the only reflected template.
+    /// <c>probes/pptgeom-r127/preset-census.tsv</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="shapeType">The <c>msofbtSp</c> record's instance.</param>
+    public static bool MirrorsVertically(ushort shapeType) => shapeType == 8;
+
+    /// <summary>
+    /// A binary adjustment value in the units the layouter's presets expect, or null when the two
+    /// vocabularies do not measure the same thing and the preset's own default is the better
+    /// answer.
     /// </summary>
     /// <param name="shapeType">The shape type, which decides whether the value means anything.</param>
     /// <param name="value">The <c>adjustValue</c> property, in 21600ths.</param>
-    public static int? Adjustment(ushort shapeType, int value)
-        => PresetOf(shapeType) is "roundRect" or "triangle"
-            ? (int)((long)value * DrawingMlViewBox / AdjustmentViewBox)
+    /// <param name="size">
+    /// The shape's extent; only the presets in <see cref="AdjustmentAcrossWidth"/> consult it.
+    /// </param>
+    public static double? Adjustment(ushort shapeType, int value, DocSize size)
+    {
+        if (AdjustmentAcrossWidth(shapeType))
+        {
+            double shortest = Math.Min(size.Width.Emu, size.Height.Emu);
+            return shortest <= 0
+                ? null
+                : (double)value * DrawingMlViewBox / AdjustmentViewBox * (size.Width.Emu / shortest);
+        }
+
+        return AdjustmentInViewBox(shapeType)
+            ? (double)value * DrawingMlViewBox / AdjustmentViewBox
             : null;
+    }
 
     /// <summary>Whether a shape of this type is filled when it does not say.</summary>
     public static bool IsFilledByDefault(ushort shapeType) => !InTable(UnfilledByDefault, shapeType);
