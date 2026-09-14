@@ -472,6 +472,14 @@ made under a load average above 20 with two other rounds' fidelity suites in fli
 condition `CLAUDE.md` warns can drop tests or invent failures; the counts are stated so the next
 round can compare them rather than only the colour.
 
+`Paperless.Fidelity.Tests` **cannot see either fix**: its only two `.ppt` fixtures are
+`shape-geometry-ppt.ppt` and `slides-ppt.ppt`, and a type histogram of the first over its own
+Escher streams is `{0: 12, 1: 31, 202: 8, 4095: 4}` — freeforms and groups, plain rectangles, text
+boxes and `mso_sptNil`. No preset with an adjustment, and no trapezoid. Two new unit tests in
+`PptPresetShapeTypeTests` carry the fix instead: one pinning the trapezoid's `w/ss` factor at two
+aspect ratios, one pinning that it is the only mirrored type and that a connector's adjustment is
+still discarded.
+
 ---
 
 ## 10. Files
