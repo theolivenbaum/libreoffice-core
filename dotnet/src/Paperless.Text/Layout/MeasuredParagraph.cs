@@ -876,7 +876,24 @@ public sealed class MeasuredParagraph
         // whole content is the object. A U+0001 standing for something that is *not* an as-character
         // object — a field result, a note reference — is deliberately not covered: that mark is drawn,
         // and its descent is real.
-        if (_objects.Length > 0 && HoldsNoText(start, end)) descent = Length.Zero;
+        //
+        // And the ascent goes with it, for the same reason and by the same test. The anchor character
+        // *is* the object in Writer — `SwTextFormatter::NewFlyCntPortion` replaces it with a
+        // `SwFlyCntPortion` rather than shaping it beside one — so a line holding nothing but anchors
+        // has no text portion to be tall for, and `SwLineLayout::CalcLine` builds its ascent out of the
+        // fly portion alone.
+        //
+        // It shows only where an object's own ascent is *below* the paragraph font's, and that is one
+        // class: a WW8 SHAPE-field frame, whose ascent is nought because it hangs below the baseline
+        // (`Ww8Frames.InlineAscent`, the only place anything sets an ascent smaller than the object).
+        // Measured on `picture-furniture.doc`, whose running head is one such 79.2 pt logo: taking the
+        // font's 11.2 pt ascent as well makes the head 90.4 pt, pushes the body down by that much, and
+        // costs page 1 two of its lines and 21 of its 476 words against the reference.
+        if (_objects.Length > 0 && HoldsNoText(start, end))
+        {
+            descent = Length.Zero;
+            ascent = Length.Zero;
+        }
 
         // An as-character object divides at the baseline: the part above raises the ascent and the part
         // below raises the descent, which for the ordinary inline picture is the whole of it above and

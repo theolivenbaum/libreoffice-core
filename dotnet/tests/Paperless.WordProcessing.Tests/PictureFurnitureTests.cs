@@ -16,8 +16,17 @@ namespace Paperless.WordProcessing.Tests;
 /// Word writes all six of a section's header stories whether the section uses them or not, so the reader
 /// has to tell "this section has no such header" from "it has an empty one" — and the only thing that
 /// distinguishes them is emptiness. The test it made was on the paragraph's <em>text</em>, which is the
-/// wrong question: a paragraph whose only content is an inline picture reads back with no text, because
-/// the U+0001 that stands for the picture is consumed by the frame it makes.
+/// wrong question: a paragraph whose only content is an inline picture holds nothing a reader would
+/// call text.
+/// </para>
+/// <para>
+/// <strong>What that paragraph's text is has changed, and the assertion below records it.</strong> An
+/// as-character frame now leaves its anchor character in the line, because an inline object's offset is
+/// a boundary and two adjacent frames with no character between them collapse onto one — see
+/// <see cref="DocShapeFieldTests.AnAsCharacterFramesAnchorIsOneCharacterThatCostsNoWidth"/>. So a
+/// picture-only header's paragraph reads back as one anchor character rather than as nothing, the
+/// emptiness test it defeats is the same test, and the control below — a story holding only a
+/// paragraph mark — is what says the distinction still works.
 /// </para>
 /// <para>
 /// So a logo-only running head was thrown away entirely, and with it the room it occupies. Measured on
@@ -39,7 +48,7 @@ public sealed class PictureFurnitureTests
         Ww8LayoutBlock block = furniture.Headers[PageFurnitureSlot.Default].ShouldHaveSingleItem();
 
         block.Paragraph.ShouldNotBeNull();
-        block.Paragraph!.Value.Text.ShouldBeEmpty();
+        block.Paragraph!.Value.Text.ShouldBe("\u0001");
         block.Paragraph!.Value.Frames.ShouldNotBeNull();
         block.Paragraph!.Value.Frames!.Count.ShouldBe(1);
     }
