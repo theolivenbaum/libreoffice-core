@@ -1,4 +1,5 @@
 using Paperless.Text.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Rtf;
 
@@ -64,7 +65,7 @@ public sealed record RtfStyleFormatting
     public bool? Italic { get; init; }
 
     /// <summary><c>\ul</c> and its siblings.</summary>
-    public bool? Underline { get; init; }
+    public TextUnderline? Underline { get; init; }
 
     /// <summary><c>\strike</c>.</summary>
     public bool? Strike { get; init; }

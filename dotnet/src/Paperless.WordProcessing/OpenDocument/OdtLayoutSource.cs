@@ -1271,7 +1271,7 @@ public sealed partial class OdtLayoutSource
                 || style.Highlight is { A: not 0 }
                 // And so do the two rules, for the same reason: neither changes a width, so a paragraph
                 // underlined end to end is uniform by every measurement test and would be drawn plain.
-                || style.IsUnderlined
+                || style.Underline != TextUnderline.None
                 || style.IsStruckThrough
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
@@ -1297,7 +1297,7 @@ public sealed partial class OdtLayoutSource
                 rise,
                 style.CaseMap,
                 Highlight: style.Highlight ?? default,
-                IsUnderlined: style.IsUnderlined,
+                Underline: style.Underline,
                 IsStruckThrough: style.IsStruckThrough));
         }
 

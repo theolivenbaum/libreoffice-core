@@ -89,7 +89,7 @@ public sealed class UnderlineTests
             Runs =
             [
                 new PageRun(
-                    0, 18, Face, Size, Colour: Colour.FromRgb(0xFF0000), IsUnderlined: true),
+                    0, 18, Face, Size, Colour: Colour.FromRgb(0xFF0000), Underline: TextUnderline.SingleLine),
             ],
         };
 
@@ -119,7 +119,13 @@ public sealed class UnderlineTests
     /// this still discriminates between them.
     /// </para>
     /// <para>
-    /// The offset is still design units and still carries the ~0.03 pt the older note describes.
+    /// <b>And the OFFSET is now the reference's own too, which is what the band used to hide.</b>
+    /// It was a range because the offset was a fraction of the em and only approximately right;
+    /// round 123 took it off the same device chain as the thickness, so it is a constant. This
+    /// face at 12 pt has its descent rounded to 26 pixels, <c>nUnderlineOffset = 26/2 + 1</c> = 14
+    /// and <c>nLineHeight/2</c> = 3, so the stroke's centre is <c>HCONV(14 - 3 + 3)</c> = <b>28
+    /// twips</b> below the baseline and its top edge is 28 − 7 = <b>21 twips, 1.05 pt</b> — read
+    /// off 26.2.4.2's own PDF, where the old band's 0.94-1.01 does not reach.
     /// </para>
     /// </remarks>
     [Fact]
@@ -128,13 +134,72 @@ public sealed class UnderlineTests
         (List<(GlyphRun Run, Colour Colour)> runs, List<(DocRect Area, Colour Colour)> rules) =
             Draw(Decorated("underlined", from: 0, underline: true, strike: false));
 
-        Length below = rules[0].Area.Y - runs[^1].Run.Origin.Y;
-
-        below.ShouldBeGreaterThan(Length.FromPoints(0.94));
-        below.ShouldBeLessThan(Length.FromPoints(1.01));
+        // Half a twip, because a stroke's centre is a whole twip and a fill's top edge is that
+        // less half its thickness.
+        (rules[0].Area.Y - runs[^1].Run.Origin.Y).ShouldBe(Length.FromTwips(28) - Length.FromTwips(7));
 
         // 14 twips, exactly, because the device answers a whole number of them.
         rules[0].Area.Height.ShouldBe(Length.FromTwips(14));
+    }
+
+    /// <summary>
+    /// A double underline is two thinner lines, and where the second sits is not a guess.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read off 26.2.4.2's own rendering, and the numbers are not fitted. Liberation Serif is on the
+    /// <c>FontsDontUseUnderlineMetrics</c> list so it takes the descent branch: at 12 pt its em is
+    /// 120 device pixels at the PDF writer's 720 dpi, its descent rounds to 26, so
+    /// <c>n2LineHeight = ((26 × 16) + 50) / 100</c> = 4 pixels and <c>n2LineDY</c> is
+    /// <c>max(4, 1 + 720/150)</c> = <b>5</b> — the floor binds, which is why this size was chosen.
+    /// <c>nUnderlineOffset</c> is <c>26/2 + 1</c> = 14, so the two tops are at 14 − 2 − 4 = 8 and
+    /// 8 + 5 + 4 = 17 pixels, and <c>drawStraightTextLine</c> centres them at
+    /// <c>HCONV(8 + 2)</c> = 20 twips and <c>HCONV(17 + 2) + HCONV(4)</c> = 38 + 8 = 46 twips.
+    /// </para>
+    /// <para>
+    /// So the drawn bands are 20 − 4 = <b>16</b> to 24 twips and 46 − 4 = <b>42</b> to 50 twips, each
+    /// 8 twips thick. <b>The gap between them is 18 twips, more than twice the thickness</b> — a
+    /// reader that put the second line one thickness below the first, which is what the metric alone
+    /// suggests and what this tree drew for a Calc cell, would put it at 32 twips.
+    /// </para>
+    /// <para>
+    /// The whole probe behind this is <c>probes/dblunder-r123/</c>: six faces × seven sizes × three
+    /// kinds authored as a <c>.fodt</c> and a <c>.fods</c>, rendered twice each, scored
+    /// <b>126 of 126 and 126 of 126</b> on thickness and position together.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ADoubleUnderlineIsTwoThinnerLinesThreeThicknessesApart()
+    {
+        (List<(GlyphRun Run, Colour Colour)> runs, List<(DocRect Area, Colour Colour)> rules) =
+            Draw(Doubled("double underlined"));
+
+        rules.Count.ShouldBe(2);
+
+        Length baseline = runs[^1].Run.Origin.Y;
+
+        rules[0].Area.Height.ShouldBe(Length.FromTwips(8));
+        rules[1].Area.Height.ShouldBe(Length.FromTwips(8));
+        (rules[0].Area.Y - baseline).ShouldBe(Length.FromTwips(16));
+        (rules[1].Area.Y - baseline).ShouldBe(Length.FromTwips(42));
+    }
+
+    /// <summary>
+    /// And each of its lines is thinner than the single underline of the same face and size.
+    /// </summary>
+    /// <remarks>
+    /// The half of the register's O68 that was right: both branches make a double line thinner, a
+    /// quarter of the descent against sixteen hundredths on this one. Asserted as a comparison
+    /// rather than as a second constant, because the constant is already pinned above.
+    /// </remarks>
+    [Fact]
+    public void EachLineOfADoubleUnderlineIsThinnerThanASingleOne()
+    {
+        (_, List<(DocRect Area, Colour Colour)> single) =
+            Draw(Decorated("underlined", from: 0, underline: true, strike: false));
+        (_, List<(DocRect Area, Colour Colour)> doubled) = Draw(Doubled("underlined"));
+
+        doubled[0].Area.Height.ShouldBeLessThan(single[0].Area.Height);
     }
 
     /// <summary>
@@ -177,6 +242,25 @@ public sealed class UnderlineTests
         lined.ShouldBe(whole);
     }
 
+    /// <summary>One paragraph, double-underlined end to end.</summary>
+    private static PageParagraph Doubled(string text)
+        => new()
+        {
+            Text = text,
+            Face = Face,
+            EmSize = Size,
+            Runs =
+            [
+                new PageRun(
+                    0, text.Length, Face, Size, Colour: Colour.Black,
+                    Underline: TextUnderline.DoubleLine),
+            ],
+        };
+
+    /// <summary>One line or none, for the tests whose variable is only whether there is a rule.</summary>
+    private static TextUnderline Ruled(bool underline)
+        => underline ? TextUnderline.SingleLine : TextUnderline.None;
+
     private static Length Width(PageParagraph paragraph)
         => paragraph.Measure().WidthBetween(0, paragraph.Text.Length);
 
@@ -189,10 +273,10 @@ public sealed class UnderlineTests
             EmSize = Size,
             Runs =
             [
-                new PageRun(0, at, Face, Size, Colour: Colour.Black, IsUnderlined: underline),
+                new PageRun(0, at, Face, Size, Colour: Colour.Black, Underline: Ruled(underline)),
                 new PageRun(
                     at, text.Length - at, Face, Size,
-                    Colour: Colour.Black, IsUnderlined: underline),
+                    Colour: Colour.Black, Underline: Ruled(underline)),
             ],
         };
 
@@ -205,12 +289,15 @@ public sealed class UnderlineTests
     /// <c>w:rPr</c> is — underlines it instead.
     /// </remarks>
     [Theory]
-    [InlineData("single", true)]
-    [InlineData("double", true)]
-    [InlineData("wavyHeavy", true)]
-    [InlineData("none", false)]
-    public void AWordUnderlineIsReadAsAStyleAndNotAsASwitch(string value, bool expected)
-        => Resolved("u", value).IsUnderlined.ShouldBe(expected);
+    [InlineData("single", TextUnderline.SingleLine)]
+    [InlineData("wavyHeavy", TextUnderline.SingleLine)]
+    [InlineData("none", TextUnderline.None)]
+    // The two of ST_Underline's eighteen values that draw two lines. `wavyDouble` is
+    // `LINESTYLE_DOUBLEWAVE`, and this engine draws no wave, so it comes out as a double line.
+    [InlineData("double", TextUnderline.DoubleLine)]
+    [InlineData("wavyDouble", TextUnderline.DoubleLine)]
+    public void AWordUnderlineIsReadAsAStyleAndNotAsASwitch(string value, TextUnderline expected)
+        => Resolved("u", value).Underline.ShouldBe(expected);
 
     [Theory]
     [InlineData("strike", null, true)]
@@ -229,16 +316,20 @@ public sealed class UnderlineTests
     /// <c>LINESTYLE_NONE</c>. Reading the byte as non-zero underlines all three.
     /// </remarks>
     [Theory]
-    [InlineData(0, false)]
-    [InlineData(1, true)]
-    [InlineData(2, true)]
-    [InlineData(3, true)]
-    [InlineData(5, false)]
-    [InlineData(8, false)]
-    [InlineData(11, true)]
-    [InlineData(255, false)]
-    public void AWordBinaryUnderlineIsAStyleAndThreeStylesAreNoLine(int kul, bool expected)
-        => Ww8.Ww8DocumentReader.IsUnderlineStyle(kul).ShouldBe(expected);
+    [InlineData(0, TextUnderline.None)]
+    [InlineData(1, TextUnderline.SingleLine)]
+    [InlineData(2, TextUnderline.SingleLine)]
+    [InlineData(5, TextUnderline.None)]
+    [InlineData(8, TextUnderline.None)]
+    [InlineData(11, TextUnderline.SingleLine)]
+    [InlineData(255, TextUnderline.None)]
+    // 3 is `LINESTYLE_DOUBLE` and 43 `LINESTYLE_DOUBLEWAVE` (`ww8par6.cxx`:3605, :3619). Operand 3
+    // is the corpus's only word-processing double underline, on `RobertQ_Service.doc`'s `Heading`
+    // and `Subtitle` styles — 1 of 66 `.doc`, twice.
+    [InlineData(3, TextUnderline.DoubleLine)]
+    [InlineData(43, TextUnderline.DoubleLine)]
+    public void AWordBinaryUnderlineIsAStyleAndThreeStylesAreNoLine(int kul, TextUnderline expected)
+        => Ww8.Ww8DocumentReader.UnderlineOf(kul).ShouldBe(expected);
 
     /// <summary>The character formatting of a run whose <c>w:rPr</c> names one element.</summary>
     private static Ooxml.WordTextStyle Resolved(string name, string? value)
@@ -277,13 +368,13 @@ public sealed class UnderlineTests
                     new PageRun(0, from, Face, Size, Colour: Colour.Black),
                     new PageRun(
                         from, text.Length - from, Face, Size, Colour: Colour.Black,
-                        IsUnderlined: underline, IsStruckThrough: strike),
+                        Underline: Ruled(underline), IsStruckThrough: strike),
                 ]
                 :
                 [
                     new PageRun(
                         0, text.Length, Face, Size, Colour: Colour.Black,
-                        IsUnderlined: underline, IsStruckThrough: strike),
+                        Underline: Ruled(underline), IsStruckThrough: strike),
                 ],
         };
 

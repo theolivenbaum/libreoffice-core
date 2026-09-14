@@ -25,7 +25,11 @@ namespace Paperless.WordProcessing.Ooxml;
 /// <param name="Highlight">
 /// The band <c>w:highlight</c> draws behind the text, or null when it names none.
 /// </param>
-/// <param name="IsUnderlined">True when <c>w:u</c> names a line style other than <c>none</c>.</param>
+/// <param name="Underline">
+/// How <c>w:u</c> underlines the run: <c>none</c> and an unstated property draw nothing,
+/// <c>double</c> and <c>wavyDouble</c> draw two lines, and the other fifteen values of
+/// <c>ST_Underline</c> draw one. See <see cref="TextUnderline"/>.
+/// </param>
 /// <param name="IsStruckThrough">True when <c>w:strike</c> or <c>w:dstrike</c> is on.</param>
 /// <param name="AutoKerning">
 /// True when the run asks for pair kerning, which <c>w:kern</c> is the only way to ask for.
@@ -75,7 +79,7 @@ public readonly record struct WordTextStyle(
     Layout.Escapement Escapement = default,
     PageCaseMap CaseMap = PageCaseMap.None,
     Colour? Highlight = null,
-    bool IsUnderlined = false,
+    TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
     bool AutoKerning = false,
     Length Tracking = default,
@@ -649,7 +653,7 @@ internal static class WordParagraphFormats
             // `w:u` is not a toggle and its `w:val` is a line style rather than a switch, so `IsOn` is
             // the wrong reading of it: it would take `w:u w:val="none"` — which is how a run turns off
             // an underline its style set — for an underline. The extraction side reads it the same way.
-            underline.HasValue && underline.Value is not (null or "none"),
+            WordCharacterFormat.UnderlineOf(underline),
             // Folded onto one flag, as the extraction side folds them: `w:dstrike` is a second line
             // rather than a different decoration, and nothing below this models a doubled rule.
             strike.IsOn || doubleStrike.IsOn,

@@ -3,6 +3,7 @@ using Paperless.Core.Extraction;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml.DrawingML;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Ooxml;
 
@@ -25,8 +26,16 @@ public sealed record WordCharacterFormat
     /// <summary>True when the run is italic.</summary>
     public bool IsItalic { get; init; }
 
+    /// <summary>How the run is underlined, if it is.</summary>
+    /// <remarks>
+    /// <c>ST_Underline</c> (ECMA-376 17.18.99) states the line's style and its count in one token,
+    /// and only the count reaches the geometry: <c>double</c> and <c>wavyDouble</c> are the two
+    /// two-line values and every other non-<c>none</c> value is one line.
+    /// </remarks>
+    public TextUnderline Underline { get; init; }
+
     /// <summary>True when the run is underlined by any underline style.</summary>
-    public bool IsUnderlined { get; init; }
+    public bool IsUnderlined => Underline != TextUnderline.None;
 
     /// <summary>True when the run is struck through, single or double.</summary>
     public bool IsStruckThrough { get; init; }
@@ -105,7 +114,7 @@ public sealed record WordCharacterFormat
             IsBold = Get("b").IsOn,
             IsItalic = Get("i").IsOn,
             // w:u carries the line style in w:val, so "none" is off and anything else is on.
-            IsUnderlined = underline.HasValue && underline.Value is not (null or "none"),
+            Underline = UnderlineOf(underline),
             IsStruckThrough = Get("strike").IsOn || Get("dstrike").IsOn,
             IsSuperscript = verticalAlignment.Value == "superscript",
             IsSubscript = verticalAlignment.Value == "subscript",
@@ -129,6 +138,23 @@ public sealed record WordCharacterFormat
             => styles.ResolveRunProperty(
                 localName, directRunProperties, paragraphStyleId, characterStyleId);
     }
+
+    /// <summary>
+    /// Which of <c>ST_Underline</c>'s values a <c>w:u</c> asks for.
+    /// </summary>
+    /// <remarks>
+    /// <c>double</c> and <c>wavyDouble</c> are the only two of the eighteen that draw two lines
+    /// (ECMA-376 17.18.99), and <c>writerfilter</c> maps them to <c>LINESTYLE_DOUBLE</c> and
+    /// <c>LINESTYLE_DOUBLEWAVE</c> — the second of which this engine draws as a double line
+    /// because it draws no wave at all. An unstated <c>w:val</c> is one line: the attribute
+    /// defaults to <c>single</c>.
+    /// </remarks>
+    internal static TextUnderline UnderlineOf(WordProperty property)
+        => !property.HasValue || property.Value == "none"
+            ? TextUnderline.None
+            : property.Value is "double" or "wavyDouble"
+                ? TextUnderline.DoubleLine
+                : TextUnderline.SingleLine;
 
     /// <summary>
     /// The Latin family the innermost layer to name one gives, or null when none does.

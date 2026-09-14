@@ -61,6 +61,49 @@ public class RuleWidthTests
         "DejaVu Sans: 6=6/4/6 7=8/6/8 8=8/6/8 9=8/6/10 10=10/6/10 11=10/8/12 12=12/8/12 14=14/10/14 16=16/10/16 18=16/12/18 20=18/12/20 24=22/16/24 28=26/18/28 36=32/22/36 48=44/30/48",
     ];
 
+    /// <summary>
+    /// Where the reference puts each rule, measured off its own PDFs of <c>probes/dblunder-r123</c>'s
+    /// position probe. Each cell is <c>size=underline/double1,double2/strikethrough</c>, in whole
+    /// hundredths of a millimetre below the baseline, and each number is the STROKE CENTRE — which
+    /// is what a PDF segment states and what this reads back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The offsets are a separate measurement from the thicknesses above and they were not taken
+    /// until round 123. Round 120 quantised the thickness and left the offset a fraction of the em,
+    /// on the strength of a <b>0.02 pt</b> agreement measured on one document's strikethroughs; over
+    /// these 126 rules a single underline was <b>0.067 pt</b> out on average and <b>0.139 pt</b> at
+    /// worst, so the figure that justified skipping it was not representative of the class.
+    /// </para>
+    /// <para>
+    /// The sizes here are seven rather than the fifteen above, and they reach down to 6 pt on
+    /// purpose: the descent branch floors the gap between a double underline's two lines at
+    /// <c>1 + DPIY/150</c> device pixels, which is <b>five</b> at 720 dpi, and that floor binds only
+    /// where the double underline is thinner than five pixels. A probe of large text cannot see the
+    /// term at all.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] CalcOffsets =
+    [
+        "Liberation Sans: 6=25/14,46/-53 8=32/18,57/-74 10=39/25,64/-92 12=46/32,78/-109 16=64/46,99/-148 24=92/64,148/-222 48=183/127,296/-445",
+        "Liberation Serif: 6=25/14,46/-53 8=32/18,57/-74 10=42/28,74/-92 12=49/35,81/-109 16=64/42,106/-145 24=95/67,151/-219 48=187/127,307/-441",
+        "Liberation Mono: 6=35/21,60/-49 8=46/32,78/-64 10=56/42,88/-81 12=67/49,103/-99 16=88/64,138/-131 24=131/92,208/-198 48=258/183,406/-395",
+        "Carlito: 6=25/11,53/-46 8=32/14,77/-60 10=39/14,89/-78 12=46/18,102/-92 16=60/21,138/-123 24=85/32,201/-183 48=169/60,388/-367",
+        "Caladea: 6=21/14,35/-53 8=28/18,50/-71 10=35/25,67/-92 12=42/28,70/-106 16=56/39,102/-141 24=85/56,141/-215 48=169/113,282/-430",
+        "DejaVu Sans: 6=11/4,25/-49 8=14/4,36/-64 10=14/4,36/-81 12=21/7,49/-99 16=28/7,60/-131 24=35/14,99/-198 48=74/21,180/-395",
+    ];
+
+    /// <summary>The same 126 rules on a word-processing page, in whole twips.</summary>
+    private static readonly string[] WriterOffsets =
+    [
+        "Liberation Sans: 6=14/8,26/-30 8=18/10,32/-42 10=22/14,36/-52 12=26/18,44/-62 16=36/26,56/-84 24=52/36,84/-126 48=104/72,168/-252",
+        "Liberation Serif: 6=14/8,26/-30 8=18/10,32/-42 10=24/16,42/-52 12=28/20,46/-62 16=36/24,60/-82 24=54/38,86/-124 48=106/72,174/-250",
+        "Liberation Mono: 6=20/12,34/-28 8=26/18,44/-36 10=32/24,50/-46 12=38/28,58/-56 16=50/36,78/-74 24=74/52,118/-112 48=146/104,230/-224",
+        "Carlito: 6=14/6,30/-26 8=18/8,44/-34 10=22/8,50/-44 12=26/10,58/-52 16=34/12,78/-70 24=48/18,114/-104 48=96/34,220/-208",
+        "Caladea: 6=12/8,20/-30 8=16/10,28/-40 10=20/14,38/-52 12=24/16,40/-60 16=32/22,58/-80 24=48/32,80/-122 48=96/64,160/-244",
+        "DejaVu Sans: 6=6/2,14/-28 8=8/2,20/-36 10=8/2,20/-46 12=12/4,28/-56 16=16/4,34/-74 24=20/8,56/-112 48=42/12,102/-224",
+    ];
+
     private static readonly Dictionary<string, string> Files = new()
     {
         ["Liberation Sans"] = "LiberationSans-Regular.ttf",
@@ -115,7 +158,7 @@ public class RuleWidthTests
                 string[] sides = cell.Split('=');
                 yield return (halves[0],
                               int.Parse(sides[0], CultureInfo.InvariantCulture),
-                              sides[1].Split('/')
+                              sides[1].Split('/', ',')
                                       .Select(v => int.Parse(v, CultureInfo.InvariantCulture))
                                       .ToArray());
             }
@@ -141,6 +184,52 @@ public class RuleWidthTests
 
         cases.ShouldBe(90, "six faces at fifteen sizes");
     }
+
+    /// <summary>
+    /// The same shape of check on the OFFSETS, comparing stroke centres.
+    /// </summary>
+    /// <remarks>
+    /// This model fills a rule where the reference strokes one (C16), so what it holds is a top
+    /// edge; half the drawn thickness turns that back into the centre a PDF segment states. The
+    /// half is a half <em>logical unit</em> and not a whole one, which is why the comparison is on
+    /// twice the value rather than on the value.
+    /// </remarks>
+    private static void CheckOffsets(string[] rows, MetricGrid grid, Func<long, Length> unit)
+    {
+        int cases = 0;
+
+        foreach ((string family, int size, int[] want) in Table(rows))
+        {
+            OpenTypeFace face = Require(family);
+            LineSpacing.RuleWidths got = LineSpacing.ResolveRuleWidths(
+                face, LineSpacing.Resolve(face), Length.FromPoints(size), grid);
+
+            string where = $"{family} at {size} pt";
+
+            Centre(got.UnderlineOffset, got.Underline).ShouldBe(unit(want[0]), $"{where}, underline");
+            Centre(got.DoubleUnderlineFirst, got.DoubleUnderline)
+                .ShouldBe(unit(want[1]), $"{where}, first line of a double underline");
+            Centre(got.DoubleUnderlineSecond, got.DoubleUnderline)
+                .ShouldBe(unit(want[2]), $"{where}, second line of a double underline");
+            Centre(got.StrikeoutOffset, got.Strikeout)
+                .ShouldBe(unit(want[3]), $"{where}, strikethrough");
+            cases++;
+        }
+
+        cases.ShouldBe(42, "six faces at seven sizes");
+    }
+
+    private static Length Centre(Length top, Length thickness) => top + (thickness / 2);
+
+    /// <summary>Every measured Calc offset, in the whole hundredth of a millimetre it was drawn at.</summary>
+    [Fact]
+    public void EveryMeasuredCalcRuleSitsWhereTheDeviceChainPutsIt()
+        => CheckOffsets(CalcOffsets, MetricGrid.TextLine, u => Length.FromMm100(u));
+
+    /// <summary>And the same on a word-processing page, where the unit is the twip.</summary>
+    [Fact]
+    public void EveryMeasuredWriterRuleSitsWhereTheDeviceChainPutsIt()
+        => CheckOffsets(WriterOffsets, MetricGrid.WriterTextLine, u => Length.FromTwips(u));
 
     /// <summary>
     /// Every one of the 90 (face, size) pairs Calc draws, in the whole hundredth of a millimetre

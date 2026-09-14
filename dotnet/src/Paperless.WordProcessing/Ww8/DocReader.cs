@@ -1234,7 +1234,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 || run.Highlight is not null
                 // And so do the two rules, for the same reason: neither changes a width, so a paragraph
                 // underlined end to end is uniform by every measurement test and would be drawn plain.
-                || run.IsUnderlined
+                || run.Underline != TextUnderline.None
                 || run.IsStruckThrough
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
@@ -1267,7 +1267,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 rise,
                 run.CaseMap,
                 Highlight: run.Highlight ?? default,
-                IsUnderlined: run.IsUnderlined,
+                Underline: run.Underline,
                 IsStruckThrough: run.IsStruckThrough,
                 Tracking: run.Tracking));
         }

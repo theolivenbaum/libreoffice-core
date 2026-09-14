@@ -2,6 +2,7 @@ using System.Globalization;
 using Paperless.Core.Extraction;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 
 namespace Paperless.OpenDocument.Styles;
 
@@ -61,8 +62,18 @@ public sealed record OdfTextFormat
     /// <summary>True when the run is italic or oblique.</summary>
     public bool IsItalic { get; init; }
 
+    /// <summary>How the run is underlined, if it is.</summary>
+    /// <remarks>
+    /// ODF splits an underline into a <em>style</em> and a <em>type</em> —
+    /// <c>style:text-underline-style</c> says solid, dotted or none and
+    /// <c>style:text-underline-type</c> says single or double — and LibreOffice merges both into
+    /// one <c>CharUnderline</c> item. They therefore have to be read at the same level; see
+    /// <c>OdfStyles.ResolveTogether</c>.
+    /// </remarks>
+    public TextUnderline Underline { get; init; }
+
     /// <summary>True when the run is underlined, by any underline style.</summary>
-    public bool IsUnderlined { get; init; }
+    public bool IsUnderlined => Underline != TextUnderline.None;
 
     /// <summary>True when the run is struck through, by any line-through style.</summary>
     public bool IsStruckThrough { get; init; }
@@ -132,7 +143,7 @@ public sealed record OdfTextFormat
             RelativeFontSize = fontSize.AsPercentage(),
             IsBold = IsBoldWeight(Get(OdfNamespaces.FoCompatible, "font-weight").Value),
             IsItalic = Get(OdfNamespaces.FoCompatible, "font-style").Value is "italic" or "oblique",
-            IsUnderlined = IsLineOn(Get(OdfNamespaces.Style, "text-underline-style").Value),
+            Underline = UnderlineIn(styles, cascade),
             IsStruckThrough = IsLineOn(Get(OdfNamespaces.Style, "text-line-through-style").Value),
             Position = ParsePosition(Get(OdfNamespaces.Style, "text-position").Value),
             Colour = Get(OdfNamespaces.FoCompatible, "color").AsColour(),
@@ -168,6 +179,57 @@ public sealed record OdfTextFormat
     /// <c>none</c>; any other value — solid, dotted, wave — draws a line.
     /// </summary>
     private static bool IsLineOn(string? value) => value is not (null or "none");
+
+    /// <summary>
+    /// The two attributes that together make up one underline, in the order
+    /// <see cref="UnderlineOf"/> reads them.
+    /// </summary>
+    private static readonly (string Namespace, string Name)[] UnderlineAttributes =
+    [
+        (OdfNamespaces.Style, "text-underline-style"),
+        (OdfNamespaces.Style, "text-underline-type"),
+    ];
+
+    /// <summary>
+    /// The underline a cascade of styles produces, style and type read at one level.
+    /// </summary>
+    /// <remarks>
+    /// Public because the word-processing reader resolves the same two attributes into its own
+    /// style record and must not read them a second, different way — one of the two would then be
+    /// right and the other wrong on the same document.
+    /// </remarks>
+    /// <param name="styles">The document's styles.</param>
+    /// <param name="cascade">The style references, outermost first.</param>
+    public static TextUnderline UnderlineIn(OdfStyles styles, IReadOnlyList<OdfStyleReference> cascade)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+        return UnderlineOf(styles.ResolveTogether(cascade, OdfPropertyKind.Text, UnderlineAttributes));
+    }
+
+    /// <summary>
+    /// One underline out of the style and the type a single level stated.
+    /// </summary>
+    /// <remarks>
+    /// <c>XMLUnderlineTypePropHdl::importXML</c> upgrades what the style handler produced rather
+    /// than replacing it (<c>xmloff/source/style/undlihdl.cxx</c>:114-160), so a type of
+    /// <c>double</c> means two lines only where the style is on. A level stating the type alone
+    /// gets two lines, because the type handler writes its own value when nothing has been merged
+    /// yet — which is the <c>rValue</c>-is-<c>NONE</c> branch at :156-159. <c>none</c> as the type
+    /// is <c>FontUnderline::NONE</c> in <c>pXML_UnderlineType_Enum</c>, so it turns the line off
+    /// as the style's own <c>none</c> does.
+    /// </remarks>
+    private static TextUnderline UnderlineOf(string?[] stated)
+    {
+        string? style = stated[0];
+        string? type = stated[1];
+
+        if (style is "none" || type is "none") return TextUnderline.None;
+        if (type is "double") return TextUnderline.DoubleLine;
+
+        // A level stating the type alone turns the line on, because the type handler writes its
+        // own value where nothing has been merged into the item yet.
+        return style is null && type is null ? TextUnderline.None : TextUnderline.SingleLine;
+    }
 
     private static OdfTextPosition ParsePosition(string? value)
     {

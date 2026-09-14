@@ -918,10 +918,15 @@ public sealed record PageNote
 /// when it has none. It changes no measurement: the band takes the room the glyphs already had, so a
 /// document gains and loses highlighting without a line moving.
 /// </param>
-/// <param name="IsUnderlined">
-/// True when a rule is drawn under the run — <c>w:u</c>, <c>sprmCKul</c>, <c>\ul</c> and
+/// <param name="Underline">
+/// How the run is underlined — <c>w:u</c>, <c>sprmCKul</c>, <c>\ul</c> and
 /// <c>style:text-underline-style</c>. Like <paramref name="Highlight"/> it changes no measurement: the
 /// rule is drawn across the advance the glyphs already had, so nothing reflows when it appears.
+/// <para>
+/// A tri-state and not a flag, because <c>w:u w:val="double"</c>, <c>\uldb</c>, ODF's
+/// <c>style:text-underline-type="double"</c> and <c>sprmCKul</c> operand 3 all ask for
+/// <em>two thinner lines at their own offsets</em> rather than one. See <see cref="TextUnderline"/>.
+/// </para>
 /// </param>
 /// <param name="IsStruckThrough">
 /// True when a rule is drawn through the run — <c>w:strike</c> and <c>w:dstrike</c>,
@@ -960,7 +965,7 @@ public readonly record struct PageRun(
     PageCaseMap CaseMap = PageCaseMap.None,
     Length MetricEmSize = default,
     Colour Highlight = default,
-    bool IsUnderlined = false,
+    TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
     Length Tracking = default,
     int WidthPerCent = 100,
@@ -982,6 +987,9 @@ public readonly record struct PageRun(
     /// answer: the measurement decided where the line broke on the strength of it.
     /// </remarks>
     public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
+
+    /// <summary>True when a rule of any kind is drawn under the run.</summary>
+    public bool IsUnderlined => Underline != TextUnderline.None;
 
     /// <summary>True when the run carries a rule under it, through it, or both.</summary>
     public bool IsDecorated => IsUnderlined || IsStruckThrough;

@@ -1065,7 +1065,52 @@ public static class LineSpacing
     /// both of the reference's branches and was drawn at the single thickness here.
     /// </param>
     /// <param name="Strikeout">The line through the text.</param>
-    public readonly record struct RuleWidths(Length Underline, Length DoubleUnderline, Length Strikeout);
+    /// <param name="UnderlineOffset">
+    /// How far below the baseline the <em>top edge</em> of a single underline sits.
+    /// <para>
+    /// The same device chain as the thickness beside it, and for the same reason: the offset is a
+    /// whole number of the writer's 720 dpi pixels rounded to a whole logical unit, so no fraction
+    /// of the em reproduces it. This tree took it from the design units until round 123 measured
+    /// the difference — 0.063 pt on average and 0.139 at worst over 84 authored rules, against the
+    /// 0.02 pt figure on which round 120 declined to touch it.
+    /// </para>
+    /// </param>
+    /// <param name="StrikeoutOffset">
+    /// The same for the line through the text, and <em>negative</em>: a strikeout sits above the
+    /// baseline.
+    /// </param>
+    /// <param name="DoubleUnderlineFirst">
+    /// How far below the baseline the <em>top edge</em> of a double underline's first line sits.
+    /// <para>
+    /// A double underline is the one rule whose position cannot be taken from the design units the
+    /// other two still come from, and it is not a rounding difference: the two lines straddle where
+    /// a single one would sit, their separation is floored on the device rather than scaled with
+    /// the em, and the writer adds a whole further thickness to the second. See
+    /// <see cref="DoubleUnderlineSecond"/> for the arithmetic and the measurement.
+    /// </para>
+    /// </param>
+    /// <param name="DoubleUnderlineSecond">
+    /// The same for its second line — <em>three</em> thicknesses below the first where the gap is
+    /// not floored, and not the two a reader of the metric alone would expect.
+    /// <para>
+    /// <c>ImplInitTextLineSize</c> puts the two lines' tops <c>mnDUnderlineSize × 2</c> apart on the
+    /// HarfBuzz branch (<c>fontmetric.cxx</c>:238) and <c>n2LineDY + n2LineHeight</c> apart on the
+    /// descent one (:319), where <c>n2LineDY</c> is <c>max(n2LineHeight, 1 + DPIY/150)</c> — a floor
+    /// of <b>five pixels</b> on the PDF writer's 720 dpi device, which binds at every size where a
+    /// double underline is thinner than that. <c>drawStraightTextLine</c> then centres the first
+    /// stroke by adding half a thickness (tdf#154235, <c>pdfwriter_impl.cxx</c>:6741) and centres
+    /// the second by adding half a thickness <em>and a whole one more</em> (:6857), which is
+    /// asymmetric and is reproduced because it is what the reference draws.
+    /// </para>
+    /// </param>
+    public readonly record struct RuleWidths(
+        Length Underline,
+        Length DoubleUnderline,
+        Length Strikeout,
+        Length UnderlineOffset = default,
+        Length StrikeoutOffset = default,
+        Length DoubleUnderlineFirst = default,
+        Length DoubleUnderlineSecond = default);
 
     /// <summary>
     /// The thicknesses of a face's rules at a size, as <c>FontMetricData::ImplInitTextLineSize</c>
@@ -1145,16 +1190,34 @@ public static class LineSpacing
             double scale = (double)em / unitsPerEm;
             double single = post.UnderlineThickness * scale;
 
-            return new RuleWidths(
-                grid.ToLength((long)Math.Ceiling(single)),
+            // `nBSize = nSize * 2; n2Size = nBSize / 3`, so two thirds and not a half.
+            long doubleSize = (long)Math.Ceiling(single * 2.0 / 3.0);
 
-                // `nBSize = nSize * 2; n2Size = nBSize / 3`, so two thirds and not a half.
-                grid.ToLength((long)Math.Ceiling(single * 2.0 / 3.0)),
-                grid.ToLength((long)Math.Ceiling(os2!.Value.StrikeoutSize * scale)));
+            // `mnBUnderlineOffset = ceil(nOffset - nSize/2)` and the double underline's first
+            // line sits there, `mnDUnderlineOffset1 = mnBUnderlineOffset` (fontmetric.cxx:234-238).
+            // The face states the underline's position as negative below the baseline and VCL
+            // negates it, so this is positive downwards.
+            long first = (long)Math.Ceiling((-post.UnderlinePosition * scale) - (single / 2.0));
+
+            long singleSize = (long)Math.Ceiling(single);
+            long strikeSize = (long)Math.Ceiling(os2!.Value.StrikeoutSize * scale);
+
+            return DoublePositions(
+                new RuleWidths(
+                    grid.ToLength(singleSize),
+                    grid.ToLength(doubleSize),
+                    grid.ToLength(strikeSize),
+                    Stroked(singleSize, (long)Math.Ceiling(-post.UnderlinePosition * scale), grid),
+                    Stroked(
+                        strikeSize,
+                        (long)Math.Ceiling(-os2.Value.StrikeoutPosition * scale),
+                        grid)),
+                doubleSize, first, first + (doubleSize * 2), grid);
         }
 
         long ascent = grid.ToPixels(line.Ascent, unitsPerEm, size);
-        long descent = grid.ToPixels(line.Descent, unitsPerEm, size);
+        long rawDescent = grid.ToPixels(line.Descent, unitsPerEm, size);
+        long descent = rawDescent;
 
         if (descent <= 0) descent = Math.Max(1, ascent / 10);
 
@@ -1164,8 +1227,84 @@ public static class LineSpacing
         long lineHeight = Math.Max(1, ((descent * 25) + 50) / 100);
         long doubleHeight = Math.Max(1, ((descent * 16) + 50) / 100);
 
-        return new RuleWidths(
-            grid.ToLength(lineHeight), grid.ToLength(doubleHeight), grid.ToLength(lineHeight));
+        // **The two descents are different and the C++ says so.** The thicknesses above take the
+        // #i55341-clamped descent; `nUnderlineOffset` takes the raw `mnDescent`
+        // (`fontmetric.cxx`:315), so a face whose clamp fires — Liberation Mono at every size —
+        // has its rules sized off one number and placed off another.
+        long underlineOffset = (rawDescent / 2) + 1;
+
+        // `n2LineDY = max(n2LineHeight, 1 + DPIY/150)`, and on a 720 dpi device that floor is FIVE
+        // pixels (fontmetric.cxx:299-306, #117909's "add some pixels ... on higher resolution
+        // devices"). It binds wherever a double underline is thinner than five pixels, which is
+        // every Liberation face below about 12 pt.
+        long gap = Math.Max(doubleHeight, 1 + (grid.Dpi / 150));
+        long firstOffset = underlineOffset - Math.Max(1, gap / 2) - doubleHeight;
+
+        // `mnIntLeading = mnAscent + mnDescent - mnHeight`, with no clamp at zero
+        // (fontmetric.cxx:543), and a strikeout sits a third of the ascent net of it above the
+        // baseline (:313). Negative, because this axis points down.
+        long internalLeading = ascent != 0 || rawDescent != 0 ? ascent + rawDescent - em : 0;
+        long strikeoutOffset = -((ascent - internalLeading) / 3);
+
+        long halfLine = Math.Max(1, lineHeight / 2);
+
+        return DoublePositions(
+            new RuleWidths(
+                grid.ToLength(lineHeight),
+                grid.ToLength(doubleHeight),
+                grid.ToLength(lineHeight),
+                Stroked(lineHeight, underlineOffset - halfLine, grid),
+                Stroked(lineHeight, strikeoutOffset - halfLine, grid)),
+            doubleHeight, firstOffset, firstOffset + gap + doubleHeight, grid);
+    }
+
+    /// <summary>
+    /// Where the two lines of a double underline are actually stroked, from the metric's own two
+    /// offsets in device pixels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>PDFWriterImpl::drawStraightTextLine</c> takes both offsets as the distance to the
+    /// <em>top</em> of the line and converts them to the stroke's centre, which is what a PDF
+    /// segment states. tdf#154235 does that by adding <c>nLineHeight / 2</c> — an integer division
+    /// on the device's pixels — to each (<c>pdfwriter_impl.cxx</c>:6741, :6751-6753); the second
+    /// line then has a whole further <c>nLineHeight</c> added when it is emitted (:6857). The
+    /// asymmetry is the reference's, not a misreading: measured on 84 double rules over a Writer
+    /// and a Calc rendering it is exact on all 84, and dropping the extra thickness makes every one
+    /// of them wrong.
+    /// </para>
+    /// <para>
+    /// A rule is filled here and stroked there (C16), so each centre is turned back into a top edge
+    /// by half the drawn thickness — which is half a logical unit, not a whole one, and is why
+    /// these are <see cref="Length"/> rather than a unit count.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// Where one line's top edge lands, from the metric's own offset in device pixels.
+    /// </summary>
+    /// <remarks>
+    /// <c>drawStraightTextLine</c> takes the offset as the distance to the line's <em>top</em> and
+    /// states the stroke's <em>centre</em>, adding <c>nLineHeight / 2</c> — an integer division on
+    /// the device's pixels, so it is not half the drawn thickness — before converting
+    /// (<c>pdfwriter_impl.cxx</c>:6741, :6751-6752). This tree fills the rule rather than stroking
+    /// it (C16), so the centre is turned back into a top edge by half the drawn thickness, which
+    /// is a different number again.
+    /// </remarks>
+    private static Length Stroked(long sizePixels, long offsetPixels, MetricGrid grid)
+        => grid.ToLength(offsetPixels + (sizePixels / 2)) - (grid.ToLength(sizePixels) / 2);
+
+    private static RuleWidths DoublePositions(
+        RuleWidths widths, long sizePixels, long firstPixels, long secondPixels, MetricGrid grid)
+    {
+        long centring = sizePixels / 2;
+        Length height = grid.ToLength(sizePixels);
+        Length half = height / 2;
+
+        return widths with
+        {
+            DoubleUnderlineFirst = grid.ToLength(firstPixels + centring) - half,
+            DoubleUnderlineSecond = grid.ToLength(secondPixels + centring) + height - half,
+        };
     }
 
     /// <summary>
