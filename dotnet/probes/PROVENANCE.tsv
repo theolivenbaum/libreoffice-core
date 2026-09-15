@@ -2473,3 +2473,5 @@ dotnet/probes/ww8toc-r130/TocProbe/Census.cs	2026-09-14	current	26.2.4.2	present
 dotnet/probes/ww8toc-r130/TocProbe/Toggles.cs	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/ww8toc-r130/results.md
 dotnet/probes/ww8toc-r130/TocProbe/Frames.cs	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/ww8toc-r130/results.md
 dotnet/probes/ww8toc-r130/TocProbe/TocProbe.csproj	2026-09-14	current	26.2.4.2	present	current	dotnet/probes/ww8toc-r130/results.md
+dotnet/probes/gate-r133/rows.tsv	2026-09-15	current	26.2.4.2	present	current	dotnet/probes/gate-r133/results.md
+dotnet/probes/gate-r133/results.md	2026-09-15	current	26.2.4.2	present	current	dotnet/probes/gate-r133/results.md
