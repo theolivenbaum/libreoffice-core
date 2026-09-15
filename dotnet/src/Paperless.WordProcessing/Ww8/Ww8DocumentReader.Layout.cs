@@ -674,7 +674,10 @@ public sealed partial class Ww8DocumentReader
         // Saved and restored around the walk, because a note or a text box is read from inside it and is
         // a story of its own — see `_indexResults`.
         IReadOnlyList<Ww8Range> outerIndexResults = _indexResults;
+        IReadOnlyList<Ww8Range> outerStrippedExceptions = _strippedExceptions;
         _indexResults = IndexResultRanges(text, body.Start, fieldTypes, fieldBase);
+        _strippedExceptions =
+            StrippedExceptionRanges(IndexFieldStarts(text, body.Start, fieldTypes, fieldBase));
 
         // Where each open field's cached result began, as an offset into the paragraph being built, or
         // −1 for a field whose separator has not been seen — and for one whose result began in an
@@ -1011,6 +1014,7 @@ public sealed partial class Ww8DocumentReader
             : assembler.Finished();
         SuppressAutoSpacing(finished);
         _indexResults = outerIndexResults;
+        _strippedExceptions = outerStrippedExceptions;
         return finished;
 
         // One paragraph, handed to the assembler with the properties of the mark that ended it — which is
@@ -1504,6 +1508,7 @@ public sealed partial class Ww8DocumentReader
                 (properties, cachedFrom, cachedTo) = _characterProperties.FindWithRange(byteOffset);
                 cached = true;
 
+                if (IsStrippedException(cachedFrom, cachedTo)) properties = default;
                 if (cachedTo <= cachedFrom) cachedTo = cachedFrom + 1;
             }
 
@@ -1549,6 +1554,11 @@ public sealed partial class Ww8DocumentReader
                 (properties, cachedFrom, cachedTo) =
                     _characterProperties.FindWithRange(byteOffset);
                 cached = true;
+
+                // The CHPX an index field's begin marker cuts short is not drawn — see
+                // `_strippedExceptions`. Applied where the run is looked up rather than where it is
+                // resolved, because "which run is this" is the question the rule is about.
+                if (IsStrippedException(cachedFrom, cachedTo)) properties = default;
 
                 // A table with no entry for this offset reports an empty range, which would make every
                 // character a fresh lookup. Treating the one character as the range stops that.
@@ -1979,8 +1989,19 @@ public sealed partial class Ww8DocumentReader
     private Ww8LayoutFormat ResolveCharacterLayout(int position)
         => ApplyCharacterException(
             CharacterStyleFormat(position),
-            _characterProperties.Find(_pieces.FileOffsetOf(position)),
+            CharacterExceptionAt(position),
             IsInIndexResult(position));
+
+    /// <summary>
+    /// The CHPX in force at a position, empty where the reference drops it.
+    /// </summary>
+    /// <remarks>See <c>_strippedExceptions</c>.</remarks>
+    private ReadOnlyMemory<byte> CharacterExceptionAt(int position)
+    {
+        (ReadOnlyMemory<byte> properties, int from, int to) =
+            _characterProperties.FindWithRange(_pieces.FileOffsetOf(position));
+        return IsStrippedException(from, to) ? default : properties;
+    }
 
     /// <summary>
     /// The cached results of the index fields in the story being walked, in character positions.
@@ -2012,6 +2033,105 @@ public sealed partial class Ww8DocumentReader
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The CHPX runs whose direct formatting 26.2.4.2 does not draw, in file offsets.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A character attribute still open where a <c>TOC</c> or <c>INDEX</c> field begins is lost.</strong>
+    /// <c>Read_F_Tox</c> inserts the index section and then moves the insertion point backwards into it —
+    /// <c>m_oPosAfterTOC.emplace(*m_pPaM, m_pPaM); (*m_pPaM).Move(fnMoveBackward);</c>
+    /// (<c>sw/source/filter/ww8/ww8par5.cxx</c>:3531-3533) — while every attribute of the CHPX that is
+    /// still open sits on <c>m_xCtrlStck</c>, so each closes at a position in a node that is not the one
+    /// it opened in and the range it would have covered is never set.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 rather than argued from the source</strong>, as a six-arm series over
+    /// <c>361400CSLegislation1RF01PUBLIC1.doc</c>, each arm one field of the file away from the original
+    /// and each read back through the binary's own <c>--convert-to fodt</c>. Its
+    /// <c>Table of Contents</c> heading is the CHPX at cp 141-158, fc 2189-2207, whose last character is
+    /// the paragraph mark and whose next character is the <c>TOC</c> field's <c>U+0013</c>:
+    /// </para>
+    /// <list type="table">
+    /// <item><description>as authored — <c>flt</c> 13, <c>sprmCKul</c> 1: <strong>no underline</strong>;</description></item>
+    /// <item><description><c>flt</c> 9, a type with no handler: underline drawn;</description></item>
+    /// <item><description><c>flt</c> 13, the run's end moved from fc 2207 to 2206 so it closes at the
+    /// paragraph mark instead of at the field: underline drawn;</description></item>
+    /// <item><description><c>flt</c> 13, <c>sprmCKul</c> replaced by <c>sprmCIco</c> 6: <strong>no colour</strong>
+    /// — so it is the CHPX that goes and not the underline;</description></item>
+    /// <item><description><c>flt</c> 9 with that same colour sprm: <c>fo:color="#ff0000"</c> drawn;</description></item>
+    /// <item><description><c>flt</c> 8 (<c>INDEX</c>, the other <c>Read_F_Tox</c> slot): <strong>no underline</strong>;
+    /// <c>flt</c> 3 (<c>REF</c>) and <c>flt</c> 88 (<c>HYPERLINK</c>): underline drawn.</description></item>
+    /// </list>
+    /// <para>
+    /// So the trigger is exactly the two field types that reach <c>Read_F_Tox</c> — the two
+    /// <see cref="IsIndexField"/> already names — and the boundary is the field's <em>begin</em> marker,
+    /// not its result. The paragraph style's own character half survives, because it is on the node's
+    /// format rather than on the control stack: the heading stays bold from <c>Block Text</c>.
+    /// </para>
+    /// <para>
+    /// This is a defect in the reference and it is reproduced deliberately, as <c>Read_CColl</c>'s
+    /// <c>Hyperlink</c> suppression is. <c>probes/ww8char-r135/results.md</c> §2.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<Ww8Range> _strippedExceptions = [];
+
+    /// <summary>True where a CHPX run is one whose direct formatting the reference drops.</summary>
+    private bool IsStrippedException(int from, int to)
+    {
+        for (int i = 0; i < _strippedExceptions.Count; i++)
+        {
+            Ww8Range range = _strippedExceptions[i];
+            if (range.Start == from && range.End == to) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The CHPX runs that end exactly where an index field begins.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the run's file offsets rather than on a character position, because that is what the
+    /// walk has in hand when it resolves a run and it is what makes the test one comparison.
+    /// </remarks>
+    private List<Ww8Range> StrippedExceptionRanges(List<int> indexFieldStarts)
+    {
+        List<Ww8Range> ranges = [];
+        foreach (int begin in indexFieldStarts)
+        {
+            if (begin <= 0) continue;
+
+            int beginOffset = _pieces.FileOffsetOf(begin);
+            (_, int from, int to) = _characterProperties.FindWithRange(_pieces.FileOffsetOf(begin - 1));
+            if (to > from && to == beginOffset) ranges.Add(new Ww8Range(from, to));
+        }
+
+        return ranges;
+    }
+
+    /// <summary>
+    /// The character positions of a story's <c>TOC</c> and <c>INDEX</c> field begin markers.
+    /// </summary>
+    /// <remarks>
+    /// Every one of them, nested included: each is a <c>Read_F_Tox</c> call, and it is the call that
+    /// moves the insertion point.
+    /// </remarks>
+    internal static List<int> IndexFieldStarts(
+        string text, int start, Ww8FieldTypes types, int fieldBase)
+    {
+        List<int> starts = [];
+        if (types.Count == 0) return starts;
+
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (text[index] != Special.FieldBegin) continue;
+            if (IsIndexField(types.At(start + index - fieldBase) ?? 0)) starts.Add(start + index);
+        }
+
+        return starts;
     }
 
     /// <summary>
@@ -2141,14 +2261,16 @@ public sealed partial class Ww8DocumentReader
         Ww8LayoutFormat own = ResolveCharacterLayout(position);
         if (position <= storyStart) return own;
 
-        ReadOnlyMemory<byte> before = _characterProperties.Find(_pieces.FileOffsetOf(position - 1));
+        ReadOnlyMemory<byte> before = CharacterExceptionAt(position - 1);
         if (before.IsEmpty) return own;
 
         bool inIndex = IsInIndexResult(position);
+        Ww8LayoutFormat fromParagraphStyle = CharacterStyleFormat(position);
         return ApplyCharacterException(
-            ApplyCharacterException(CharacterStyleFormat(position), before, inIndex),
-            _characterProperties.Find(_pieces.FileOffsetOf(position)),
-            inIndex);
+            ApplyCharacterException(fromParagraphStyle, before, inIndex, fromParagraphStyle),
+            CharacterExceptionAt(position),
+            inIndex,
+            fromParagraphStyle);
     }
 
     /// <summary>
@@ -2166,14 +2288,25 @@ public sealed partial class Ww8DocumentReader
     /// </para>
     /// </remarks>
     private Ww8LayoutFormat ApplyCharacterException(
-        Ww8LayoutFormat inherited, ReadOnlyMemory<byte> exception, bool inIndexResult = false)
+        Ww8LayoutFormat inherited,
+        ReadOnlyMemory<byte> exception,
+        bool inIndexResult = false,
+        Ww8LayoutFormat? paragraphStyle = null)
     {
         Ww8LayoutFormat format = inherited;
+        ushort? named = CharacterStyleNamedIn(exception);
+
+        // What this CHPX's toggle sprms are stated relative to: the style this same CHPX names,
+        // resolved on its own, and the paragraph style only when it names none. See
+        // <see cref="StyleToggleFormat"/>.
+        Ww8LayoutFormat toggleBase = named is { } toggleStyle
+            ? StyleToggleFormat(toggleStyle)
+            : paragraphStyle ?? inherited;
 
         // Index zero is not "no character style" — in WW8 the stylesheet is one table and istd 0 is
         // *Normal*, a paragraph style. Resolving its chain here would lay the document's default font size
         // over the paragraph style's own, so every run of an 11 pt paragraph would come out at 12.
-        if (CharacterStyleIndexIn(exception) is var styleIndex and not 0
+        if (named is { } styleIndex and not 0
             && !(inIndexResult && IsIndexLinkStyle(_styles, styleIndex)))
         {
             Colour? outer = format.Highlight;
@@ -2183,6 +2316,13 @@ public sealed partial class Ww8DocumentReader
                 format = ApplyLayoutSprms(format, fromStyle);
             }
 
+            // The style's own toggles were just resolved against the paragraph's value, and they are not
+            // stated relative to it: a character style's flags are settled when the style is read, against
+            // its *base* style alone. `toggleBase` is that resolution, so where the style states a toggle
+            // its answer replaces the one the layering produced, and where it states none the paragraph's
+            // shows through — which is what a character format that sets no weight item does.
+            format = WithStatedToggles(format, toggleBase);
+
             // Word ignores character highlighting in a *character* style, and only there — a paragraph
             // style's CHPX carries it as it carries everything else. `SwWW8ImplReader::Read_CharHighlight`
             // says so in its first two lines (`ww8par6.cxx`:4237): it returns without reading the operand
@@ -2190,7 +2330,89 @@ public sealed partial class Ww8DocumentReader
             format = format with { Highlight = outer };
         }
 
-        return ApplyLayoutSprms(format, exception);
+        return ApplyLayoutSprms(format, exception, toggleBase);
+    }
+
+    /// <summary>
+    /// The seven toggle attributes a style resolves to on its own, as LibreOffice's
+    /// <c>m_n81Flags</c> holds them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A WW8 toggle sprm's "as the style" and "against the style" operands are relative to one
+    /// style, and that style is the one the same CHPX names — never the value the paragraph resolved
+    /// to.</strong> <c>SwWW8ImplReader::Read_BoldUsw</c> (<c>sw/source/filter/ww8/ww8par6.cxx</c>:3117-3156)
+    /// starts at <c>pSI = GetStyle(m_nCurrentColl)</c>, the paragraph style, and then
+    /// <em>replaces it outright</em> when the CHPX being read carries a <c>sprmCIstd</c>:
+    /// <c>if (aCharIstd.pSprm &amp;&amp; aCharIstd.nRemainingData >= 2) pSI = GetStyle(...)</c>. Only
+    /// then does <c>if (*pData &amp; 0x80) { if (pSI->m_n81Flags &amp; nMask) bOn = !bOn; }</c> decide the
+    /// value. It asks that question whatever else happens to the style — <c>Read_CColl</c> may have
+    /// declined to apply it at all, which is the case inside an index's cached result.
+    /// </para>
+    /// <para>
+    /// <c>m_n81Flags</c> is seeded from the base style — <c>rSI.m_n81Flags = pj->m_n81Flags</c>
+    /// (<c>ww8par2.cxx</c>:3825) — and then set or cleared by each toggle sprm in the style's own CHPX,
+    /// so it is exactly this chain walked from nothing. A style that states no weight at all therefore
+    /// answers <em>not bold</em>, not "whatever the paragraph is", and that is the whole of the defect:
+    /// <c>150_5335_5a.doc</c>'s contents entries name <c>Hyperlink</c>, which states no weight, so
+    /// <c>sprmCFBold</c> 0x81 over it is bold where the same operand over the <c>TOC 3</c> paragraph
+    /// style, which is itself bold, is regular.
+    /// </para>
+    /// <para>
+    /// An index the stylesheet has no style for answers all-clear, as <c>GetStyle</c>'s null does.
+    /// </para>
+    /// <para>
+    /// Memoised: the walk asks this once per character, and a document has a handful of styles.
+    /// </para>
+    /// </remarks>
+    private Ww8LayoutFormat StyleToggleFormat(ushort styleIndex)
+    {
+        if (_styleToggleFlags.TryGetValue(styleIndex, out Ww8LayoutFormat cached)) return cached;
+
+        Ww8LayoutFormat flags = default;
+        foreach (ReadOnlyMemory<byte> fromStyle in _styles.ResolveCharacterChain(styleIndex))
+        {
+            flags = ApplyLayoutSprms(flags, fromStyle);
+        }
+
+        _styleToggleFlags[styleIndex] = flags;
+        return flags;
+    }
+
+    private readonly Dictionary<ushort, Ww8LayoutFormat> _styleToggleFlags = [];
+
+    /// <summary>
+    /// Replaces the toggle attributes of one format with a style's own, where the style states them.
+    /// </summary>
+    private static Ww8LayoutFormat WithStatedToggles(Ww8LayoutFormat format, Ww8LayoutFormat stated)
+        => format with
+        {
+            IsBold = stated.IsBold ?? format.IsBold,
+            IsItalic = stated.IsItalic ?? format.IsItalic,
+            IsSmallCapitalised = stated.IsSmallCapitalised ?? format.IsSmallCapitalised,
+            IsCapitalised = stated.IsCapitalised ?? format.IsCapitalised,
+            IsStruckThrough = stated.IsStruckThrough ?? format.IsStruckThrough,
+            IsHiddenText = stated.IsHiddenText ?? format.IsHiddenText,
+        };
+
+    /// <summary>
+    /// The character style index a grpprl names, or null when it carries no <c>sprmCIstd</c> at all.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <c>CharacterStyleIndexIn</c>'s "zero means none": <c>Read_BoldUsw</c> tests whether
+    /// the sprm is <em>present</em> and hands its operand to <c>GetStyle</c> unfiltered, so a CHPX naming
+    /// istd 0 states <em>Normal</em> as its toggle base rather than falling back to the paragraph's.
+    /// Only the style <em>layer</em> skips zero, and it skips it because <c>Read_CColl</c> ignores every
+    /// paragraph style (<c>ww8par6.cxx</c>:4145-4148).
+    /// </remarks>
+    private static ushort? CharacterStyleNamedIn(ReadOnlyMemory<byte> grpprl)
+    {
+        foreach (Ww8Sprm sprm in Ww8SprmReader.Read(grpprl))
+        {
+            if (sprm.Identifier == Ww8SprmReader.Ids.CharacterStyle) return sprm.Word;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -2256,8 +2478,9 @@ public sealed partial class Ww8DocumentReader
     /// any version of Word may carry either and they are different numbers.
     /// </remarks>
     private Ww8LayoutFormat ApplyLayoutSprms(
-        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl)
-        => ApplyLayoutSprms(format, grpprl, DocumentProperties);
+        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl,
+        Ww8LayoutFormat? toggleBase = null)
+        => ApplyLayoutSprms(format, grpprl, DocumentProperties, toggleBase);
 
     /// <summary>
     /// The same walk with the document's properties passed rather than read off the reader.
@@ -2269,8 +2492,16 @@ public sealed partial class Ww8DocumentReader
     /// tested. See <c>Ww8CharacterSprmTests</c>.
     /// </remarks>
     internal static Ww8LayoutFormat ApplyLayoutSprms(
-        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl, Ww8DocumentProperties properties)
+        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl, Ww8DocumentProperties properties,
+        Ww8LayoutFormat? toggleBase = null)
     {
+        // What the seven toggle sprms' "as the style" and "against the style" operands are stated
+        // relative to. `SwWW8ImplReader::Read_BoldUsw` (`ww8par6.cxx`:3117-3156) reads it out of one
+        // style's `m_n81Flags` and never out of the value it is layering onto, so a caller that knows
+        // which style that is passes it here; with none, the accumulated value stands in, which is
+        // what a style chain's own sprms resolve against.
+        Ww8LayoutFormat toggles = toggleBase ?? format;
+
         // What `sprmPFDyaBeforeAuto` and `sprmPFDyaAfterAuto` stand for in this document. Fourteen
         // points ordinarily and five when the document switched HTML auto-spacing off, which is the
         // whole of `SwWW8ImplReader::GetParagraphAutoSpace` (`ww8par6.cxx:4609`).
@@ -2315,7 +2546,7 @@ public sealed partial class Ww8DocumentReader
                 case Ww8SprmReader.Ids.Vanish:
                     format = format with
                     {
-                        IsHiddenText = sprm.ResolveToggle(format.IsHiddenText ?? false),
+                        IsHiddenText = sprm.ResolveToggle(toggles.IsHiddenText ?? false),
                     };
                     continue;
 
@@ -2498,25 +2729,25 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.Bold:
                     format = format with
                     {
-                        IsBold = sprm.ResolveToggle(format.IsBold ?? false),
+                        IsBold = sprm.ResolveToggle(toggles.IsBold ?? false),
                     };
                     break;
                 case LayoutSprms.Italic:
                     format = format with
                     {
-                        IsItalic = sprm.ResolveToggle(format.IsItalic ?? false),
+                        IsItalic = sprm.ResolveToggle(toggles.IsItalic ?? false),
                     };
                     break;
                 case LayoutSprms.SmallCaps:
                     format = format with
                     {
-                        IsSmallCapitalised = sprm.ResolveToggle(format.IsSmallCapitalised ?? false),
+                        IsSmallCapitalised = sprm.ResolveToggle(toggles.IsSmallCapitalised ?? false),
                     };
                     break;
                 case LayoutSprms.Caps:
                     format = format with
                     {
-                        IsCapitalised = sprm.ResolveToggle(format.IsCapitalised ?? false),
+                        IsCapitalised = sprm.ResolveToggle(toggles.IsCapitalised ?? false),
                     };
                     break;
 
@@ -2526,13 +2757,13 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.Strike:
                     format = format with
                     {
-                        IsStruckThrough = sprm.ResolveToggle(format.IsStruckThrough ?? false),
+                        IsStruckThrough = sprm.ResolveToggle(toggles.IsStruckThrough ?? false),
                     };
                     break;
                 case LayoutSprms.DoubleStrike:
                     format = format with
                     {
-                        IsStruckThrough = sprm.ResolveToggle(format.IsStruckThrough ?? false),
+                        IsStruckThrough = sprm.ResolveToggle(toggles.IsStruckThrough ?? false),
                     };
                     break;
 
