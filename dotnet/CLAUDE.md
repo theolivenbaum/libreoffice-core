@@ -3416,6 +3416,23 @@ It is resumable, records the binary version in its header, and was validated aga
 independent known answer before use — reference page counts against `ppt/slides/slideN.xml`
 counts taken from the zip, 4 of 4 exact.
 
+### A corpus document whose page number never changes is O88, and the ODF copy agrees for the wrong reason
+
+26.2.4.2 does not import a field that sits in a text box inside a `wpg:wgp` group anchored in a
+table cell: it keeps the field's cached result as ordinary text. On the two words-track documents
+that carry that structure the footer prints one constant page number on every page —
+`Page 6 of 7` on all seven of `A1. EASA Form 2.docx`, `Page 3 of 6` on all six of
+`B11. TE.CAO.00129  Experience  logbook.docx` — and **ours counting 1..N is the right answer**.
+Established both ways on mutated corpus documents and on a 2×2 synthetic factorial, and present
+in 24.2.7.2 as well, so it is not a version artefact. `probes/pagefield-r137`, seat **O88**.
+
+Two traps follow. **The gate cannot see it**: a frozen page number has the same glyph count as a
+counted one, so both documents are `match` rows and always will be. And **`/home/user/corpus-odf`
+carries the defect forward** — those `.odt` were written by 26.2.4.2's own exporter from the
+already-broken import, so they hold the frozen string and no field, and an ODF-track comparison on
+them agrees with us because both sides are reading the same wrong text. Agreement on a converted
+file is not evidence about the construct that the conversion destroyed.
+
 ## Research notes
 
 Written from a deep read of the C++ implementation. Consult the relevant one *before*
