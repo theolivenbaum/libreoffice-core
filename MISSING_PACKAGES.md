@@ -8,6 +8,71 @@ breakage presented — because in every case so far the symptom looked like some
 apt-get update && apt-get install -y fonts-dejavu-core
 ```
 
+That list was wrong, and the way it was wrong is the point: it recorded the one package a
+*test failure* pointed at, and missed everything whose absence produces no failure at all.
+
+A container rebuild on 2026-09-16 came up with the dotnet tree building cleanly, 0 warnings, and
+the whole reference toolchain gone:
+
+| what | state after rebuild | how the absence presented |
+|---|---|---|
+| `/opt/libreoffice26.2/program/soffice` | **absent** | `timeout: failed to run command … No such file or directory`, exit status **0** |
+| `poppler-utils` (`pdfinfo`, `pdftotext`, `pdftoppm`) | absent | `pdfinfo: command not found`, and an empty page count that reads as a broken PDF |
+| `pymupdf`, `pillow` | absent | a probe script fails on import, or silently returns nothing |
+| `fonts-dejavu-core` | present this time | — |
+| `/usr/bin/soffice` | **present, 24.2.7.2** | this is the trap, see below |
+
+**The dangerous one is the third row of that table combined with the last.** With
+`/opt/libreoffice26.2` gone, `/usr/bin/soffice` still answers, still converts, still produces a
+plausible PDF — and it is **24.2.7.2**, a different renderer whose output this project has
+measured to differ from the reference on page counts, word counts and font fallback. A script
+that falls back to `soffice` on `$PATH`, or a person who types it from memory, gets a complete,
+confident, wrong reference half with nothing anywhere reporting a problem. **Check the version,
+not the existence.**
+
+Two failure modes made this worse than it needed to be:
+
+- **`timeout` exits 0 when the command does not exist.** `timeout 300 /opt/…/soffice … ; echo $?`
+  printed `exit=0`. A conversion loop testing `$?` concludes every document converted.
+- **A raw-bytes `grep` for `/Im1 Do` in a PDF finds nothing even when the image is drawn**, because
+  content streams are Flate-compressed. It returned 0 for the reference *and* for us, which looks
+  like agreement. Inflate the streams — `zlib.decompress` per `stream…endstream` — or use the
+  project's own `pdf-ops.py`. This is the same class as the pikepdf incident: an instrument that
+  is not installed, or not reading the right layer, reports absence rather than failure.
+
+### Restoring the reference
+
+The exact build is archived and the download works through the proxy:
+
+```sh
+curl -O https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.4.2/deb/x86_64/LibreOffice_26.2.4.2_Linux_x86-64_deb.tar.gz
+tar xzf LibreOffice_26.2.4.2_Linux_x86-64_deb.tar.gz
+cd LibreOffice_26.2.4.2_Linux_x86-64_deb/DEBS
+mkdir -p /tmp/stage && for d in *.deb; do dpkg-deb -x "$d" /tmp/stage; done
+rm -rf /opt/libreoffice26.2 && mv /tmp/stage/opt/libreoffice26.2 /opt/
+apt-get update && apt-get install -y poppler-utils fonts-dejavu-core
+pip install pymupdf pillow
+```
+
+Extract with `dpkg-deb -x` rather than `dpkg -i`: the debs also install a `/usr/bin` launcher, and
+overwriting the 24.2.7.2 there would destroy the one control this project has for telling a 26.2
+behaviour apart from a long-standing one.
+
+### The check to run at the start of every session
+
+```sh
+/opt/libreoffice26.2/program/soffice --version   # must end 0229ac93fcf0d7cbc6376066c6f35021cef002dc
+fc-match "DejaVu Sans"                           # must say DejaVuSans.ttf, not wqy-zenhei.ttc
+pdfinfo -v 2>&1 | head -1                        # must exist
+python3 -c "import pymupdf, PIL"                 # must not raise
+```
+
+The version line's trailing hex **is** the identifier this project records as the reference's hash.
+It is LibreOffice's own build id, printed by `--version` — it is not a `sha1sum` of the binary, and
+checking it with `sha1sum` gives a different number and a false alarm.
+
+---
+
 That is the whole list at present. It is short and it is not trivial.
 
 **Re-check it every session — the install does not survive.** This was installed and written
