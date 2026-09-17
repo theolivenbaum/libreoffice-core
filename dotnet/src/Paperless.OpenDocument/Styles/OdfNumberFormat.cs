@@ -248,8 +248,17 @@ public static class OdfNumberFormat
             // A literal. ODF writes the per cent sign, the currency symbol and every separator as
             // one of these, so quoting is what keeps a stray "d" or "m" in a suffix out of the
             // date vocabulary.
-            case "text" or "currency-symbol": Literal(code, piece.Value, kind); break;
+            case "text" or "currency-symbol": Literal(code, piece.Value, kind, BlankWidth(piece)); break;
             case "text-content": code.Append('@'); break;
+
+            // "Repeat the next character until the column is full", which is the `*` directive.
+            // The element's content is the character and `AddToCode` takes its first only
+            // (`xmlnumfi.cxx`:1007-1013); every one of the corpus's 4143 is a space, which is
+            // what puts an accounting format's currency symbol against the left edge of the cell
+            // and its digits against the right.
+            case "fill-character":
+                if (piece.Value is { Length: > 0 } fill) code.Append('*').Append(fill[0]);
+                break;
 
             case "year": code.Append(Long(piece) ? "YYYY" : "YY"); break;
             case "month":
@@ -288,11 +297,23 @@ public static class OdfNumberFormat
         int minimum = Integer(piece, "min-decimal-places") ?? decimals;
         bool grouping = Flag(piece, "grouping") == true;
 
+        // `?` is a digit placeholder that draws a blank rather than a zero, and it is how an
+        // accounting format keeps its zero row's columns aligned. ODF states how many of the
+        // integer digits are blank ones in a *count* rather than by writing them
+        // (`max-blank-integer-digits`, in either namespace), and the minimum integer width is
+        // raised to at least that count (`xmlnumfi.cxx`:681-684 and :801-802).
+        int blanks = Math.Max(Integer(piece, "max-blank-integer-digits", OdfNamespaces.LoExt) ?? 0, 0);
+        if (blanks > integers) integers = blanks;
+
         // The integer part is grouped by writing the group separator into it, which is what the
         // format-code language means by "#,##0": one hash-comma-hash-hash before the digits.
         if (grouping) code.Append("#,##");
 
-        code.Append(integers <= 0 ? "#" : new string('0', integers));
+        // The reference builds the digits and then rewrites the first `blanks` of the zeros in
+        // the integer part (`:1828-1844`), which is the same thing said the other way round.
+        code.Append(integers <= 0
+            ? "#"
+            : new string('?', Math.Min(blanks, integers)) + new string('0', integers - Math.Min(blanks, integers)));
 
         if (decimals <= 0) return;
 
@@ -357,11 +378,19 @@ public static class OdfNumberFormat
     /// the sign rather than over it (<c>:552-587</c>).
     /// </para>
     /// </remarks>
-    private static void Literal(StringBuilder code, string? text, string kind)
+    private static void Literal(StringBuilder code, string? text, string kind, string? blankWidth)
     {
         if (text is not { Length: > 0 } literal) return;
 
-        if (!NeedsQuotes(literal, kind))
+        // `lcl_EnquoteIfNecessary`'s first branch is guarded on the blank-width string being
+        // empty (`xmlnumfi.cxx`:539, tdf#170670), so a literal carrying one is ALWAYS quoted —
+        // the insertion below works on positions inside a quoted string and there has to be a
+        // quote for it to step out of.
+        bool blanks = blankWidth is { Length: > 0 };
+
+        StringBuilder part = blanks ? new StringBuilder() : code;
+
+        if (!blanks && !NeedsQuotes(literal, kind))
         {
             code.Append(literal);
             return;
@@ -371,7 +400,8 @@ public static class OdfNumberFormat
 
         if (sign < 0)
         {
-            Quote(code, literal);
+            Quote(part, literal);
+            if (blanks) Blanks(part, blankWidth!, code);
             return;
         }
 
@@ -380,17 +410,162 @@ public static class OdfNumberFormat
         // bare, so that " %" compiles to " %" rather than to "\" \"%".
         if (sign > 0)
         {
-            if (sign == 1 && Bare(literal[0], kind)) code.Append(literal[0]);
-            else Quote(code, literal[..sign]);
+            if (sign == 1 && Bare(literal[0], kind)) part.Append(literal[0]);
+            else Quote(part, literal[..sign]);
         }
 
-        code.Append('%');
+        part.Append('%');
 
-        if (sign + 1 >= literal.Length) return;
+        if (sign + 1 < literal.Length)
+        {
+            if (sign + 2 == literal.Length && Bare(literal[sign + 1], kind))
+                part.Append(literal[sign + 1]);
+            else
+                Quote(part, literal[(sign + 1)..]);
+        }
 
-        if (sign + 2 == literal.Length && Bare(literal[sign + 1], kind)) code.Append(literal[sign + 1]);
-        else Quote(code, literal[(sign + 1)..]);
+        if (blanks) Blanks(part, blankWidth!, code);
     }
+
+    /// <summary>The <c>blank-width-char</c> an element states, in either namespace, or null.</summary>
+    /// <remarks>
+    /// LibreOffice writes it as <c>loext:</c> and reads both spellings
+    /// (<c>xmlnumfi.cxx</c>:460-463 and :793-796) — the same shape as the four other attributes
+    /// this project has met whose exported namespace is not the one the specification names. All
+    /// 11 816 occurrences in the converted corpus are <c>loext:</c>.
+    /// </remarks>
+    private static string? BlankWidth(XElement piece)
+        => piece.Attribute(XName.Get("blank-width-char", OdfNamespaces.LoExt))?.Value
+           ?? piece.Attribute(XName.Get("blank-width-char", OdfNamespaces.Number))?.Value;
+
+    /// <summary>
+    /// Rewrites a quoted literal so that the blanks standing in for an <c>_x</c> directive become
+    /// the directive again, and appends the result.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>_x</c> means "leave the width of <c>x</c> blank", and ODF has no directive for it: the
+    /// exporter writes the *spaces* into a <c>number:text</c> and records what they stood for in
+    /// <c>blank-width-char</c>. So the accounting format <c>_(* #,##0_)</c> comes back as
+    /// <c>&lt;number:text loext:blank-width-char="("&gt; &lt;/number:text&gt;</c>, a
+    /// <c>number:fill-character</c>, the number, and a second text with <c>")"</c> — and a reader
+    /// that takes the element's text at face value compiles a literal space where the reference
+    /// compiles a blank the width of a bracket.
+    /// </para>
+    /// <para>
+    /// This is <c>lcl_InsertBlankWidthChars</c> (<c>xmlnumfi.cxx</c>:879-926), followed exactly,
+    /// because its arithmetic is positional and an approximation of it lands the directive in the
+    /// wrong place. The attribute is a sequence of <c>&lt;char&gt;[&lt;position&gt;]</c> groups
+    /// separated by <c>_</c>; the position defaults to zero and is counted in the *unquoted*
+    /// text, which is why the running <c>shift</c> starts at one and grows by the quotes each
+    /// insertion adds. The corpus states 19 distinct values, from a bare <c>)</c> to
+    /// <c>F1_t3_-4</c>.
+    /// </para>
+    /// <para>
+    /// <strong>How many characters a blank replaces is the character's own width</strong>, from
+    /// <c>SvNumberformat::InsertBlanks</c> and its <c>cCharWidths</c> table
+    /// (<c>svl/source/numbers/zformat.cxx</c>:71-105). Counting one space instead is right for
+    /// every value in this corpus but <c>€</c>, which is above ASCII and therefore two.
+    /// </para>
+    /// <para>
+    /// The <em>renderer</em> makes its own, separate choice about how wide to draw an <c>_x</c>,
+    /// and <see cref="Core.Numbers.NumberFormatSection"/> records why it draws one space.
+    /// </para>
+    /// </remarks>
+    /// <param name="part">The quoted literal, rewritten in place.</param>
+    /// <param name="spec">The attribute's value.</param>
+    /// <param name="code">Where the result is appended.</param>
+    private static void Blanks(StringBuilder part, string spec, StringBuilder code)
+    {
+        int shift = 1;   // the content starts with a quote
+
+        for (int i = 0; i < spec.Length; i++)
+        {
+            char which = spec[i];
+            int blanks = BlankCount(which);
+
+            int stated = 0;
+            if (++i < spec.Length)
+            {
+                int next = spec.IndexOf('_', i);
+                if (i < next)
+                {
+                    stated = Position(spec[i..next]);
+                    i = next;
+                }
+                else
+                {
+                    // `i` is deliberately not advanced here, exactly as the reference leaves it:
+                    // a position of more than one digit therefore re-reads its own second digit
+                    // as the next group's character. No corpus value states one.
+                    stated = Position(spec[i..]);
+                }
+            }
+
+            int position = stated + shift;
+            if (position < 0 || position > part.Length) continue;
+
+            part.Remove(position, Math.Min(blanks, part.Length - position));
+
+            if (position >= 1 && part[position - 1] == '"')
+            {
+                position--;
+                part.Insert(position, which);
+                part.Insert(position, '_');
+            }
+            else
+            {
+                part.Insert(position, '"');
+                part.Insert(position, which);
+                part.Insert(position, "\"_");
+                shift += 2;
+            }
+
+            shift += 2 - blanks;
+        }
+
+        // An empty string left at the end is removed, so that `" "` with one blank comes out as
+        // `_)` rather than as `_)""`.
+        int length = part.Length;
+        if (length >= 3 && part[length - 1] == '"' && part[length - 2] == '"'
+            && part[length - 3] != '\\')
+        {
+            part.Length = length - 2;
+        }
+
+        code.Append(part);
+    }
+
+    /// <summary>A stated position, or zero — which is <c>o3tl::toInt32</c>'s answer for text that
+    /// is not a number, and the default when a group states none.</summary>
+    private static int Position(string text)
+        => int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+            ? parsed
+            : 0;
+
+    /// <summary>How many spaces stand in for one character's width.</summary>
+    /// <remarks>
+    /// <c>cCharWidths</c>, <c>svl/source/numbers/zformat.cxx</c>:71-87, indexed from the space.
+    /// Anything above ASCII is two — the table's own comment calls that a hack — and anything
+    /// below the space contributes nothing.
+    /// </remarks>
+    private static int BlankCount(char character)
+    {
+        if (character < ' ') return 0;
+        if (character > (char)127) return 2;
+
+        return CharacterWidths[character - ' '];
+    }
+
+    private static ReadOnlySpan<byte> CharacterWidths =>
+    [
+        1, 1, 1, 2, 2, 3, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1,
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2,
+        3, 2, 2, 2, 2, 2, 2, 3, 2, 1, 2, 2, 2, 3, 3, 3,
+        2, 3, 2, 2, 2, 2, 2, 3, 2, 2, 2, 1, 1, 1, 2, 2,
+        1, 2, 2, 2, 2, 2, 1, 2, 2, 1, 1, 2, 1, 3, 2, 2,
+        2, 2, 1, 2, 1, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 1,
+    ];
 
     /// <summary>Whether a literal has to be quoted at all.</summary>
     private static bool NeedsQuotes(string text, string kind)
@@ -462,9 +637,12 @@ public static class OdfNumberFormat
             _ => null,
         };
 
-    private static int? Integer(XElement piece, string name)
+    /// <summary>An integer attribute, read from the <c>number:</c> namespace and optionally from
+    /// a second one the exporter may have used instead.</summary>
+    private static int? Integer(XElement piece, string name, string? alternative = null)
         => int.TryParse(
-            piece.Attribute(XName.Get(name, OdfNamespaces.Number))?.Value,
+            piece.Attribute(XName.Get(name, OdfNamespaces.Number))?.Value
+            ?? (alternative is null ? null : piece.Attribute(XName.Get(name, alternative))?.Value),
             NumberStyles.Integer,
             CultureInfo.InvariantCulture,
             out int parsed)

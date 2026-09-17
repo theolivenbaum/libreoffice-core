@@ -254,17 +254,13 @@ public class OdfNumberFormatSectionsTests
         => Code(name).ShouldBe(expected);
 
     [Fact]
-    public void TheAccountingFormatsSHAPEAgreesAndItsPaddingDirectivesDoNot()
+    public void TheAccountingFormatIsTheReferencesOwnCodeToo()
     {
-        // 26.2.4.2 assembles this one as
-        //     [>0]_(* #,##0_);[<0]_(* (#,##0);_(* "-"_);_(@_)
-        // so the section structure is reproduced exactly — three conditions with the last bare,
-        // and the text-style owner's own body last. What is not reproduced is `_` and `*`:
-        // `number:fill-character` reaches no branch of `Append` and `loext:blank-width-char` is
-        // unread, so each becomes the literal space the element carries. Both are padding, so the
-        // drawn characters are right and their spacing is not; seated separately rather than
-        // folded into this round.
-        Code("N144").ShouldBe("[>0]\" \"#,##0\" \";[<0]\" \"(#,##0);\" \"- ;\" \"@\" \"");
+        // 26.2.4.2's own `sdnum` for this style, and the hardest of the six: three conditions
+        // with the last bare, a `number:text-style` owner whose body is the text section, an
+        // `*` fill character, and four `_x` blanks reconstructed from `blank-width-char`
+        // attributes and the spaces the exporter wrote in their place.
+        Code("N144").ShouldBe("""[>0]_(* #,##0_);[<0]_(* (#,##0);_(* "-"_);_(@_)""");
     }
 
     [Fact]

@@ -2159,3 +2159,12 @@ dotnet/probes/odfnumfmt-r141/o98-narrow-fixture.py	2026-09-17	current	26.2.4.2	p
 dotnet/probes/odfnumfmt-r141/o98-wrap-fixture.py	2026-09-17	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/odfnumfmt-r141/o98-wrapbig-fixture.py	2026-09-17	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/odfnumfmt-r141/o98-wrap-census.tsv	2026-09-17	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/odfpad-r142/results.md	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/make-fixture.py	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/reference-sdnum.tsv	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/movers.tsv	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/invoice-bands.py	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/fingerprints-before.txt	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/fingerprints-after.txt	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/par-sweep.sh	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
+dotnet/probes/odfpad-r142/movers.txt	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.OpenDocument/Styles/OdfNumberFormat.cs;dotnet/tests/Paperless.OpenDocument.Tests/OdfNumberFormatPaddingTests.cs
