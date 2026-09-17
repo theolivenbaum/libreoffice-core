@@ -2403,3 +2403,8 @@ dotnet/probes/tablerow-r146/sweep.tsv	2026-09-17	current	26.2.4.2	present	curren
 dotnet/probes/dotnet/src/Paperless.WordProcessing/Ooxml/DocxVmlFrames.cs;dotnet/tests/Paperless.WordProcessing.Tests/VmlLineExtentTests.cs	2026-09-17	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/tablerow-r146/words-paths.txt	2026-09-17	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/dotnet/src/Paperless.WordProcessing/Ooxml/DocxVmlFrames.cs;dotnet/tests/Paperless.WordProcessing.Tests/VmlLineExtentTests.cs	2026-09-17	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tbalign-r147/diff-legs.py	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/PageDrawing.cs;dotnet/tests/Paperless.WordProcessing.Tests/TableBorderTopAlignmentTests.cs
+dotnet/probes/tbalign-r147/mixed-lines.py	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/PageDrawing.cs;dotnet/tests/Paperless.WordProcessing.Tests/TableBorderTopAlignmentTests.cs
+dotnet/probes/tbalign-r147/results.md	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/PageDrawing.cs;dotnet/tests/Paperless.WordProcessing.Tests/TableBorderTopAlignmentTests.cs
+dotnet/probes/tbalign-r147/sweep-words.txt	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/PageDrawing.cs;dotnet/tests/Paperless.WordProcessing.Tests/TableBorderTopAlignmentTests.cs
+dotnet/probes/tbalign-r147/sweep.log	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/PageDrawing.cs;dotnet/tests/Paperless.WordProcessing.Tests/TableBorderTopAlignmentTests.cs

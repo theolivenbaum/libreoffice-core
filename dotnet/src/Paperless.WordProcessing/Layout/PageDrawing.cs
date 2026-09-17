@@ -767,21 +767,44 @@ public static class PageDrawing
         List<Edge> edges = Edges(table);
         if (table.Table.JoinsBordersLikeWord) edges = WithWordJoins(edges);
 
+        // How wide the widest band at each horizontal grid line is, which is what decides where all of
+        // that line's bands begin. See the remark on `WidestAt`.
+        Dictionary<long, Length> widest = WidestAt(edges);
+
         foreach (Edge edge in edges)
         {
             // The stated width is the whole rule's, so a double's two strokes are drawn inside it — one
-            // against each edge of the band the grid line is the middle of. See `BorderRules`.
+            // against each edge of the band. See `BorderRules`.
             BorderBands bands = edge.Border.Bands;
             IReadOnlyList<Length>? dashes = BorderRules.Dashes(edge.Border.Line);
             Length half = edge.Border.Width / 2;
             Length from = edge.From - half;
             Length to = edge.To + half;
 
-            Rule((bands.Outer / 2) - half, bands.Outer);
-            if (bands.HasTwoRules) Rule(half - (bands.Inner / 2), bands.Inner);
+            // Where this band's top edge sits, relative to the grid line. A vertical border is centred
+            // on its line; a horizontal one shares its top edge with every other band on the same line,
+            // and that shared edge is the top of the widest of them.
+            //
+            // The two are written as separate expressions rather than as one parameterised by `top`,
+            // and that is not tidiness: `Length`'s division ROUNDS (`operator /`, `Length.cs`:140), so
+            // `half - Inner/2` and `-half + Width - Inner/2` — the same arithmetic re-associated —
+            // differ by one EMU whenever the width is an odd number of them. Written as one expression
+            // this round moved a doubled *vertical* border on `150_5300_13_chg12.doc` by 0.0001 pt,
+            // which it has no business touching at all; the confinement sweep is what caught it.
+            if (edge.IsHorizontal)
+            {
+                Length top = -(widest.GetValueOrDefault(edge.At.Twips, edge.Border.Width) / 2);
 
-            // `offset` is where the stroke's own centre sits relative to the grid line: nought for a
-            // single rule, since its width is the band's, and against each edge of the band for a double.
+                Rule(top + (bands.Outer / 2), bands.Outer);
+                if (bands.HasTwoRules) Rule(top + edge.Border.Width - (bands.Inner / 2), bands.Inner);
+            }
+            else
+            {
+                Rule((bands.Outer / 2) - half, bands.Outer);
+                if (bands.HasTwoRules) Rule(half - (bands.Inner / 2), bands.Inner);
+            }
+
+            // `offset` is where the stroke's own centre sits relative to the grid line.
             void Rule(Length offset, Length thick)
             {
                 if (thick <= Length.Zero) return;
@@ -801,6 +824,59 @@ public static class PageDrawing
                 sink.StrokePath(path, stroke);
             }
         }
+    }
+
+    /// <summary>
+    /// The widest horizontal band at each grid line, by that line's own twip.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A horizontal table border hangs downwards from the row boundary; it is not centred on
+    /// it.</strong> <c>SwTabFramePainter::Insert</c> (<c>sw/source/core/layout/paintfrm.cxx</c>:3061-3064)
+    /// sets <c>RefMode::Begin</c> on the two horizontal borders and <c>RefMode::Centered</c> on the two
+    /// vertical ones, and <c>Begin</c> is documented as <em>"horizontal lines are drawn below the
+    /// reference points"</em> (<c>include/svx/framelink.hxx</c>:40-45), implemented as
+    /// <c>mfRefModeOffset = +width/2</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Which is invisible until one boundary carries two widths, and that is the whole of this
+    /// change.</strong> This tree charges half of a row boundary's border to each of the two rows, so
+    /// its grid line sits in the middle of the band the reference hangs below the boundary — and for a
+    /// boundary of one width those two descriptions put the ink in exactly the same place. Where the
+    /// columns differ they do not: the reference gives every band the <em>same</em> top edge, the top of
+    /// the widest, and this tree centred each on its own. Measured at 26.2.4.2 on three columns stating
+    /// 0.5, 3.0 and 1.5 pt across one boundary: the bands are <c>95.001..95.501</c>,
+    /// <c>95.001..98.001</c> and <c>95.001..96.501</c> — one shared top, three different bottoms — and
+    /// moving the statement to the other side of the boundary changes nothing.
+    /// </para>
+    /// <para>
+    /// So the offset is taken from the widest band on the line rather than from each band's own width,
+    /// which leaves a single-width boundary exactly where it was. <strong>Reach: 49 of the 337 words
+    /// documents and 770 boundaries, 21 % of the per-column boundaries the reference draws.</strong>
+    /// </para>
+    /// <para>
+    /// <strong>What this does NOT fix, deliberately.</strong> The <em>height</em> half of the same rule
+    /// — the row below pays for the whole band and the row above pays nothing — is seat O84 and moves
+    /// page counts, and the two rules at a page cut are O83. Both need the layout rather than the
+    /// painter. <c>probes/tablerow-r146/results.md</c> has the closed form for each and the one measured
+    /// exception: a border <em>copied</em> across a cut by <c>InsertFollowTopBorder</c> really is drawn
+    /// centred and really does charge no height.
+    /// </para>
+    /// </remarks>
+    private static Dictionary<long, Length> WidestAt(List<Edge> edges)
+    {
+        Dictionary<long, Length> widest = [];
+
+        foreach (Edge edge in edges)
+        {
+            if (!edge.IsHorizontal) continue;
+
+            long line = edge.At.Twips;
+            if (!widest.TryGetValue(line, out Length known) || edge.Border.Width > known)
+                widest[line] = edge.Border.Width;
+        }
+
+        return widest;
     }
 
     /// <summary>One consolidated grid line: where it sits, how far it runs, and its border.</summary>
