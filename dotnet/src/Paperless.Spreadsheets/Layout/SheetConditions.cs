@@ -203,6 +203,55 @@ internal static class SheetConditions
         }
     }
 
+    /// <summary>
+    /// An <c>expression</c> rule whose formula is more than two operands and a comparison.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reached only where <see cref="Comparison"/> refuses, which is the confinement guarantee of
+    /// the round that added it: every formula this evaluates used to paint nothing at all.
+    /// </para>
+    /// <para>
+    /// <strong>The rule fires when the formula's value is a non-zero NUMBER</strong>, not when it
+    /// is exactly true. <c>ScConditionEntry::IsCellValid</c> is
+    /// <c>if (eOp == ScConditionMode::Direct) return nVal1 != 0.0;</c>
+    /// (<c>sc/source/core/data/conditio.cxx</c>:1272-1278), and <c>Interpret</c> sets
+    /// <c>nVal1 = 0.0</c> whenever the result is a string (<c>:714-719</c>) — so a text-valued
+    /// formula never fires, and <c>MOD(COLUMN(),2)</c> fires on every odd column without ever
+    /// being a boolean. It is also what lets a rule multiply comparisons together, which is how
+    /// a Gantt planner states its bars.
+    /// </para>
+    /// </remarks>
+    /// <param name="Root">The parsed formula.</param>
+    internal sealed record Expression(SheetFormula.Node Root) : ICondition
+    {
+        /// <summary>Reads one, or null when the formula is outside the grammar.</summary>
+        /// <param name="formula">The rule's <c>&lt;formula&gt;</c> text.</param>
+        /// <param name="sheetName">The sheet the rule is on, for a qualified reference.</param>
+        /// <param name="names">The workbook's defined names, by name.</param>
+        /// <param name="anchorRow">The zero-based row the rule's formula is written for.</param>
+        /// <param name="anchorColumn">The zero-based column it is written for.</param>
+        public static Expression? Parse(
+            string? formula, string sheetName, Dictionary<string, string> names,
+            int anchorRow, int anchorColumn)
+        {
+            ArgumentNullException.ThrowIfNull(names);
+
+            return SheetFormula.Parse(
+                       formula, sheetName, name => names.GetValueOrDefault(name),
+                       anchorRow, anchorColumn)
+                is { } root
+                ? new Expression(root)
+                : null;
+        }
+
+        /// <inheritdoc/>
+        public bool Holds(Sheet sheet, int row, int column, int anchorRow, int anchorColumn)
+            => SheetFormula.Evaluate(
+                   Root, sheet, row, column, row - anchorRow, column - anchorColumn)
+               is { Number: { } value } && value != 0.0;
+    }
+
     /// <summary>An <c>expression</c> rule of the shape <c>&lt;operand&gt; &lt;op&gt; &lt;operand&gt;</c>.</summary>
     internal sealed record Comparison(Operand Left, string Operator, Operand Right) : ICondition
     {

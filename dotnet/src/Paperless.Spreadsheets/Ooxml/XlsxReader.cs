@@ -129,7 +129,8 @@ public static class XlsxReader
                 // to be laid over the text formats.
                 SheetFormatting formatting = XlsxCellDecoration.Read(
                     file.StyleSheet, file.ThemeRoot, worksheet, file.SharedStrings,
-                    out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText);
+                    out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText,
+                    entry.Name, file.Workbook);
                 formats = formats.WithConditionalText(conditionalText);
 
                 // A pivot table's frame is generated when the table is imported and is stated by

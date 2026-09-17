@@ -151,12 +151,31 @@ public sealed class XlsxConditionalStyleTests
     }
 
     [Fact]
+    public void AFormulaOfMoreThanTwoOperandsIsEvaluated()
+    {
+        // This asserted the opposite until round 144, and the premise was the reader's rather
+        // than the reference's: `Comparison` reads one operator between two operands, so every
+        // longer formula was refused and painted nothing. `SheetFormula` evaluates them, and the
+        // two-operand reader still runs first — so what reaches the evaluator is exactly the set
+        // that used to paint nothing at all.
+        (_, SheetCellFormats formats) = Read(Rule("S1:S1048576", "AND(H2=\"x\",H2&lt;&gt;\"y\")", 0));
+
+        formats.At(0, 18).Colour.ToString().ShouldBe("#00B050");
+
+        // Row 2's H3 is empty, so the first half is false and `AND` is zero. A rule that fired
+        // everywhere would pass the assertion above without evaluating anything.
+        formats.At(1, 18).Colour.ShouldBe(Colour.Black);
+    }
+
+    [Fact]
     public void AFormulaThisCannotEvaluatePaintsNothing()
     {
-        // 140 of the corpus's 601 expression rules are `AND`, `MOD(ROW())`, `ISERROR`, `TODAY`, a
-        // defined name or `#REF!`, and each needs an interpreter. Refusing them leaves the reader
-        // exactly where it was before this existed, which is the only safe answer.
-        (_, SheetCellFormats formats) = Read(Rule("S1:S1048576", "AND(H2=\"x\",H2&lt;&gt;\"y\")", 0));
+        // The floor the evaluator keeps: a function outside its vocabulary parses and answers
+        // nothing rather than guessing, so the rule paints nothing rather than painting a cell
+        // the reference leaves alone. `ISERROR` is the one the corpus states that this declines,
+        // and it declines it because `ValueOf` stores an error cell as blank — so a reader that
+        // answered it would answer it wrongly.
+        (_, SheetCellFormats formats) = Read(Rule("S1:S1048576", "ISERROR(H2)", 0));
 
         formats.At(0, 18).Colour.ShouldBe(Colour.Black);
     }

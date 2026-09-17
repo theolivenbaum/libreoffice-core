@@ -7,6 +7,7 @@ using CellIs = Paperless.Spreadsheets.Layout.SheetConditions.CellIs;
 using Comparison = Paperless.Spreadsheets.Layout.SheetConditions.Comparison;
 using ICondition = Paperless.Spreadsheets.Layout.SheetConditions.ICondition;
 using Operand = Paperless.Spreadsheets.Layout.SheetConditions.Operand;
+using Expression = Paperless.Spreadsheets.Layout.SheetConditions.Expression;
 using Sheet = Paperless.Spreadsheets.Layout.SheetConditions.Sheet;
 using Value = Paperless.Spreadsheets.Layout.SheetConditions.Value;
 
@@ -93,13 +94,17 @@ internal static class XlsxConditionalStyles
     /// <param name="theme">The <c>theme</c> root, for colours named by slot.</param>
     /// <param name="worksheet">The sheet's own root.</param>
     /// <param name="shared">The workbook's shared strings, for the cells a rule compares.</param>
+    /// <param name="sheetName">The sheet's name, so a rule may qualify a reference with it.</param>
+    /// <param name="workbook">The workbook root, for the defined names a rule's formula uses.</param>
     /// <returns>What each matching cell's winning rule changes about its text.</returns>
     public static Dictionary<(int Row, int Column), SheetConditionalText> Apply(
         SheetFormatting formatting,
         XElement? styles,
         XElement? theme,
         XElement? worksheet,
-        XlsxSharedStrings shared)
+        XlsxSharedStrings shared,
+        string? sheetName = null,
+        XElement? workbook = null)
     {
         Dictionary<(int Row, int Column), SheetConditionalText> text = [];
         if (worksheet is null || styles is null) return text;
@@ -108,7 +113,8 @@ internal static class XlsxConditionalStyles
         List<Difference> differences = ReadDifferences(styles, palette);
         if (differences.Count == 0) return text;
 
-        List<Rule> rules = ReadRules(worksheet, differences);
+        List<Rule> rules = ReadRules(worksheet, differences, sheetName ?? string.Empty,
+                                    DefinedNames(workbook));
         if (rules.Count == 0) return text;
 
         Sheet sheet = ReadSheet(worksheet, shared);
@@ -207,38 +213,19 @@ internal static class XlsxConditionalStyles
                 FontFamily = Xlsx.Attribute(Xlsx.Child(font, "name"), "val"),
             };
 
-            differences.Add(new Difference(text, ReadFill(Xlsx.Child(dxf, "fill"), palette)));
+            differences.Add(new Difference(
+                text, XlsxPatternFill.Resolve(Xlsx.Child(dxf, "fill"), palette, differential: true)));
         }
 
         return differences;
     }
 
-    /// <summary>
-    /// The colour a <c>dxf</c>'s fill paints, or null when it paints nothing.
-    /// </summary>
-    /// <remarks>
-    /// The <c>mbDxf</c> branch of <c>Fill::finalizeImport</c>, in the order it tests: a stated
-    /// background with no pattern or a solid one <em>is</em> the solid colour; a solid pattern
-    /// with neither colour stated paints nothing; anything else keeps the foreground as the
-    /// pattern colour, which for the corpus's hatches is what shows.
-    /// </remarks>
-    private static Colour? ReadFill(XElement? fill, XlsxPalette palette)
-    {
-        XElement? pattern = Xlsx.Child(fill, "patternFill");
-        if (pattern is null) return null;
-
-        string? type = Xlsx.Attribute(pattern, "patternType");
-        if (string.Equals(type, "none", StringComparison.Ordinal)) return null;
-
-        Colour? background = palette.Read(Xlsx.Child(pattern, "bgColor"));
-        Colour? foreground = palette.Read(Xlsx.Child(pattern, "fgColor"));
-
-        if (background is { } stated && type is null or "solid") return stated;
-        return type is "solid" && foreground is null ? null : foreground ?? background;
-    }
-
     /// <summary>Every rule that names a <c>dxf</c> and whose condition can be evaluated.</summary>
-    private static List<Rule> ReadRules(XElement worksheet, List<Difference> differences)
+    private static List<Rule> ReadRules(
+        XElement worksheet,
+        List<Difference> differences,
+        string sheetName,
+        Dictionary<string, string> names)
     {
         List<Rule> rules = [];
         int index = -1;
@@ -263,7 +250,8 @@ internal static class XlsxConditionalStyles
                 Difference difference = differences[id];
                 if (difference.Text.IsNone && difference.Background is null) continue;
 
-                if (ConditionOf(rule, ranges) is not { } test) continue;
+                if (ConditionOf(rule, ranges, sheetName, names, anchorRow, anchorColumn)
+                    is not { } test) continue;
 
                 rules.Add(new Rule(
                     index,
@@ -275,6 +263,43 @@ internal static class XlsxConditionalStyles
         return rules;
     }
 
+    /// <summary>
+    /// The workbook-level defined names, by name, as the text they expand to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A conditional-format rule may be written entirely in terms of names — the corpus's Gantt
+    /// planner states <c>Plan</c>, <c>Actual</c> and six more, each of which refers to others —
+    /// so a reader that stops at a bare identifier evaluates the whole chart as nothing.
+    /// </para>
+    /// <para>
+    /// <strong>Sheet-scoped names are skipped.</strong> A <c>localSheetId</c> name resolves
+    /// against the sheet that declares it, which this does not model, and taking one for a
+    /// workbook name would resolve a rule against the wrong sheet's cells. The corpus's are all
+    /// workbook scope.
+    /// </para>
+    /// </remarks>
+    private static Dictionary<string, string> DefinedNames(XElement? workbook)
+    {
+        Dictionary<string, string> names = new(StringComparer.OrdinalIgnoreCase);
+        if (workbook is null) return names;
+
+        foreach (XElement element in Xlsx.Children(
+                     Xlsx.Child(workbook, "definedNames"), "definedName"))
+        {
+            if (Xlsx.Attribute(element, "localSheetId") is not null) continue;
+            if (Xlsx.Attribute(element, "name") is not { Length: > 0 } name) continue;
+
+            // `_xlnm.Print_Area` and its siblings are ranges rather than expressions and are read
+            // by `XlsxPrintNames`; letting one through here would make a rule naming it parse.
+            if (name.StartsWith("_xlnm.", StringComparison.Ordinal)) continue;
+
+            if (element.Value.Trim() is { Length: > 0 } body) names[name] = body;
+        }
+
+        return names;
+    }
+
     /// <summary>The condition one <c>cfRule</c> states, or null when it cannot be evaluated.</summary>
     /// <remarks>
     /// The arms are <c>CondFormatRule::finalizeImport</c>'s
@@ -284,14 +309,27 @@ internal static class XlsxConditionalStyles
     /// view of the corpus documents that state them — see <see cref="TextPredicate"/> and
     /// <see cref="BlankPredicate"/>.
     /// </remarks>
-    private static ICondition? ConditionOf(XElement rule, List<SheetRange> ranges)
+    private static ICondition? ConditionOf(
+        XElement rule,
+        List<SheetRange> ranges,
+        string sheetName,
+        Dictionary<string, string> names,
+        int anchorRow,
+        int anchorColumn)
     {
         List<string> formulas = [.. Xlsx.Children(rule, "formula").Select(static f => f.Value)];
 
         switch (Xlsx.Attribute(rule, "type"))
         {
             case "expression":
-                return formulas.Count == 1 ? Comparison.Parse(formulas[0]) : null;
+                if (formulas.Count != 1) return null;
+
+                // The two-operand reader first, and deliberately: it is measured, it is what the
+                // great majority of these rules are, and keeping it in front means the evaluator
+                // below can only reach a formula that used to paint nothing at all. That is this
+                // round's confinement guarantee, and it is structural rather than measured.
+                return (ICondition?)Comparison.Parse(formulas[0])
+                       ?? Expression.Parse(formulas[0], sheetName, names, anchorRow, anchorColumn);
 
             case "cellIs":
                 return CellIs.Parse(Xlsx.Attribute(rule, "operator"), formulas);

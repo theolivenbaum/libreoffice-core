@@ -61,12 +61,16 @@ internal static class XlsxCellDecoration
     /// <param name="worksheet">The sheet's own root.</param>
     /// <param name="shared">The workbook's shared strings, for the cells a rule compares.</param>
     /// <param name="conditionalText">What each matching cell's winning rule does to its text.</param>
+    /// <param name="sheetName">The sheet's name, for a rule whose formula qualifies a reference.</param>
+    /// <param name="workbook">The workbook root, for the defined names a rule's formula may use.</param>
     public static SheetFormatting Read(
         XElement? styles,
         XElement? theme,
         XElement? worksheet,
         XlsxSharedStrings shared,
-        out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText)
+        out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText,
+        string? sheetName = null,
+        XElement? workbook = null)
     {
         conditionalText = [];
         if (worksheet is null) return SheetFormatting.Empty;
@@ -84,7 +88,7 @@ internal static class XlsxCellDecoration
         {
             XlsxConditionalFormats.Apply(formatting, styles, theme, worksheet);
             conditionalText = XlsxConditionalStyles.Apply(
-                formatting, styles, theme, worksheet, shared);
+                formatting, styles, theme, worksheet, shared, sheetName, workbook);
             return formatting.IsEmpty ? SheetFormatting.Empty : formatting;
         }
 
@@ -129,7 +133,8 @@ internal static class XlsxCellDecoration
         }
 
         XlsxConditionalFormats.Apply(formatting, styles, theme, worksheet);
-        conditionalText = XlsxConditionalStyles.Apply(formatting, styles, theme, worksheet, shared);
+        conditionalText = XlsxConditionalStyles.Apply(
+            formatting, styles, theme, worksheet, shared, sheetName, workbook);
 
         return formatting.IsEmpty ? SheetFormatting.Empty : formatting;
     }
@@ -182,20 +187,9 @@ internal static class XlsxCellDecoration
     /// what Calc falls back to when it cannot hatch (<c>XclImpCellArea</c>,
     /// <c>sc/source/filter/excel/xistyle.cxx:1075</c>), and recorded in the module's TODO.
     /// </remarks>
+    /// <summary>The colour a <c>fills</c> entry paints — see <see cref="XlsxPatternFill"/>.</summary>
     private static Colour? ReadFill(XElement fill, XlsxPalette palette)
-    {
-        XElement? pattern = Xlsx.Child(fill, "patternFill");
-        if (pattern is null) return null;
-
-        string type = Xlsx.Attribute(pattern, "patternType") ?? "none";
-        if (string.Equals(type, "none", StringComparison.Ordinal)) return null;
-
-        // A solid fill's colour is its foreground; a hatch's visible mass is its background.
-        return string.Equals(type, "solid", StringComparison.Ordinal)
-            ? palette.Read(Xlsx.Child(pattern, "fgColor"))
-            : palette.Read(Xlsx.Child(pattern, "bgColor"))
-              ?? palette.Read(Xlsx.Child(pattern, "fgColor"));
-    }
+        => XlsxPatternFill.Resolve(fill, palette, differential: false);
 
     private static SheetCellBorders ReadBorders(XElement border, XlsxPalette palette)
         => new(
