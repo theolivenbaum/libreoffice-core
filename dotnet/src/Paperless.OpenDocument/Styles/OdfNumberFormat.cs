@@ -39,35 +39,203 @@ public static class OdfNumberFormat
     /// The format code a data style states, or null when the style is not one this compiles.
     /// </summary>
     /// <param name="style">The <c>number:*-style</c> element.</param>
-    public static string? Code(XElement? style)
-    {
-        if (style is null) return null;
-
-        StringBuilder code = new();
-
-        // Which literals need quoting is decided per format type, and the type is what the style's
-        // own element name states.
-        string kind = style.Name.LocalName;
-
-        foreach (XElement piece in style.Elements())
-        {
-            if (piece.Name.NamespaceName != OdfNamespaces.Number) continue;
-            Append(code, piece, kind);
-        }
-
-        string built = code.ToString();
-        return built.Length == 0 ? null : built;
-    }
+    /// <param name="resolve">
+    /// How to find another data style by name, or null to compile this element alone. Supplying it
+    /// is what assembles a multi-section format — see the remarks on <see cref="Sections"/>.
+    /// </param>
+    public static string? Code(XElement? style, Func<string, XElement?>? resolve = null)
+        => Code(style, resolve, []);
 
     /// <summary>The parsed code a data style states, or null.</summary>
     /// <param name="style">The <c>number:*-style</c> element.</param>
-    public static NumberFormatCode? Parse(XElement? style)
+    /// <param name="resolve">How to find another data style by name, or null.</param>
+    public static NumberFormatCode? Parse(XElement? style, Func<string, XElement?>? resolve = null)
     {
-        if (Code(style) is not { Length: > 0 } code) return null;
+        if (Code(style, resolve) is not { Length: > 0 } code) return null;
 
         NumberFormatCode parsed = NumberFormatCode.Parse(code);
         return parsed.IsGeneral ? null : parsed;
     }
+
+    private static string? Code(XElement? style, Func<string, XElement?>? resolve, List<XElement> stack)
+    {
+        if (style is null) return null;
+
+        // `CreateAndInsert` keeps the styles it is already building on a stack and refuses a
+        // `style:map` that names one of them — "invalid style:map references containing style",
+        // xmloff/source/style/xmlnumfi.cxx:1592-1596. Without it a file that maps a style to
+        // itself is a stack overflow rather than a diagnostic.
+        if (stack.Contains(style)) return null;
+        stack.Add(style);
+
+        try
+        {
+            // Which literals need quoting is decided per format type, and the type is what the
+            // style's own element name states.
+            string kind = style.Name.LocalName;
+
+            StringBuilder conditions = new();
+            if (resolve is not null) Sections(conditions, style, kind, resolve, stack);
+
+            StringBuilder code = new();
+            foreach (XElement piece in style.Elements())
+            {
+                if (piece.Name.NamespaceName != OdfNamespaces.Number) continue;
+                Append(code, piece, kind);
+            }
+
+            if (Colour(style) is { } colour) code.Insert(0, colour);
+
+            // `:1605-1610` — an empty format is inserted as `""`, and the check is made before the
+            // conditions are prepended so that a mapped style with nothing of its own still holds
+            // a section. Only done where there ARE conditions: a style element that compiles to
+            // nothing at all still answers null, which is what every caller before this expected.
+            if (code.Length == 0 && conditions.Length > 0) code.Append("\"\"");
+
+            string built = conditions.Append(code).ToString();
+            return built.Length == 0 ? null : built;
+        }
+        finally
+        {
+            stack.RemoveAt(stack.Count - 1);
+        }
+    }
+
+    /// <summary>
+    /// The sections a style's <c>style:map</c> children contribute, in document order, each
+    /// closed with a semicolon — so that prepending them to the style's own body gives the whole
+    /// format code.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>ODF does not write a multi-section format as one element.</strong> It writes one
+    /// <c>number:*-style</c> per section and links them from the one the cell names, whose own
+    /// body is the <em>last</em> section: <c>N142</c> carries <c>(</c>, the number and <c>)</c>
+    /// and a <c>&lt;style:map style:condition="value()&gt;=0"
+    /// style:apply-style-name="N142P0"/&gt;</c>, with the positive form in the volatile
+    /// <c>N142P0</c>. Reading the named element alone therefore compiles <em>one</em> section and
+    /// applies it to every value — a negative drew <c>(100)</c> for us where the reference draws
+    /// it and a positive drew <c>(100)</c> too.
+    /// </para>
+    /// <para>
+    /// This is <c>SvXMLNumFormatContext::CreateAndInsert</c> and <c>AddCondition</c>
+    /// (<c>xmloff/source/style/xmlnumfi.cxx</c>:1588-1602 and :2130-2186) in the order they run.
+    /// Four details decide it and three of them are not in the specification's prose:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <strong>The condition must begin <c>value()</c></strong> and only what follows is the
+    /// comparison (<c>:2137-2140</c>). One that does not, or that names a style nothing resolves,
+    /// contributes <b>nothing at all</b> — not even an empty section — so the sections that remain
+    /// close up.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>A single <c>value()&gt;=0</c> map states no condition in the code</strong>
+    /// (<c>:2149-2150</c>): it is the ordinary <em>positive;negative</em> pair, and bracketing it
+    /// would make both sections conditional and leave nothing to fall through to.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>In a <c>number:text-style</c> the last map is unconditional too</strong>
+    /// (<c>:2152-2156</c>, whose comment says the last condition "can only be all other numbers").
+    /// That is how an accounting format arrives: the owner is the <em>text</em> style holding
+    /// <c>@</c>, and its three maps are positive, negative and zero — so the assembled code is the
+    /// familiar four sections in the familiar order, with the third bare.
+    /// </description></item>
+    /// <item><description>
+    /// <strong><c>!=</c> is rewritten to <c>&lt;&gt;</c></strong> (<c>:2161-2166</c>), once. The
+    /// decimal separator is localised in the same place and this compiles as en-US throughout, so
+    /// that half is a no-op here.
+    /// </description></item>
+    /// </list>
+    /// </remarks>
+    private static void Sections(
+        StringBuilder conditions,
+        XElement style,
+        string kind,
+        Func<string, XElement?> resolve,
+        List<XElement> stack)
+    {
+        List<XElement> maps = [.. style.Elements(XName.Get("map", OdfNamespaces.Style))];
+
+        for (int index = 0; index < maps.Count; index++)
+        {
+            XElement map = maps[index];
+
+            if (map.Attribute(XName.Get("apply-style-name", OdfNamespaces.Style))?.Value
+                is not { Length: > 0 } applied) continue;
+            if (map.Attribute(XName.Get("condition", OdfNamespaces.Style))?.Value
+                is not { } condition) continue;
+            if (!condition.StartsWith(ValuePrefix, StringComparison.Ordinal)) continue;
+
+            if (Code(resolve(applied), resolve, stack) is not { Length: > 0 } section) continue;
+
+            bool bare = (conditions.Length == 0 && maps.Count == 1
+                         && condition.AsSpan(ValuePrefix.Length) is ">=0")
+                        || (kind == TextStyle && index == maps.Count - 1);
+
+            if (!bare)
+            {
+                string comparison = condition[ValuePrefix.Length..];
+                int inequality = comparison.IndexOf("!=", StringComparison.Ordinal);
+                if (inequality >= 0) comparison = comparison.Remove(inequality, 2).Insert(inequality, "<>");
+
+                conditions.Append('[').Append(comparison).Append(']');
+            }
+
+            conditions.Append(section).Append(';');
+        }
+    }
+
+    /// <summary>What a data style's <c>fo:color</c> contributes to its section, or null.</summary>
+    /// <remarks>
+    /// <para>
+    /// ODF states a section's colour as a <c>style:text-properties</c> child carrying an RGB
+    /// value, where the format-code language states it as a keyword — so <c>AddColor</c>
+    /// (<c>xmlnumfi.cxx</c>:2196-2216) turns the value back into the keyword and
+    /// <strong>inserts it at the front of the code</strong>, wherever in the element the property
+    /// sat.
+    /// </para>
+    /// <para>
+    /// <strong>Only ten values survive the round trip, and that is the reference's own behaviour
+    /// rather than a shortcut here.</strong> <c>aNumFmtStdColors</c> (<c>:212-226</c>) is the same
+    /// ten in the same order as <c>ImpSvNumberformatScan::StandardColor</c> — the table
+    /// <c>NumberFormatSection</c> already reads the other way — and a colour that is not one of
+    /// them matches nothing, leaves <c>aColName</c> empty and is dropped. So a section stating
+    /// <c>#262626</c> is black on both sides, and a reader that resolved arbitrary RGB here would
+    /// paint ink 26.2.4.2 does not.
+    /// </para>
+    /// </remarks>
+    private static string? Colour(XElement style)
+    {
+        XElement? properties = style.Element(XName.Get("text-properties", OdfNamespaces.Style));
+
+        string? value = properties?.Attribute(XName.Get("color", OdfNamespaces.FoCompatible))?.Value;
+        if (value is not { Length: 7 } || value[0] != '#') return null;
+
+        if (!uint.TryParse(value.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture,
+                           out uint rgb))
+        {
+            return null;
+        }
+
+        return rgb switch
+        {
+            0x000000 => "[BLACK]",
+            0x0000FF => "[BLUE]",
+            0x00FF00 => "[GREEN]",
+            0x00FFFF => "[CYAN]",
+            0xFF0000 => "[RED]",
+            0xFF00FF => "[MAGENTA]",
+            0x808000 => "[BROWN]",
+            0x808080 => "[GREY]",
+            0xFFFF00 => "[YELLOW]",
+            0xFFFFFF => "[WHITE]",
+            _ => null,
+        };
+    }
+
+    /// <summary>What every <c>style:condition</c> this reads begins with.</summary>
+    private const string ValuePrefix = "value()";
 
     private static void Append(StringBuilder code, XElement piece, string kind)
     {
@@ -281,6 +449,7 @@ public static class OdfNumberFormat
     private const string DateStyle       = "date-style";
     private const string TimeStyle       = "time-style";
     private const string BooleanStyle    = "boolean-style";
+    private const string TextStyle       = "text-style";
 
     private static bool Long(XElement piece)
         => piece.Attribute(XName.Get("style", OdfNamespaces.Number))?.Value == "long";

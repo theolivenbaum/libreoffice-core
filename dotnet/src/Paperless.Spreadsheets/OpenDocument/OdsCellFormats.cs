@@ -610,7 +610,9 @@ internal static class OdsCellFormats
                 // `###` rule — and the code is what states the format to a caller: the HTML
                 // export's `sdnum`, and the `*` fill directive, which could not fire on this path
                 // while the code was null.
-                NumberFormat = OdfNumberFormat.Parse(DataStyleElement(styleName)),
+                // A multi-section format is several elements linked by `style:map`, so the
+                // resolver is what turns the one the cell names into the whole code.
+                NumberFormat = OdfNumberFormat.Parse(DataStyleElement(styleName), DataStyleByName),
             };
         }
 
@@ -644,6 +646,14 @@ internal static class OdsCellFormats
             /// <summary>The element of the data style a cell style names, or null when it names none.</summary>
         private XElement? DataStyleElement(string styleName)
             => styles.FindDataStyle(DataStyleName(styleName))?.Element;
+
+        /// <summary>A data style by its own name, which is what a <c>style:map</c> names.</summary>
+        /// <remarks>
+        /// The styles a map points at are <c>style:volatile="true"</c> — no cell names one — so
+        /// this is the only way they are reached, and it is by the style's own name rather than
+        /// through the cell-style chain <see cref="DataStyleName"/> walks.
+        /// </remarks>
+        private XElement? DataStyleByName(string name) => styles.FindDataStyle(name)?.Element;
 
     /// <summary>The data style a cell style names, following its parent chain.</summary>
         /// <remarks>
