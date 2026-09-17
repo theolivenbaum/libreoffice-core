@@ -764,12 +764,7 @@ public static class PageDrawing
         // Collected per grid line and merged, so that a run of cells agreeing about an edge becomes one
         // stroke. Keyed on the line's own coordinate rounded to a twip, because two cells' shared edge is
         // computed from two different rectangles and can differ in the last EMU.
-        List<Edge> edges = Edges(table);
-        if (table.Table.JoinsBordersLikeWord) edges = WithWordJoins(edges);
-
-        // How wide the widest band at each horizontal grid line is, which is what decides where all of
-        // that line's bands begin. See the remark on `WidestAt`.
-        Dictionary<long, Length> widest = WidestAt(edges);
+        List<Edge> edges = WithSpans(Edges(table), table.Table.JoinsBordersLikeWord);
 
         foreach (Edge edge in edges)
         {
@@ -778,12 +773,22 @@ public static class PageDrawing
             BorderBands bands = edge.Border.Bands;
             IReadOnlyList<Length>? dashes = BorderRules.Dashes(edge.Border.Line);
             Length half = edge.Border.Width / 2;
-            Length from = edge.From - half;
-            Length to = edge.To + half;
 
-            // Where this band's top edge sits, relative to the grid line. A vertical border is centred
-            // on its line; a horizontal one shares its top edge with every other band on the same line,
-            // and that shared edge is the top of the widest of them.
+            // A horizontal rule meets a vertical one, which is CENTRED on its line, so it overshoots by
+            // half a rule at each end. A vertical's own span is already final — `WithSpans` settles it,
+            // because a horizontal band HANGS DOWNWARDS and the two ends are therefore not symmetrical.
+            Length from = edge.IsHorizontal ? edge.From - half : edge.From;
+            Length to = edge.IsHorizontal ? edge.To + half : edge.To;
+
+            // Where this band's top edge sits, relative to the grid line. A vertical border is CENTRED
+            // on its line and a horizontal one HANGS DOWNWARDS FROM IT: [src] `SwTabFramePainter::Insert`
+            // (`sw/source/core/layout/paintfrm.cxx`:3061-3064) sets `RefMode::Begin` on a cell's two
+            // horizontal borders -- "drawn below the reference points", `mfRefModeOffset = +width/2` --
+            // and `Centered` on its two vertical ones. So every band on one horizontal line begins at the
+            // line, whatever its own width, and no reference to the widest of them is needed: the layout
+            // puts the grid line ON the row boundary and `TableLayouter.TopBand` charges the row below for
+            // the whole band. [bin] `probes/tablerow-r146/results.md` §3.1 -- three columns stating
+            // 0.5/3.0/1.5 pt across one boundary draw 95.001..95.501, 95.001..98.001 and 95.001..96.501.
             //
             // The two are written as separate expressions rather than as one parameterised by `top`,
             // and that is not tidiness: `Length`'s division ROUNDS (`operator /`, `Length.cs`:140), so
@@ -793,10 +798,8 @@ public static class PageDrawing
             // which it has no business touching at all; the confinement sweep is what caught it.
             if (edge.IsHorizontal)
             {
-                Length top = -(widest.GetValueOrDefault(edge.At.Twips, edge.Border.Width) / 2);
-
-                Rule(top + (bands.Outer / 2), bands.Outer);
-                if (bands.HasTwoRules) Rule(top + edge.Border.Width - (bands.Inner / 2), bands.Inner);
+                Rule(bands.Outer / 2, bands.Outer);
+                if (bands.HasTwoRules) Rule(edge.Border.Width - (bands.Inner / 2), bands.Inner);
             }
             else
             {
@@ -826,59 +829,6 @@ public static class PageDrawing
         }
     }
 
-    /// <summary>
-    /// The widest horizontal band at each grid line, by that line's own twip.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <strong>A horizontal table border hangs downwards from the row boundary; it is not centred on
-    /// it.</strong> <c>SwTabFramePainter::Insert</c> (<c>sw/source/core/layout/paintfrm.cxx</c>:3061-3064)
-    /// sets <c>RefMode::Begin</c> on the two horizontal borders and <c>RefMode::Centered</c> on the two
-    /// vertical ones, and <c>Begin</c> is documented as <em>"horizontal lines are drawn below the
-    /// reference points"</em> (<c>include/svx/framelink.hxx</c>:40-45), implemented as
-    /// <c>mfRefModeOffset = +width/2</c>.
-    /// </para>
-    /// <para>
-    /// <strong>Which is invisible until one boundary carries two widths, and that is the whole of this
-    /// change.</strong> This tree charges half of a row boundary's border to each of the two rows, so
-    /// its grid line sits in the middle of the band the reference hangs below the boundary — and for a
-    /// boundary of one width those two descriptions put the ink in exactly the same place. Where the
-    /// columns differ they do not: the reference gives every band the <em>same</em> top edge, the top of
-    /// the widest, and this tree centred each on its own. Measured at 26.2.4.2 on three columns stating
-    /// 0.5, 3.0 and 1.5 pt across one boundary: the bands are <c>95.001..95.501</c>,
-    /// <c>95.001..98.001</c> and <c>95.001..96.501</c> — one shared top, three different bottoms — and
-    /// moving the statement to the other side of the boundary changes nothing.
-    /// </para>
-    /// <para>
-    /// So the offset is taken from the widest band on the line rather than from each band's own width,
-    /// which leaves a single-width boundary exactly where it was. <strong>Reach: 49 of the 337 words
-    /// documents and 770 boundaries, 21 % of the per-column boundaries the reference draws.</strong>
-    /// </para>
-    /// <para>
-    /// <strong>What this does NOT fix, deliberately.</strong> The <em>height</em> half of the same rule
-    /// — the row below pays for the whole band and the row above pays nothing — is seat O84 and moves
-    /// page counts, and the two rules at a page cut are O83. Both need the layout rather than the
-    /// painter. <c>probes/tablerow-r146/results.md</c> has the closed form for each and the one measured
-    /// exception: a border <em>copied</em> across a cut by <c>InsertFollowTopBorder</c> really is drawn
-    /// centred and really does charge no height.
-    /// </para>
-    /// </remarks>
-    private static Dictionary<long, Length> WidestAt(List<Edge> edges)
-    {
-        Dictionary<long, Length> widest = [];
-
-        foreach (Edge edge in edges)
-        {
-            if (!edge.IsHorizontal) continue;
-
-            long line = edge.At.Twips;
-            if (!widest.TryGetValue(line, out Length known) || edge.Border.Width > known)
-                widest[line] = edge.Border.Width;
-        }
-
-        return widest;
-    }
-
     /// <summary>One consolidated grid line: where it sits, how far it runs, and its border.</summary>
     /// <param name="IsHorizontal">True when it runs across the page.</param>
     /// <param name="At">Where it sits on the other axis.</param>
@@ -893,22 +843,53 @@ public static class PageDrawing
         bool IsHorizontal, Length At, Length From, Length To, TableBorder Border, bool IsOuter = false);
 
     /// <summary>
-    /// The grid lines with Word's joins applied: an inner line gives way to the outline it meets.
+    /// Every grid line's final span: how far a vertical reaches into the bands it meets, and Word's join
+    /// rule, by which an inner line gives way to the outline.
     /// </summary>
     /// <remarks>
-    /// By the <em>full</em> width of the outer line rather than half of it, which is what makes the two
-    /// rules differ by a whole border width at each end rather than by nothing. Ported from
-    /// <c>SwTabFramePainter::FindStylesForLine</c>, which adjusts an inner entry's start and end for every
-    /// outer entry it meets there, and does it before the half-width overshoot is added.
+    /// <para>
+    /// <strong>The two ends of a vertical are not symmetrical, because a horizontal band hangs downwards
+    /// from its line rather than being centred on it</strong> ([src] <c>SwTabFramePainter::Insert</c>,
+    /// <c>paintfrm.cxx</c>:3061-3064, <c>RefMode::Begin</c> on the horizontals and <c>Centered</c> on the
+    /// verticals). At its top the vertical already starts on the boundary, which is where that band
+    /// begins, so it reaches nothing; at its bottom it has to cross the whole band or the corner is left
+    /// open. Under the centred model this tree used until round 149 the two ends were one expression,
+    /// <c>± width/2</c>, which agrees for as long as every rule in the table has one width.
+    /// </para>
+    /// <para>
+    /// Word's join is then subtracted from both ends, by the <em>full</em> width of the outer line rather
+    /// than half of it — ported from <c>SwTabFramePainter::FindStylesForLine</c>, which adjusts an inner
+    /// entry's start and end for every outer entry it meets and does it before the half-width overshoot
+    /// is added. For a vertical that is what makes it stop at the table's outline instead of crossing it,
+    /// while still crossing every <em>interior</em> band on the way.
+    /// </para>
+    /// <para>
+    /// [bin] Measured on <c>table-borders.docx</c> against 26.2.4.2, whose three verticals run
+    /// <c>70.201..161.901</c> (outer: the first band's top to the last band's bottom),
+    /// <c>70.701..161.401</c> (interior, full height: below the outer top band, stopping at the top of
+    /// the outer bottom one) and <c>70.701..142.501</c> (interior, ending on an <em>interior</em>
+    /// boundary, which it crosses). Getting any one of the three wrong is a whole rule width, and all
+    /// three are reproduced.
+    /// </para>
     /// </remarks>
-    private static List<Edge> WithWordJoins(List<Edge> edges)
+    /// <param name="edges">The merged grid lines.</param>
+    /// <param name="joinsLikeWord">Whether the table applies Word's join rule; see <c>PageTable</c>.</param>
+    private static List<Edge> WithSpans(List<Edge> edges, bool joinsLikeWord)
     {
-        // Keyed on the coordinate in twips for the same reason the merge is: two cells' shared edge comes
-        // from two rectangles and can differ in the last EMU. The width is the widest outline stroke at
-        // that coordinate, since that is the one whose corner has to be cleared.
+        // The widest band at each horizontal line, and the widest OUTER band — the second is what an
+        // inner line has to give way to, since only the outline clears a corner.
+        Dictionary<long, Length> band = [];
         Dictionary<(bool, long), Length> outline = [];
+
         foreach (Edge edge in edges)
         {
+            if (edge.IsHorizontal)
+            {
+                long line = edge.At.Twips;
+                if (!band.TryGetValue(line, out Length seen) || edge.Border.Width > seen)
+                    band[line] = edge.Border.Width;
+            }
+
             if (!edge.IsOuter) continue;
 
             (bool, long) key = (edge.IsHorizontal, edge.At.Twips);
@@ -916,23 +897,29 @@ public static class PageDrawing
                 outline[key] = edge.Border.Width;
         }
 
-        List<Edge> joined = new(edges.Count);
+        List<Edge> spanned = new(edges.Count);
         foreach (Edge edge in edges)
         {
-            if (edge.IsOuter)
+            // A vertical crosses the band at its lower boundary. Its upper end needs nothing: the band
+            // there begins on the boundary it already starts at.
+            Length to = edge.IsHorizontal
+                ? edge.To
+                : edge.To + band.GetValueOrDefault(edge.To.Twips, Length.Zero);
+
+            if (edge.IsOuter || !joinsLikeWord)
             {
-                joined.Add(edge);
+                spanned.Add(edge with { To = to });
                 continue;
             }
 
-            joined.Add(edge with
+            spanned.Add(edge with
             {
                 From = edge.From + Meeting(edge, edge.From),
-                To = edge.To - Meeting(edge, edge.To),
+                To = to - Meeting(edge, edge.To),
             });
         }
 
-        return joined;
+        return spanned;
 
         Length Meeting(Edge edge, Length end)
             => outline.TryGetValue((!edge.IsHorizontal, end.Twips), out Length width)
