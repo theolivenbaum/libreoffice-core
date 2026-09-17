@@ -145,3 +145,43 @@ would be asserting a defect.
 
 `WordProcessing` 2029 green; Containers, Core, Markup, OpenDocument, Rendering, Spreadsheets,
 Text and Vector unchanged and green; Fidelity's ten known failures unchanged.
+
+---
+
+## 8. Round 148's correction to §5 and §6 — the census was wrong, not the tree
+
+Sections 5 and 6 left *"28 of the 49 predicted documents did not move"* open, and named the
+disagreement between `tablerow-r146/census-pdf.py` and `mixed-lines.py` as unestablished.
+`probes/mixedcensus-r148/results.md` settled it against **`census-pdf.py`**, three ways:
+
+1. Its second shape **never compares thickness** — it counts a narrower rule within 6 pt below a
+   wider one whatever the widths. Every one of `150_5300_13_chg8.doc`'s 210 and
+   `150-5370-10H.docx`'s 206 is a pair of groups of *identical* thickness, and what it fires on
+   is not a table: 351 of that page's 355 horizontal segments are 0.069 pt hairlines 8–10 pt
+   long, a vector-traced departmental seal. Only three are real rules.
+2. Its **first** shape — the one that is this round's question — answers **0** on both
+   documents, which is exactly what `mixed-lines.py` answered. The two instruments never
+   disagreed about mixed widths.
+3. That first shape is inverted anyway: it caps the side-by-side *overlap* at 1.0 pt and puts no
+   cap on the *gap*, so it rejects the mitre overlap two bands of different width actually make.
+   That is why §5 called the two `B11. TE.CAO.00129` movers unexplained — they hold four mixed
+   boundaries each **in the reference too**.
+
+**Corrected reach for this class: 16 of 337 words documents and 67 boundaries** (14 / 59 on
+thickness alone, which is sturdier because it does not depend on the length floor), against
+round 146's 49 / 770. Cross-tabbed against this round's own 23 movers: **19 of the 20 documents
+holding an extent-mixed boundary moved, and 19 of the 23 movers are covered**.
+
+**Two claims in §6 are withdrawn.** `150-5370-10H.docx` *did* move — §6 lists it as a non-mover
+and `sweep-words.txt`, from the same script, lists it as a mover; the fingerprints say it moved,
+on the one boundary that is mixed in our ink and not the reference's. Only
+`150_5300_13_chg8.doc` genuinely did not move, and it now has no reason to (0 and 0). And §5's
+hypothesis — *a boundary the reference draws in two widths resolves to one width in ours* — is
+not merely unproven but **backwards**: our ink holds about five times as many mixed boundaries
+as the reference's (292 against 67). Exactly one corpus document behaves the way it predicted,
+which is not a mechanism.
+
+Still open: why `PAT-047`, `airbus-pdf-information-package_v1-4` and
+`xx_SETIS_PWS_template_10.19.22` moved. Every horizontal band in all three is identical before
+and after to three decimals, which is consistent with §4's one-EMU vertical but was not
+established by diffing the content streams.

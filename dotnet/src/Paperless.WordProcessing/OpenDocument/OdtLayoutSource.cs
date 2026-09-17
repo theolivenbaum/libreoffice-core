@@ -1112,6 +1112,7 @@ public sealed partial class OdtLayoutSource
             Label = label,
             EmSize = text.Size,
             Language = text.Language,
+            WidthPerCent = text.WidthPerCent,
             Shaping = new ShapingOptions(
                 Language: text.Language, DisableKerning: !text.AutoKerning),
             BlanksAreTransparentToHeight = _blanksAreTransparentToHeight,
@@ -1277,6 +1278,12 @@ public sealed partial class OdtLayoutSource
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
                 || style.AutoKerning != paragraph.AutoKerning
+                // And a character width, for the same reason and more strongly: it multiplies every
+                // advance in the run, so a run scaled inside an unscaled paragraph that was folded away
+                // would be measured and broken at the paragraph's own width. Round 143 established on
+                // the DOCX side that the measurement fallbacks rebuild a run from the paragraph and
+                // carry no scale, so the fold is where it is lost.
+                || style.WidthPerCent != paragraph.WidthPerCent
                 // And a synthetic oblique, which is drawing-only in the same way and was the one
                 // missing from this list: an italic run whose family has no italic installed resolves to
                 // the *same* face as its upright neighbour, so nothing above can see it and the fold
@@ -1298,7 +1305,8 @@ public sealed partial class OdtLayoutSource
                 style.CaseMap,
                 Highlight: style.Highlight ?? default,
                 Underline: style.Underline,
-                IsStruckThrough: style.IsStruckThrough));
+                IsStruckThrough: style.IsStruckThrough,
+                WidthPerCent: style.WidthPerCent));
         }
 
         return varies ? runs : [];

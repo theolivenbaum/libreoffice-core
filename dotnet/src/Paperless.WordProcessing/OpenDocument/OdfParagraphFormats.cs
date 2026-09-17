@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
@@ -44,6 +45,23 @@ namespace Paperless.WordProcessing.OpenDocument;
 /// <param name="IsStruckThrough">
 /// True when <c>style:text-line-through-style</c> names a style other than <c>none</c>.
 /// </param>
+/// <param name="WidthPerCent">
+/// How far the glyphs are squeezed across, from <c>style:text-scale</c>, as a percentage.
+/// <para>
+/// The same item as <c>w:rPr/w:w</c> and <c>\charscalex</c>: <c>xmloff</c> maps the attribute onto
+/// <c>PROP_CharScaleWidth</c> as an <c>XML_TYPE_PERCENT16</c>
+/// (<c>xmloff/source/text/txtprmap.cxx</c>:253 and :641), which is the property the DOCX importer
+/// fills too, so <see cref="TextWidthScale"/>'s twip truncation applies here unchanged.
+/// </para>
+/// <para>
+/// Measured at 26.2.4.2 on five one-attribute flat-ODF arms, the drawn width read out of a
+/// right-aligned line's own origin rather than from glyph boxes: <c>130%</c> comes out at
+/// <b>1.29981</b> of the unscaled arm and <c>60%</c> at <b>0.59974</b>, while <c>99%</c> at 12 pt
+/// comes out at <b>0.98665</b> — nearer the truncated <b>0.98750</b> than the stated 0.99, which is
+/// the same twip grid the Microsoft formats land on. An absent attribute and <c>100%</c> are
+/// byte-identical. <c>probes/odtscale-r148/</c>.
+/// </para>
+/// </param>
 /// <param name="AutoKerning">
 /// True when pair kerning applies, which for ODF is <em>unless</em> <c>style:letter-kerning</c> says
 /// <c>false</c> — the opposite way round from the three Microsoft formats.
@@ -78,7 +96,8 @@ public readonly record struct OdfTextStyle(
     Colour? Highlight = null,
     TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
-    bool AutoKerning = true)
+    bool AutoKerning = true,
+    int WidthPerCent = 100)
 {
     /// <summary>The key a face cache is keyed on: what actually decides which font file is loaded.</summary>
     public (string? Family, int Weight, bool Italic) FaceKey => (FamilyName, Weight, IsItalic);
@@ -274,11 +293,38 @@ internal static class OdfParagraphFormats
             // type must not be merged with an inner style's style. See `OdfStyles.ResolveTogether`.
             OdfTextFormat.UnderlineIn(styles, cascade),
             IsLineOn(Cascaded(styles, cascade, OdfNamespaces.Style, "text-line-through-style").Value),
-            Cascaded(styles, cascade, OdfNamespaces.Style, "letter-kerning").Value is not "false");
+            Cascaded(styles, cascade, OdfNamespaces.Style, "letter-kerning").Value is not "false",
+            ScaleIn(styles, cascade));
     }
 
     /// <summary>Whether one of ODF's two line-style attributes asks for a line.</summary>
     private static bool IsLineOn(string? value) => value is not (null or "none");
+
+    /// <summary>
+    /// The character width <c>style:text-scale</c> asks for, as a percentage.
+    /// </summary>
+    /// <remarks>
+    /// The specification's namespace is the one written: over the 337 converted <c>.odt</c> the
+    /// attribute appears <b>350</b> times as <c>style:text-scale</c> and <b>not once</b> as
+    /// <c>loext:text-scale</c>, which is worth stating because five other ODF attributes in this
+    /// reader are the other way round and <c>dotnet/CLAUDE.md</c> records each of them costing a
+    /// round. Two thirds of those 350 say <c>100%</c> and cost nothing; the reach is the
+    /// <b>111 occurrences in 18 documents</b> that say something else.
+    /// </remarks>
+    private static int ScaleIn(OdfStyles styles, IReadOnlyList<OdfStyleReference> cascade)
+    {
+        string? stated = Cascaded(styles, cascade, OdfNamespaces.Style, "text-scale").Value;
+        if (stated is null) return TextWidthScale.Natural;
+
+        ReadOnlySpan<char> digits = stated.AsSpan().Trim();
+        if (digits.EndsWith("%", StringComparison.Ordinal)) digits = digits[..^1];
+
+        return double.TryParse(digits, NumberStyles.Float, CultureInfo.InvariantCulture,
+                               out double percentage)
+               && percentage > 0
+            ? (int)Math.Round(percentage)
+            : TextWidthScale.Natural;
+    }
 
     /// <summary>
     /// The case the cascade draws the text in.

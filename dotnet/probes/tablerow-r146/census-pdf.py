@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 """Census, out of 26.2.4.2's OWN renderings, of what the horizontal-band rule paints.
+**SUPERSEDED -- its MIXED figures are wrong by an order of magnitude; do not quote 49/770.**
+Round 148 (`probes/mixedcensus-r148/results.md`) took it apart against the same renderings and
+found three defects. Its second shape never compares THICKNESS at all -- it counts a narrower
+rule within 6 pt below a wider one whatever their widths -- so 100 % of the 210 it scored on
+`150_5300_13_chg8.doc` and the 206 on `150-5370-10H.docx` is a vector-traced departmental seal
+of same-width hairlines. Its first shape, which IS the question, caps the side-by-side OVERLAP
+at 1.0 pt and puts no cap on the GAP, so it rejects the mitre overlap that two bands of
+different width actually make. Corrected, the reach is **16 documents and 67 boundaries**, not
+49 and 770. Use `mixedcensus-r148/mixed-census.py` (thickness) or `extent-census.py` (extent,
+which also catches a `double` border beside a single one, where every band is one thickness and
+only the extent differs). Kept as the record of what round 146 ran.
 
     census-pdf.py <sweep.tsv> <out-prefix>
 

@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Count horizontal grid lines carrying more than one band width, in any rendering.
 
-**UNRECONCILED — do not quote this script's numbers.** It answers 0 mixed boundaries for
-26.2.4.2's own rendering of `150_5300_13_chg8.doc` and `150-5370-10H.docx`, which round 146's
-`census-pdf.py` scored at 210 and 206. One of the two readings is wrong and this round did not
-establish which: `census-pdf.py` matches two shapes with a tolerance, including a narrower band
-contained inside a wider one, where this groups on an exactly rounded top edge. It is kept
-because the question it asks -- how many mixed boundaries are in OUR ink, not the reference's --
-is the one that bounds this change, and because a discarded instrument is re-written by the next
-round that wants it.
+**RECONCILED in round 148, in this script's favour.** It answered 0 mixed boundaries for
+26.2.4.2's own rendering of `150_5300_13_chg8.doc` and `150-5370-10H.docx` where round 146's
+`census-pdf.py` scored 210 and 206, and the 0 is right: `census-pdf.py` counts two shapes and
+compares *thickness* in neither the second nor, through an inverted side-by-side test, reliably
+in the first. All 210 and all 206 are its second shape firing on a vector-traced departmental
+seal -- 351 of that page's 355 horizontal segments are 0.069 pt hairlines 8-10 pt long, stacked
+within 6 pt of one another and all of ONE width. The two instruments never disagreed about mixed
+widths. See `probes/mixedcensus-r148/results.md`, whose `mixed-census.py` is the sharper form of
+this (it adds x-abutment, which this ignores: 59 boundaries in 14 documents against this
+script's 60 in 15).
 
 The point of running it on OUR output as well as the reference's: round 146's census read the
 reference's ink, and that is an upper bound on what a change to our painter can move. Where our
