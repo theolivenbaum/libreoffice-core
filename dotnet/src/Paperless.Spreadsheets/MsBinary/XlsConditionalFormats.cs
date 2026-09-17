@@ -303,6 +303,12 @@ internal sealed class XlsConditionalFormats
     /// <inheritdoc cref="AreaPatternUnused"/>
     private const uint AreaBackgroundUnused = 0x00040000;
 
+    /// <summary>System window text, <c>EXC_COLOR_WINDOWTEXT</c> — an unstated foreground.</summary>
+    private const int WindowTextColour = 64;
+
+    /// <summary>System window background, <c>EXC_COLOR_WINDOWBACK</c> — an unstated background.</summary>
+    private const int WindowBackColour = 65;
+
     /// <summary>
     /// The <c>ScConditionMode</c> a <c>CF</c> comparison byte names, in this reader's spelling.
     /// </summary>
@@ -474,20 +480,20 @@ internal sealed class XlsConditionalFormats
         bool backgroundUsed = (flags & AreaBackgroundUnused) == 0;
         bool patternUsed = (flags & AreaPatternUnused) == 0;
 
-        const int SolidPattern = 1;
-
-        if (backgroundUsed && (!patternUsed || pattern == SolidPattern))
+        if (backgroundUsed && (!patternUsed || pattern == XlsPatternFill.Solid))
             return palette.SchemeColour(background);
 
-        if (!patternUsed || pattern == 0) return null;
+        if (!patternUsed || pattern == XlsPatternFill.None) return null;
 
-        // A hatch is a foreground over a background that one colour cannot stand for, so the
-        // foreground is reported — which is what `XlsDecorationTable.FormatOf` does not do for a
-        // stated `XF`, because there the background is Calc's fallback. Here the background may
-        // be the unstated half, and a rule that paints nothing at all is worse than one that
-        // paints the hatch's ink.
-        if (foregroundUsed) return palette.SchemeColour(foreground);
-        return backgroundUsed ? palette.SchemeColour(background) : null;
+        // A hatch is the two colours mixed at the weight the pattern number carries, not either
+        // of them whole — see `XlsPatternFill`, and note that a `CF` record is where the two
+        // colours really can be stated separately, so the window-colour substitutions below are
+        // the reference's own (`XclImpCellArea::FillToItemSet`, `xistyle.cxx`:1105-1111) rather
+        // than a guard against a bad index.
+        return XlsPatternFill.Resolve(
+            pattern,
+            palette.SchemeColour(foregroundUsed ? foreground : WindowTextColour) ?? Colour.Black,
+            palette.SchemeColour(backgroundUsed ? background : WindowBackColour) ?? Colour.White);
     }
 }
 

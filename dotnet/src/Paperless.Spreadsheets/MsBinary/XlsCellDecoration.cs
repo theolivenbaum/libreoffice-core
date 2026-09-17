@@ -150,12 +150,18 @@ internal sealed class XlsDecorationTable
         bool ownAttributes = HasStyleParent(index);
 
         Colour? background = null;
-        if ((xf.StatesArea || ownAttributes) && xf.Pattern != 0)
+        if ((xf.StatesArea || ownAttributes) && xf.Pattern != XlsPatternFill.None)
         {
-            // Pattern 1 is solid and its colour is the foreground. Everything else is a hatch
-            // of foreground over background, which one colour cannot stand for, so the
-            // background is reported — which is what Calc falls back to.
-            background = xf.Pattern == 1 ? Colour(xf.ForeColour) : Colour(xf.BackColour);
+            // A hatch is the two colours mixed at the weight the pattern number carries, not
+            // either of them whole — see `XlsPatternFill`. `solid` is the same sum at a ratio of
+            // nothing, which returns the foreground, so it is not a special case here. An `XF`
+            // marks all three of its area parts used together (`XclImpCellArea::SetUsedFlags`,
+            // `xistyle.cxx`:1036-1039), so both colours are always stated and the window-colour
+            // fallbacks below are only reached for an index the palette does not hold.
+            background = XlsPatternFill.Resolve(
+                xf.Pattern,
+                Colour(xf.ForeColour) ?? Core.Graphics.Colour.Black,
+                Colour(xf.BackColour) ?? Core.Graphics.Colour.White);
         }
 
         SheetCellBorders borders = xf.StatesBorder || ownAttributes
