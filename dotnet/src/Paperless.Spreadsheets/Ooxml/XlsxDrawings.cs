@@ -299,14 +299,35 @@ internal static class XlsxDrawings
             }
         }
 
+        // A shape's own interior can be a bitmap rather than a colour: `a:blipFill` inside
+        // `xdr:sp/xdr:spPr`, which is a *fill*, not an `xdr:pic`. It is drawn here rather than in
+        // `XlsxShapeInk` because the picture below already does every part of the work — the blip
+        // choice, `a:alphaModFix`, `a:srcRect` — and because `Ink` carries colours, so teaching it
+        // a bitmap would mean a second image path. `PptxSlideLayout` and `DocxPictures` resolve the
+        // same element; only the spreadsheet reader had the hole, and the ten corpus shapes were
+        // drawn with no interior at all.
+        //
+        // **Only `a:stretch`.** A stretched bitmap fills the shape's rectangle, which is exactly
+        // what the picture path draws, so the two are the same operation. `a:tile` is a repeat at
+        // the blip's own size with its own offsets and is a different geometry; it is left
+        // unfilled, as before, rather than drawn stretched — a tile painted stretched would be a
+        // confident wrong answer where today there is an absent one. No corpus shape tiles: all
+        // ten are `prstGeom` `rect`, `a:stretch`, unrotated, and nine of ten also state `a:srcRect`.
+        XElement? shapeFill = picture is not null || shape is null
+            ? null
+            : Child(Child(shape, DrawingNamespace, "spPr"), MainNamespace, "blipFill");
+
+        if (shapeFill is not null && Child(shapeFill, MainNamespace, "stretch") is null)
+            shapeFill = null;
+
         // A shape carries no image and no chart, so it reaches the print area and stops there.
-        if (picture is null) return drawing;
+        if (picture is null && shapeFill is null) return drawing;
 
         // `BlipReference.Choose` rather than `r:embed` read straight off the blip: since Office 2016
         // one `a:blip` may name an SVG in an `asvg:svgBlip` extension beside the raster, and the
         // vector is the one to draw. The raster is kept beside it, so a decode that comes back empty
         // still leaves the picture the file put there for exactly that.
-        XElement? blipFill = Child(picture, DrawingNamespace, "blipFill");
+        XElement? blipFill = shapeFill ?? Child(picture, DrawingNamespace, "blipFill");
         XElement? blip = Child(blipFill, MainNamespace, "blip");
         BlipReference.Choice choice = BlipReference.Choose(blip);
 
