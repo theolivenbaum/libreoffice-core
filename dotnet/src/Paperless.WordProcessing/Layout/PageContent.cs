@@ -202,6 +202,57 @@ public sealed record PageParagraph : PageBlock
     public Length Tracking { get; init; }
 
     /// <summary>
+    /// The character width scaling applied where the paragraph's runs say nothing else, as a
+    /// percentage.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Tracking"/>'s twin, and it was missing for exactly the reason the remark above
+    /// gives for tracking: a paragraph set end to end in one scaled style is <strong>uniform by
+    /// every test <see cref="Runs"/> makes</strong>, so it arrives at <see cref="Measure"/> with
+    /// no runs at all and was measured — and drawn — at 100 per cent. The property was resolved
+    /// correctly through the style chain the whole time; it had nowhere to go.
+    /// </para>
+    /// <para>
+    /// That is also why a run stating the <em>same</em> percentage as its style came out
+    /// unscaled, which is a trap for anyone probing this: setting the run to its style's own
+    /// value makes the paragraph uniform and so reproduces the defect rather than controlling for
+    /// it. A seat was nearly filed as "<c>w:w</c> is not applied at all" on that reading.
+    /// </para>
+    /// <para>
+    /// Measured on <c>Regulations Governing the Status…docx</c>, whose title style <c>SL</c>
+    /// states <c>&lt;w:w w:val="96"/&gt;</c> and whose title runs state no <c>w:rPr</c> at all:
+    /// its <c>Experts on Mission</c> was drawn <b>227.56 pt</b> against 26.2.4.2's <b>218.06</b>,
+    /// same face and same start, and the title then wrapped a word later on every line.
+    /// </para>
+    /// </remarks>
+    public int WidthPerCent { get; init; } = 100;
+
+    /// <summary>
+    /// Whether the paragraph's own character width is anything but natural, which is what puts it
+    /// on the measured path rather than the shortcut.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both layouters take a shortcut for a paragraph with no runs: they hand the line breaker the
+    /// <em>text</em>, a face, a size and <see cref="EffectiveShaping"/>, and that overload measures
+    /// from those alone. Tracking survives it because <see cref="EffectiveShaping"/> carries it;
+    /// a character width has nowhere to ride, so the lines were broken at the <b>unscaled</b>
+    /// widths and then drawn at the scaled ones.
+    /// </para>
+    /// <para>
+    /// That is why the defect was invisible to a one-line probe and to a width measurement: the
+    /// drawn line is exactly <c>scale ×</c> the unscaled one, so it looks right until the text is
+    /// long enough to wrap and then it breaks in the unscaled places. Measured on
+    /// <c>features/words-style-char-scale.docx</c>, whose fourth paragraph is a scaled style over
+    /// eighteen words: 26.2.4.2 breaks it into <b>two</b> lines and this tree broke it into
+    /// <b>three</b>, each exactly 0.6 of the unscaled control's — the same three the control
+    /// breaks into.
+    /// </para>
+    /// </remarks>
+    public bool IsHorizontallyScaled => WidthPerCent != TextWidthScale.Natural;
+
+    /// <summary>
     /// How the paragraph's text is shaped where its runs say nothing else, once
     /// <see cref="Tracking"/> has had its say.
     /// </summary>
@@ -640,7 +691,9 @@ public sealed record PageParagraph : PageBlock
 
         if (runs.Count == 0)
         {
-            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping, Tracking: Tracking, Item: Item));
+            runs.Add(new FormattedRun(
+                0, Text.Length, Face, EmSize, Shaping,
+                Tracking: Tracking, WidthPerCent: WidthPerCent, Item: Item));
         }
 
         return MeasuredParagraph.Measure(

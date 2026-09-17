@@ -2059,6 +2059,14 @@ public static class PageDrawing
                             paragraph.Colour,
                             paragraph.Shaping,
                             Tracking: paragraph.Tracking,
+
+                            // And the paragraph's own character width, which is tracking's twin
+                            // here as everywhere else: this is the SECOND fallback a uniform
+                            // paragraph goes through — `PageParagraph.Measure` builds the other —
+                            // and carrying the scale in one of the two is worse than carrying it
+                            // in neither, because the line would then break at the squeezed width
+                            // and be drawn at the unsqueezed one.
+                            WidthPerCent: paragraph.WidthPerCent,
                             Item: paragraph.Item),
                     ])));
         }

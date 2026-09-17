@@ -960,6 +960,10 @@ public sealed partial class DocxLayoutSource
             Shaping = new ShapingOptions(
                 Language: text.Language, DisableKerning: !text.AutoKerning),
             Tracking = text.Tracking,
+
+            // The paragraph mark's own character width, for the same reason as its tracking: a
+            // paragraph set end to end in one scaled style carries no runs at all.
+            WidthPerCent = text.WidthPerCent,
             Runs = runs,
             Fields = walker.Fields,
             Notes = NotesOf(walker.Notes),
