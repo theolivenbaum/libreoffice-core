@@ -109,9 +109,21 @@ internal static class DocxVmlFrames
     /// <summary>The VML shapes and groups of a <c>w:pict</c> that are not inside another group.</summary>
     /// <remarks>
     /// <para>
-    /// <c>v:shapetype</c> is excluded deliberately — it is the reusable geometry definition Word writes
-    /// ahead of the shape that uses it, it carries no <c>style</c>, and a reader that takes the first
-    /// VML element finds no size and silently reserves nothing.
+    /// <c>v:shapetype</c> is excluded — it is the reusable geometry definition Word writes ahead of
+    /// the shape that uses it, it carries no <c>style</c>, and a reader that takes the first VML
+    /// element finds no size and silently reserves nothing.
+    /// </para>
+    /// <para>
+    /// <strong>It was not excluded, and nor was anything else.</strong> This filter read
+    /// <c>IsShape(child) is not false</c> against a predicate that answered <c>true</c> or
+    /// <c>null</c> and never <c>false</c>, so the only condition that did any work was the group
+    /// test below: every descendant of the element was offered to <see cref="One"/>, a
+    /// <c>v:imagedata</c>, a <c>v:f</c> and a <c>v:path</c> among them. Inside a <c>w:pict</c> that
+    /// cost nothing, because <see cref="One"/> wants a size and those elements stated none. Inside
+    /// a <c>w:object</c> it cost a duplicate of everything: <see cref="One"/> falls back to the
+    /// <em>object's</em> <c>w:dxaOrig</c>/<c>w:dyaOrig</c>, which is the same pair for every
+    /// descendant, and <c>DocxPictures.ReadVml</c> searches <c>DescendantsAndSelf</c>, so the
+    /// <c>v:imagedata</c> element resolved itself and the replacement picture was drawn twice.
     /// </para>
     /// <para>
     /// Members of a <c>v:group</c> are excluded here and reached through <see cref="Group"/> instead,
@@ -122,17 +134,50 @@ internal static class DocxVmlFrames
     /// </remarks>
     private static IEnumerable<XElement> TopLevel(XElement element)
         => element.Descendants().Where(child =>
-            IsShape(child) is not false
+            IsShape(child)
             && !child.Ancestors()
                 .TakeWhile(ancestor => ancestor != element)
                 .Any(ancestor => ancestor.Name == XName.Get("group", OoxmlNamespaces.Vml)));
 
-    /// <summary>True for a VML shape or group, false for anything else.</summary>
-    private static bool? IsShape(XElement child)
+    /// <summary>True for a VML element that is a shape in its own right.</summary>
+    /// <remarks>
+    /// <para>
+    /// The ten are VML's own shape elements. <c>v:shape</c>, <c>v:rect</c>, <c>v:roundrect</c>,
+    /// <c>v:oval</c> and <c>v:group</c> were always here; <c>v:line</c>, <c>v:polyline</c>,
+    /// <c>v:curve</c>, <c>v:arc</c> and <c>v:image</c> are named rather than admitted by the
+    /// accident of the predicate never answering false. Everything else answers false —
+    /// <c>v:shapetype</c>, and the property elements (<c>v:fill</c>, <c>v:stroke</c>,
+    /// <c>v:shadow</c>, <c>v:path</c>, <c>v:formulas</c>, <c>v:f</c>, <c>v:handles</c>,
+    /// <c>v:textbox</c>, <c>v:textpath</c>, <c>v:imagedata</c>) which describe a shape rather
+    /// than being one. <strong>Only that second half has any reach</strong>, and the first is
+    /// named because it is what this method claims to answer rather than because the corpus
+    /// needs it.
+    /// </para>
+    /// <para>
+    /// <strong>Widening to the ten is a measured no-op, and an earlier draft of this remark said
+    /// the opposite.</strong> It claimed 72 of the corpus's 150 top-level <c>v:line</c> state a
+    /// sized <c>style</c>, so that narrowing back to the original five would drop them. The
+    /// figure is wrong: <b>all 150 state <c>from</c>/<c>to</c> attributes and none states a
+    /// <c>style</c> width or height at all</b>, every one is <c>position:absolute</c>, and
+    /// <see cref="Floating"/> wants both from the style — so it returns null for each of them
+    /// under either predicate. <see cref="Group"/> answers the same way for the other end: all
+    /// <b>715</b> <c>v:line</c> that are a direct child of a corpus <c>v:group</c> are missing at
+    /// least one of the <c>left</c>, <c>top</c>, <c>width</c> and <c>height</c> its own guard
+    /// requires. Rendering the <b>53</b> corpus documents that hold any of the five added
+    /// elements, once with this set and once narrowed to the original five, gives <b>53
+    /// byte-identical PDFs</b>. <c>probes/vmldup-r140/census-vml.py</c>.
+    /// </para>
+    /// <para>
+    /// What that measurement also says is that <strong>none of those 150 rules is drawn by this
+    /// tree at all</strong>, because a <c>v:line</c> states its extent in <c>from</c>/<c>to</c>
+    /// and nothing here reads them. That is a gap of its own and not this method's to close.
+    /// </para>
+    /// </remarks>
+    private static bool IsShape(XElement child)
         => child.Name.Namespace == OoxmlNamespaces.Vml
-           && child.Name.LocalName is "shape" or "rect" or "roundrect" or "oval" or "group"
-            ? true
-            : null;
+           && child.Name.LocalName is
+               "shape" or "rect" or "roundrect" or "oval" or "group"
+               or "line" or "polyline" or "curve" or "arc" or "image";
 
     /// <summary>
     /// A <c>v:group</c> flattened into one frame per member, each mapped out of the group's own
@@ -249,7 +294,7 @@ internal static class DocxVmlFrames
         (double baseX, double baseY) = Pair(group.Attribute("coordorigin")?.Value) ?? (0, 0);
         if (spaceX <= 0 || spaceY <= 0) return;
 
-        foreach (XElement member in group.Elements().Where(child => IsShape(child) is not null))
+        foreach (XElement member in group.Elements().Where(IsShape))
         {
             Dictionary<string, string> box = Style(member);
             if (Number(box.GetValueOrDefault("left", "")) is not { } left

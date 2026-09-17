@@ -178,8 +178,9 @@ it is against the wrong page. State the size Impress will actually use.
 
 ### Hand-written DOCX files
 
-Five documents that LibreOffice cannot produce, because what they exercise is something its own
-export normalises away. Each is written by a script rather than converted, and each is minimal.
+The documents below are ones LibreOffice cannot produce, because what they exercise is something
+its own export normalises away. *The count that stood here said five and the table has long held
+more; a number in prose beside a table it does not compute is a number that decays.* Each is written by a script rather than converted, and each is minimal.
 
 `shape-geometry.pptx` is hand-written for the same reason and one more. LibreOffice's own PPTX
 export resolves every themed fill to a literal colour and rounds every offset through hundredths
@@ -199,6 +200,7 @@ combination that tells the two transform orders apart.
 | `paragraph-spacing-collapsed.rtf` | And again in the format that defaults the other way round from the rest of the Word family. `\htmautsp` is the opt-in and reads backwards from its name: it asks for HTML auto-spacing, which is the *collapsing* behaviour. Hand-written, because LibreOffice's RTF export writes the control word only when the document collapses and the interesting cases are both sides of it |
 | `page-top-line-gap.docx` | Where a face's **external** leading sits in the line box, which is a different quantity from every other entry in this group and needs a document that can only be read against a page's top margin. The gap leaves line *n*'s descent and arrives in line *n*+1's ascent, so a pitch comparison cancels it and only an absolute first baseline can see it. Two blocks, each starting a page: one in Liberation Sans, whose `hhea` gap is 67/2048, and one in Carlito, whose gap is zero. LibreOffice puts the first Liberation Sans baseline at **82.3008 pt** inside a 72 pt margin — 206 twips of ascent, not the 199 the ascender alone gives — and the Carlito block is the control that must not move either way. Hand-written rather than round-tripped, because it has to name two faces with different line gaps and a conversion rewrites them |
 | `paragraph-shading.docx` | Paragraph backgrounds, hand-written so every edge is a round number of twips. Thirteen paragraphs: one shaded directly with indents *and* spacing on both sides, so the fill can be shown to span the indents and to stop at the lines; a pair shaded the same colour with spacing between them, which LibreOffice paints as **one** band; a pair shaded different colours with the same spacing, which it paints as two with the gap left white; a paragraph shaded only by its style; and one whose style overrides its parent's fill with `w:fill="auto"`, which paints nothing. It is hand-written because LibreOffice's own DOCX export moves a paragraph fill into a `w:pPr/w:shd` on every paragraph of the style, which would lose the direct-versus-style distinction |
+| `words-object-duplicate.docx` | A `w:object` carrying `w:dxaOrig`/`w:dyaOrig` and holding a `v:shapetype`, a `v:shape` whose own `style` states the box, and a `v:imagedata` inside the shape — the smallest markup that shows a replacement picture being drawn twice. LibreOffice cannot produce it: its own export writes the picture as a `w:drawing`, and the defect lives in the VML path. 26.2.4.2 draws **one** image, at `77.3 x 49.5`; the two rectangles a broken reader draws are `77.25 x 49.5` from the shape's style and `77 x 49.85` from `dxaOrig`/`dyaOrig` over twenty, so asserting the *size* is what distinguishes "one picture" from "the wrong one of the two". Built by `probes/vmldup-r140/make-fixture.py`; it carries an empty `word/settings.xml` for the reason the paragraph below this table gives. |
 
 #### Why `contextual-spacing-styles` is hand-written, and why every `w:after` in it is zero
 
@@ -378,6 +380,16 @@ each is then scored against the other's rendering. `dotnet/tests/corpus` already
 stems duplicated between its own subdirectories, so check a new one against the whole corpus —
 `features/`, `minimal/`, `/home/user/sample-files` and `/home/user/corpus-odf` — before authoring
 it, and render one document per output directory regardless.
+
+### The two round-138/139 sheet fixtures
+
+Both are built by a script rather than converted, and both had their expected values read out of
+26.2.4.2's own rendering of the fixture before any assertion was written.
+
+| file | what it separates |
+|---|---|
+| `sheet-shape-picture-fill.xlsx` | an `a:blipFill` inside `xdr:sp/xdr:spPr` — a shape whose own **interior** is a bitmap, which is a fill and not an `xdr:pic`. Reduced from the corpus's ten such shapes to one anchor. 26.2.4.2 places the image once, at `143.972 0 0 71.972 100.998 686.324 cm`. Built by `probes/sheetfill-r138/make-fixture.py` |
+| `sheet-numfmt-colour.xlsx` | a number format's `[Red]`/`[Blue]` colour clause, and **which subformat a value selects**. Its fourth cell holds the same `-2.5` as its second under a *colourless* format, so an implementation that colours by the sign of the number rather than by the selected section fails on it — a red-only fixture cannot tell the two apart, and nor can one that omits the blue section, since `[Blue]` is `#0000FF` and not `#000080`. Built by `probes/numfmtcolour-r139/make-fixture.py` |
 
 ## Writing a flat-XML corpus document by hand
 
