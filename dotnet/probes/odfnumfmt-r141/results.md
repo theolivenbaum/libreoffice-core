@@ -182,12 +182,25 @@ was reachable.
 
 ## 7. What this round did not do
 
-* **`FormatKind` still reads the owner element's name, not the assembled code.** For an accounting
-  format the owner is a `number:text-style`, so an ODF cell holding a number under one answers
-  `NumberFormatKind.Text` where the OOXML reader — which derives the kind from `Sections[0].Kind`
-  of the compiled code — answers `Number`. That decides the `###` rule and nothing else, and its
-  reach is **31 of the 307 converted `.ods` and 102 690 numeric cells**, which is too large to
-  carry unmeasured on the back of this change. Seated as **O98**.
+* **`FormatKind` still reads the owner element's name, not the assembled code — and that turned
+  out not to matter.** It was seated as **O98** on the reasoning that an accounting format's owner
+  is a `number:text-style`, so an ODF numeric cell under one answers `NumberFormatKind.Text` where
+  `XlsxCellFormats` would answer `Number`, and that this decides the `###` rule. **Both halves of
+  that were wrong and the probe took eight minutes.** The `###` rule does not consult the kind at
+  all; its only consumer is `SheetTextLayout.Breaks`, which decides whether a *wrapping* numeric
+  cell line-breaks. Three one-attribute variants of the fixture — four-character columns, six
+  with `wrapText` everywhere, and the same with the values widened to 1 234 567.89 — agree with
+  26.2.4.2 **cell for cell and row height for row height on all three**, because `###` fires
+  before the wrap can. The corpus case exists in quantity and still shows nothing: 31 documents
+  and 102 690 numeric cells under a text-style owner, 7 documents and 75 402 of them wrapping.
+  **O98 is now a nil-reach entry, refuted the day it was seated.** The probe builders are
+  `o98-narrow-fixture.py`, `o98-wrap-fixture.py` and `o98-wrapbig-fixture.py`, and the census is
+  `o98-wrap-census.tsv`.
+
+  *The general point is worth more than the entry.* The seat was written from reading the source
+  and not from running it, and it named a property — `ShowsHashesWhenTooNarrow` — that **does not
+  exist in this tree**. A seat is a claim, and a claim that cites an identifier should have been
+  grepped for.
 * **`number:fill-character` and `loext:blank-width-char`** — **O99**, above.
 
 ## 8. Files
@@ -200,4 +213,5 @@ was reachable.
 | `convert-ods.sh` | re-makes `/home/user/corpus-odf/ods` from the corpus with 26.2.4.2 |
 | `par-sweep.sh` | renders the column three at a time, one output directory per document |
 | `fingerprints-before.txt`, `fingerprints-after.txt` | md5 of all 307 renderings, each leg |
-| `movers.tsv` | the renderings that move, with pages and alphanumerics |
+| `movers.tsv` | the renderings that move, with pages, alphanumerics and coloured spans |
+| `o98-*-fixture.py`, `o98-wrap-census.tsv` | the three variants and the census that refuted O98 |
