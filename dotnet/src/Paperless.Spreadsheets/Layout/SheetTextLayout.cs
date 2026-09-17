@@ -191,6 +191,27 @@ internal static class SheetTextLayout
     /// converts that file to draws the same cell <c>#FF0000</c>. <c>probes/quantise-r120/</c> §5.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The colour the cell's number format states for the subformat its value selects, or null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only a <em>numeric</em> cell asks. A subformat's colour applies to the value it formats,
+    /// and the text subformat is the fourth one; a cell holding a string takes its own colour,
+    /// which is what <see cref="NumberFormatCode.SelectForText"/> would have to be consulted for
+    /// and which no corpus document states a colour on.
+    /// </para>
+    /// <para>
+    /// Null is the answer for every format that names no colour, which is nearly all of them —
+    /// 14 of 240 corpus workbooks state one at all, and 8 hold a value that selects a coloured
+    /// subformat. See <c>probes/numfmtcolour-r139/results.md</c>.
+    /// </para>
+    /// </remarks>
+    private static Colour? NumberFormatColour(in SheetCellText cell)
+        => cell.Value is double value && cell.Format.NumberFormat is { } code
+            ? code.SelectFor(value).Colour
+            : null;
+
     private static Colour? FieldInk(in SheetCellText cell)
     {
         if (!cell.IsField) return null;
@@ -271,7 +292,15 @@ internal static class SheetTextLayout
         // The cell's own colour is the fallback rather than the answer: a rich cell's portions
         // carry theirs, and a plain one's segment carries none so that the two paths emit the
         // same paint for the same cell.
-        Colour fallback = cell.Format.Colour;
+        //
+        // A number format's subformat may state one of its own — `#,##0 ;[Red](#,##0)` draws a
+        // negative red — and it beats the cell's, because Calc paints the colour the *selected
+        // subformat* named: `ScOutputData` takes it from the `ScPatternAttr`'s format through
+        // `SvNumberFormatter::GetOutputString`, which returns the subformat's colour beside the
+        // text. Which subformat that is depends on the cell's value, so this is resolved per
+        // cell here rather than per style on `SheetCellFormat`. See
+        // `NumberFormatSection.Colour`, including why `[COLOR n]` is left unresolved.
+        Colour fallback = NumberFormatColour(cell) ?? cell.Format.Colour;
 
         if (cell.Format.IsRotated)
         {

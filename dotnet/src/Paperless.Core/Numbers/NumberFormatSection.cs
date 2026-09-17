@@ -26,8 +26,10 @@ public sealed class NumberFormatSection
         bool hasTimePart,
         bool twelveHour,
         bool hasElapsed,
-        bool hasUnreproducedDirective)
+        bool hasUnreproducedDirective,
+        Graphics.Colour? colour)
     {
+        Colour = colour;
         Code = code;
         _tokens = tokens;
         Kind = kind;
@@ -103,6 +105,43 @@ public sealed class NumberFormatSection
     /// </remarks>
     public bool HasFillDirective { get; }
 
+    /// <summary>
+    /// The colour this subformat states, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>[Red]</c> in a subformat colours the cells that subformat formats, so it belongs to
+    /// the <em>section</em> and not to the format: <c>#,##0 ;[Red](#,##0)</c> draws a positive
+    /// in the cell's own colour and a negative in red, and which one a cell gets is decided by
+    /// its value. It was dropped with the other bracketed bodies under the reasoning that a
+    /// colour "changes appearance rather than the text this extracts" — true of the text, and
+    /// false of the ink.
+    /// </para>
+    /// <para>
+    /// <strong>The ten names and their values are LibreOffice's own</strong>, in its own order:
+    /// <c>ImpSvNumberformatScan::StandardColor</c> is
+    /// <c>{ BLACK, LIGHTBLUE, LIGHTGREEN, LIGHTCYAN, LIGHTRED, LIGHTMAGENTA, BROWN, GRAY,
+    /// YELLOW, WHITE }</c> against the keywords <c>BLACK BLUE GREEN CYAN RED MAGENTA BROWN GREY
+    /// YELLOW WHITE</c> (<c>svl/source/numbers/zforscan.cxx</c>:98-111, 145-147). So
+    /// <c>[Blue]</c> is <c>#0000FF</c> and not <c>#000080</c>, and <c>[Grey]</c> is spelled the
+    /// British way. Confirmed against 26.2.4.2's own output: <c>[Red]</c> draws <c>#ff0000</c>
+    /// and <c>[Blue]</c> <c>#0000ff</c>.
+    /// </para>
+    /// <para>
+    /// <strong><c>[COLOR n]</c> is deliberately not resolved</strong> and leaves this null.
+    /// LibreOffice takes it from <c>GetUserDefColor(n-1)</c>, which Calc wires to
+    /// <c>XColorList::CreateStdColorList()</c> (<c>sc/source/core/data/documen9.cxx</c>:246-259)
+    /// — the palette loaded from <c>SvtPathOptions().GetPalettePath()</c>, i.e. the
+    /// <c>share/palette/standard.soc</c> of whichever installation is running, 120 entries and
+    /// user-configurable. Index 9 there is <c>#dddddd</c> "Light Gray 4", which is exactly what
+    /// 26.2.4.2 paints for <c>[Color10]</c>. Reproducing that would mean vendoring one
+    /// installation's UI palette into a document renderer and pinning to it, which is the same
+    /// class of coupling as the bundled-font confound. Corpus reach of the gap is <b>18 cells in
+    /// one document</b>; see <c>probes/numfmtcolour-r139/results.md</c>.
+    /// </para>
+    /// </remarks>
+    public Graphics.Colour? Colour { get; }
+
     /// <summary>The tokens, for the renderer.</summary>
     internal IReadOnlyList<FormatToken> Tokens => _tokens;
 
@@ -128,6 +167,7 @@ public sealed class NumberFormatSection
         bool twelveHour = false;
         bool hasElapsed = false;
         bool unreproduced = false;
+        Graphics.Colour? colour = null;
 
         for (int i = 0; i < code.Length;)
         {
@@ -201,8 +241,15 @@ public sealed class NumberFormatSection
                     {
                         unreproduced = true;
                     }
-                    // Anything else — a colour name, [ENG] — changes appearance rather than
-                    // the text this extracts.
+                    else if (StandardColour(body) is { } named)
+                    {
+                        // The first colour wins, as LibreOffice's scan does: it takes the colour
+                        // at the head of the subformat and a second one is a syntax error there
+                        // rather than an override.
+                        colour ??= named;
+                    }
+                    // Anything else — [ENG], [COLOR n] — changes appearance rather than the
+                    // text this extracts, or needs a palette this does not have.
                     continue;
                 }
 
@@ -331,8 +378,34 @@ public sealed class NumberFormatSection
 
         return new NumberFormatSection(
             code, tokens, kind, condition, percents, thousandScale,
-            hasDate, hasTime, twelveHour, hasElapsed, unreproduced);
+            hasDate, hasTime, twelveHour, hasElapsed, unreproduced, colour);
     }
+
+    /// <summary>
+    /// One of LibreOffice's ten colour keywords, or null for anything else.
+    /// </summary>
+    /// <remarks>
+    /// The names and the values are both <c>svl/source/numbers/zforscan.cxx</c>'s, paired in its
+    /// own order (:98-111 against :145-147). Matching is case-insensitive because
+    /// <c>ImpSvNumberformatScan::GetColor</c> upper-cases the word first (:548), which is why a
+    /// file may write <c>[Red]</c>, <c>[RED]</c> or <c>[red]</c> and all three are the same
+    /// colour. <c>GREY</c> is the spelling LibreOffice keys on; <c>GRAY</c> is accepted beside
+    /// it because Excel writes that and the two name one colour.
+    /// </remarks>
+    private static Graphics.Colour? StandardColour(string body) => body.ToUpperInvariant() switch
+    {
+        "BLACK" => Graphics.Colour.FromRgb(0x000000),
+        "BLUE" => Graphics.Colour.FromRgb(0x0000FF),
+        "GREEN" => Graphics.Colour.FromRgb(0x00FF00),
+        "CYAN" => Graphics.Colour.FromRgb(0x00FFFF),
+        "RED" => Graphics.Colour.FromRgb(0xFF0000),
+        "MAGENTA" => Graphics.Colour.FromRgb(0xFF00FF),
+        "BROWN" => Graphics.Colour.FromRgb(0x808000),
+        "GREY" or "GRAY" => Graphics.Colour.FromRgb(0x808080),
+        "YELLOW" => Graphics.Colour.FromRgb(0xFFFF00),
+        "WHITE" => Graphics.Colour.FromRgb(0xFFFFFF),
+        _ => null,
+    };
 
     private static bool IsNumeralOrCalendarDirective(string body)
         => body.StartsWith("NatNum", StringComparison.OrdinalIgnoreCase)

@@ -2134,3 +2134,5 @@ dotnet/probes/pagefield-r137/syn/syn-group-para.docx	2026-09-15	current	24.2.7.2
 dotnet/probes/pagefield-r137/syn/syn-group-table.docx	2026-09-15	current	24.2.7.2;26.2.4.2	present	current	dotnet/probes/pagefield-r137/results.md
 dotnet/probes/sheetfill-r138/results.md	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/Ooxml/XlsxDrawings.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetShapePictureFillTests.cs
 dotnet/probes/sheetfill-r138/make-fixture.py	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/Ooxml/XlsxDrawings.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetShapePictureFillTests.cs
+dotnet/probes/numfmtcolour-r139/results.md	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Numbers/NumberFormatSection.cs;dotnet/src/Paperless.Spreadsheets/Layout/SheetTextLayout.cs
+dotnet/probes/numfmtcolour-r139/make-fixture.py	2026-09-17	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Numbers/NumberFormatSection.cs;dotnet/src/Paperless.Spreadsheets/Layout/SheetTextLayout.cs
