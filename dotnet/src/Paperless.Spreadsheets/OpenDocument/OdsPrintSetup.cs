@@ -103,7 +103,20 @@ internal static class OdsPrintSetup
         string[] prints = (Get(page, OdfNamespaces.Style, "print") ?? string.Empty)
             .Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        string? centring = Get(page, OdfNamespaces.Style, "table-centring");
+        // "table-centering", with the American spelling, because that is the attribute's name in
+        // ODF and an attribute name is not ours to anglicise. This file's convention is British
+        // everywhere it names something of our own -- `centring`, `CentresHorizontally`,
+        // `SheetHorizontalAlignment.Centre` -- and the convention leaked one word too far: asking
+        // for `style:table-centring` matched nothing in any `.ods` ever read, so
+        // `CentresHorizontally` and `CentresVertically` were never once true.
+        //
+        // [src] `xmloff/source/core/xmltoken.cxx`:1992 interns the token, and
+        // `PageMasterStyleMap.cxx`:97-98 maps the one attribute onto BOTH `PROP_CenterHorizontally`
+        // and `PROP_CenterVertically` with `MID_FLAG_MERGE_ATTRIBUTE`, its value being
+        // `horizontal`, `vertical` or `both`. [bin] 81 of the 307 converted `.ods` state it, on 236
+        // rendered tables; the specification's spelling appears in the corpus 175 times and the
+        // British one not once. See `probes/invcol-r149/results.md`.
+        string? centring = Get(page, OdfNamespaces.Style, "table-centering");
         (PrintScaleMode mode, int percentage, int count, int wide, int tall) = ReadScale(page);
 
         return setup with
