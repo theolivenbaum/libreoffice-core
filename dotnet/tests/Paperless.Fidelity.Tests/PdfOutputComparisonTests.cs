@@ -119,9 +119,12 @@ public sealed class PdfOutputComparisonTests : IDisposable
                 TolerancePoints,
                 $"{where}: pen at {mine.X:F3} pt, {reference.X - PdfPenOffsetPoints:F3} pt rendered");
 
-            // The size, exactly. A PDF states it in the Tf operator, so there is nothing to round:
-            // a difference here is a font size read wrongly, not a measurement.
-            mine.FontSize.ShouldBe(reference.FontSize, 0.001, $"{where}: font size");
+            // The size, exactly -- at the resolution the reference's own writer prints one, which is a
+            // whole tenth of a point and not the exact number it laid out with. Ours is printed exactly,
+            // so it is rounded the writer's way before the comparison rather than compared through a
+            // tolerance, which would accept a size half a tenth out in either direction.
+            PdfFontSizes.AsLibreOfficePrintsIt(mine.FontSize)
+                .ShouldBe(reference.FontSize, 0.001, $"{where}: font size");
 
             // And how many glyphs the line holds. One fewer is allowed and only one: LibreOffice
             // draws the blank a wrapped line ends with and we do not, which is a glyph that

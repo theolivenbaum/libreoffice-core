@@ -251,3 +251,25 @@ and we do not — and closing one of them exposes the other, exactly as round 15
 This is the `w:pgBorders` argument in reverse: the gate's columns are not a measure of whether a
 page is right, and a round that optimised them would have kept the blank page. Recorded here, and in
 `OPEN-ISSUES.md`, so that the row is not read later as a regression.
+
+## 11. Five fidelity tests read the reference's `Tf` as if it were exact, and now round it the writer's way
+
+The suite is green at its known baseline except for five tests, and all five are C17 in the test
+kit rather than a defect: they compare a font size against the number 26.2.4.2's PDF *printed*.
+
+| test | expected | drawn |
+|---|--:|--:|
+| `FootnoteComparisonTests.EveryCitationIsSetAndRaisedAsLibreOfficeSetsIt` (`.docx`, `.doc`, `.odt`, `.fodt`) | `6.40@4.40` | **`6.35@4.40`** |
+| `PdfOutputComparisonTests.EveryLineIsShownWhereLibreOfficeShowsIt` (`footnotes.docx`) | 6.4 ± 0.001 | **6.35** |
+
+Eleven point is 220 twips, 58 per cent of it is 127.6, the reference's layout sets **127** — 6.35 pt
+— and its writer prints **6.4**. The old expectation was met by a size that was wrong by a twip, so
+these tests were passing *because* of the defect.
+
+`Paperless.TestKit.LibreOffice.PdfFontSizes.AsLibreOfficePrintsIt` is the correction: both sides'
+sizes are rounded to a tenth of a point through their twip count before they are compared, which is
+a no-op on the reference's half. The alternative — loosening the tolerance to 0.05 pt — would accept
+a size half a tenth out in either direction, and the other alternative, printing a coarser size in
+our own PDF, is making our output worse to make a comparison exact. The rise, the pen and the glyph
+counts keep their own resolution, and the five citation sizes this test distinguishes (11.00, 6.40,
+5.80, 10.00) are a tenth apart or more, so nothing it was built to catch is given up.
