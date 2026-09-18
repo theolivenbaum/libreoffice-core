@@ -171,25 +171,51 @@ public class ControlOnlyParagraphHeightTests
     }
 
     /// <summary>
-    /// The kept run is zero length, so nothing but the fallback can see it.
+    /// The kept run keeps its own range, so the fold can find it — and it must, which is the
+    /// opposite of what this test asserted until round 151.
     /// </summary>
     /// <remarks>
-    /// <c>Fold</c> matches a run on <c>touches</c> or <c>contains</c> and both are false for an empty
-    /// range; <c>RunsBetween</c> clips it away, so the drawing pass never meets it and no glyph run is
-    /// emitted for a paragraph that has no glyphs. Giving the run the paragraph's whole length instead
-    /// would put it in the fold — where it would be right by accident here and wrong the moment a real
-    /// run sat beside it.
+    /// <para>
+    /// <b>This test held that the kept run is zero length and therefore invisible to <c>Fold</c></b>,
+    /// on the reasoning that giving it a range <em>"would put it in the fold, where it would be right
+    /// by accident here and wrong the moment a real run sat beside it"</em>. The hazard it named is
+    /// the actual rule: a real run sitting beside it is the <em>ordinary</em> case —
+    /// <c>&lt;w:r&gt;&lt;w:br/&gt;&lt;/w:r&gt;</c> at one size ahead of a run at another — and with the
+    /// break run invisible, <c>MeasureLine</c> found nothing covering the break-only line, fell
+    /// through to its last resort and took <c>_runs[0]</c>, which is the <em>neighbour</em>. The line
+    /// then came out the height of whatever text was beside it.
+    /// </para>
+    /// <para>
+    /// [bin] Thirteen arms of <c>probes/brline-r149/fixtures3</c> varying only the break run's
+    /// <c>w:sz</c>: 26.2.4.2 draws <b>1.150 … 46.550 pt</b> on a 1.164-em slope and this tree drew a
+    /// flat <b>12.800</b> at every one of them, agreeing only at <c>b22</c> — 11 pt, the paragraph's
+    /// own size. With the run in the fold, all 70 of that round's banked arms agree to 0.05 pt,
+    /// across four faces, four line-spacing rules and the page body as well as a shape.
+    /// <c>probes/brline-r151/discriminate.txt</c>.
+    /// </para>
+    /// <para>
+    /// The two properties the old assertion was really protecting are kept and asserted below: the run
+    /// carries no shaped text, so it adds no advance and draws no glyph. The drawing pass re-shapes
+    /// from the text and skips a run that shapes to nothing.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void TheKeptRunIsInvisibleToDrawingAndToTheFold()
+    public void TheKeptRunCarriesItsRangeAndNoGlyphs()
     {
         OpenTypeFace face = Carlito();
         MeasuredParagraph paragraph = MeasuredParagraph
             .Measure("\u2028", [new FormattedRun(0, 1, face, Size)]);
 
         paragraph.Runs.Count.ShouldBe(1);
-        paragraph.Runs[0].Run.Length.ShouldBe(0);
-        paragraph.RunsBetween(0, 1).ShouldBeEmpty();
+
+        // Its own range, so `Fold` matches it on `touches` for a line over the break and on
+        // `contains` for the empty line the break ends.
+        paragraph.Runs[0].Run.Start.ShouldBe(0);
+        paragraph.Runs[0].Run.Length.ShouldBe(1);
+        paragraph.RunsBetween(0, 1).ShouldHaveSingleItem();
+
+        // And no ink and no advance, which is what made the zero-length form look safe.
+        paragraph.Runs[0].Shaped.Glyphs.ShouldBeEmpty();
         paragraph.WidthBetween(0, 1).ShouldBe(Length.Zero);
     }
 

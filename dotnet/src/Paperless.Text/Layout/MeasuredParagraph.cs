@@ -401,8 +401,12 @@ public sealed class MeasuredParagraph
 
         foreach (FormattedRun run in formatted)
         {
+            bool itemised = false;
+
             foreach (FormattedRun part in SubRuns(text, run, items, options))
             {
+                itemised = true;
+
                 ShapedText shaped = engine.Shape(
                     part.Face, text.AsSpan(part.Start, part.Length), part.EffectiveShaping);
 
@@ -428,6 +432,35 @@ public sealed class MeasuredParagraph
                 }
 
                 running += Scaled(Advance(shaped, shaped.AdvanceInDesignUnits, part.EmSize, grid), squeeze);
+            }
+
+            // A run every one of whose characters is a format control makes no sub-run at all, and
+            // until round 151 it then vanished from the measurement entirely. The commonest such run
+            // is a MANUAL LINE BREAK on its own: U+2028 is what all four word-processing readers and
+            // both DrawingML readers emit for one, and `TextItemiser.IsFormatControl` cuts it out of
+            // every sub-run.
+            //
+            // The paragraph whose *whole* text is breaks already had a repair -- the `measured.Count
+            // == 0` fallback below -- but a break run beside ordinary text did not, and that is the
+            // ordinary case: `<w:r><w:br/></w:r>` at one size ahead of a run at another. `MeasureLine`
+            // then found no run covering the break-only line, fell through to its last resort, and
+            // took `_runs[0]`'s metrics -- which is the *neighbouring* run. So the line came out the
+            // height of whatever text was beside it instead of the height of the break's own face.
+            //
+            // [bin] Measured on `probes/brline-r149/fixtures3`, thirteen arms varying only the break
+            // run's `w:sz` from 1 pt to 40 pt: 26.2.4.2 draws 1.150 .. 46.550 pt on a 1.164-em slope
+            // and this tree drew a flat 12.800 at every one of them, agreeing only at `b22`, which is
+            // 11 pt -- the paragraph's own size. `probes/brline-r151/discriminate.txt`.
+            //
+            // Kept with its own range rather than as a zero-length marker, because `Fold` matches on
+            // `touches` or `contains` and a zero-length run satisfies neither. It carries
+            // `ShapedText.Empty`, so it adds no advance, draws nothing, and the prefix table's
+            // monotonic fix-up below covers the positions it leaves uncovered -- exactly as it did
+            // when the run was absent.
+            if (!itemised && run.Length > 0)
+            {
+                measured.Add(new MeasuredRun(
+                    run, ShapedText.Empty, LineSpacing.Resolve(run.Face, grid, leadingAboveText)));
             }
         }
 

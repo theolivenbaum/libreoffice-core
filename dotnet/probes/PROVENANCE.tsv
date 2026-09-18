@@ -2872,3 +2872,17 @@ dotnet/probes/charscale-r150/score.txt	2026-09-18	current	26.2.4.2	present	curre
 dotnet/probes/charscale-r150/sweep.sh	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/charscale-r150/words-char-scale.doc	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/charscale-r150/words-char-scale.rtf	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/compare.py	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/confinement.txt	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/diff-legs.py	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/discriminate.py	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/discriminate.txt	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/movers-paths.tsv	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/movers.txt	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/ours3.txt	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/ref-movers.sh	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/render-ours.sh	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/results.md	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/score.py	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/score.txt	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/brline-r151/sweep.sh	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
