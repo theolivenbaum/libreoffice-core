@@ -173,3 +173,81 @@ page 127 our stream runs one page *ahead*: 26.2.4.2 emits a near-empty page 127 
 its header and footer and nothing else — and we do not. That page was invisible while the
 document's two faults cancelled in the page stream; it is now the whole of the remaining gap and it
 is not this seat.
+
+## 8. [bin] Confinement and reach: 118 of 1620 renderings move, all of them word-processing
+
+Our half of the whole corpus, of the 337 converted `.odt` and of the 337 converted `.rtf`, rendered
+once at the round's base and once with the fix under `SOURCE_DATE_EPOCH=0`, one output directory per
+document. `sweep.sh`, `diff-legs.py`, `confinement.txt`.
+
+| family | ext | moved | of |
+|---|---|--:|--:|
+| words | docx | **29** | 271 |
+| words | doc | **11** | 66 |
+| odt column | odt | **39** | 337 |
+| rtf column | rtf | **39** | 337 |
+| slides | ppt / pptx | **0** | 302 |
+| sheets | xls / xlsm / xlsx | **0** | 307 |
+
+**118 of 1620 moved and 1502 are byte-identical**, and the 609 slides and sheets renderings are
+untouched — the layering holding, measured rather than inferred, because `Paperless.Presentations`
+has an escapement of its own and a different unit.
+
+Beside §6's denominator this is the *"census what a rule paints"* rule again: **57 `.docx` state an
+escapement and 29 of them draw a different page for it**, because the two rules agree at 28 of the
+57 half-point sizes and a document whose superscripts are all at 10 pt cannot move.
+
+## 9. [bin] The instrument that scores it, and the two that cannot
+
+**A document-level mean of |Δx| cannot see this change.** An escaped run's size moves the spans that
+follow it on its own line and nothing else, so on a page of a hundred spans the mean is diluted by
+two orders of magnitude: `score.py` reports 116 of 118 documents *level*, which is true and useless.
+Per span (`score2.py`), of the **5808 spans that moved between the two legs, 3372 are closer to
+26.2.4.2 and 2406 further** — a near coin flip, because a 0.05 pt shift lands either side of a
+position we already differ from the reference on for unrelated reasons.
+
+**What answers the question is the size itself, through §1's own quantisation.** The reference's
+`Tf` is its size rounded to a tenth of a point, so rounding *ours* to a tenth must reproduce it —
+and the two candidate rules differ by one twip, which straddles a tenth boundary in exactly the
+discriminating cases (92 tw → 4.6, 93 tw → 4.65 → 4.7). `score3.py`, over the 2947 spans in 108
+documents whose drawn size moved:
+
+| | matches 26.2.4.2's `Tf` |
+|---|--:|
+| base (round to a twip) | **1695 of 2947 — 57.5 %** |
+| head (truncate) | **2936 of 2947 — 99.6 %** |
+
+**17 documents better, 0 worse, 91 level** — level being the documents where the channel is blind,
+`150-5370-10H.docx`'s 352 eleven-point superscripts among them, since 127 and 128 twips both print
+as 6.4.
+
+**The 11 residual spans are not counter-evidence and each is a different question.** Eight are
+single characters where the reference's `Tf` is 5.8 — 58 % of *ten* point — and ours is 58 % of
+eight or eleven, so it is our **base** size that differs there and the escapement is not in it. The
+other three carry `Tf` values of 4.9744, 7.1751 and 7.2000, which are not tenths of a point at all,
+so that text is drawn under a text matrix and the operator is not comparable.
+
+*And the first cut of `score3.py` scored the head leg **0 of 352** on `150-5370-10H.docx` and
+reported 81 documents worse.* It rounded to a tenth in floating point, where 6.35 pt reads back as
+6.34999 and rounds **down**. Rounding through the twip count — which is what the writer has —
+inverts that verdict. A scorer whose arithmetic is a tenth of the quantity it is scoring has to be
+exact.
+
+## 10. [bin] One gate verdict moves, and it moves the wrong way on the document this fixes
+
+Of all 1620 renderings, **exactly one changes a page count or an alphanumeric count**: the witness.
+
+| `FAA 2025-26 Holdover Tables.docx` | 26.2.4.2 | base | head |
+|---|--:|--:|--:|
+| pages | 167 | 167 | **166** |
+| alphanumeric characters | 335 603 | 336 754 | **336 680** |
+
+So its gate verdict goes from `match` to a **page mismatch**, while the rendering is unambiguously
+better: page 83 is no longer blank, the displacement at the foot of page 82 goes +5.00 → −2.05 pt,
+and ten pages in the wrong orientation become two. The page count agreed **because the document's
+two faults cancelled** — our surplus blank page 83 and the near-empty page 127 that 26.2.4.2 emits
+and we do not — and closing one of them exposes the other, exactly as round 152 predicted it would.
+
+This is the `w:pgBorders` argument in reverse: the gate's columns are not a measure of whether a
+page is right, and a round that optimised them would have kept the blank page. Recorded here, and in
+`OPEN-ISSUES.md`, so that the row is not read later as a regression.
