@@ -22,8 +22,21 @@ namespace Paperless.WordProcessing.Layout;
 /// the unshrunk font's height in the reference device's units.
 /// </para>
 /// <para>
-/// Both results snap to whole twips, because Writer measures in them and the snapping is visible: 58% of
-/// eleven point is 127.6 twips, and LibreOffice draws the citation at 128 — 6.4 pt, not 6.38.
+/// Both results snap to whole twips, because Writer measures in them, and both snap by <em>truncation</em>
+/// rather than by rounding: <c>SwSubFont::SetSize</c> sets the shrunk size to
+/// <c>m_aSize.Height() * GetPropr() / 100</c> in <c>sw/source/core/inc/swfont.hxx</c>:772-783 — integer
+/// division on a twip — and <c>SvxFont::SetPhysFont</c> does the same for an EditEngine text
+/// (<c>editeng/source/items/svxfont.cxx</c>:358-360). So 58% of eight point is 92.8 twips and the
+/// reference sets <b>92</b>, not 93.
+/// </para>
+/// <para>
+/// <b>Do not re-measure this through a PDF's font size.</b> LibreOffice's PDF writer prints every
+/// <c>Tf</c> at a whole tenth of a point, so a rendering of an eleven point superscript reads back as
+/// 6.4 pt where the layout used 127 twips — 6.35 — and a rule fitted to that channel is fitted to the
+/// writer's rounding. Measured instead through an advance, by differencing two right-aligned lines
+/// holding two and forty-two copies of one digit: truncation is right at <b>81 of 81</b> arms and at
+/// <b>59 of 59</b> where the three candidate rules disagree, over 33 base sizes at proportion 58 and
+/// over proportions 25 to 99 at two base sizes. <c>probes/escsize-r153/results.md</c>.
 /// </para>
 /// </remarks>
 /// <param name="Percent">
@@ -65,8 +78,12 @@ public readonly record struct Escapement(int Percent, int Proportion)
     public bool IsNone => Percent == 0 && Proportion is 0 or 100;
 
     /// <summary>The size the text is actually set at, given the size it would otherwise take.</summary>
+    /// <remarks>
+    /// Integer division on a whole twip, which is the arithmetic cited above rather than a convenience:
+    /// the two rules part company at 29 of the 57 half-point sizes between two and thirty point.
+    /// </remarks>
     public Length SizeOf(Length emSize)
-        => Proportion is 0 or 100 ? emSize : Twips(emSize.Twips * Proportion / 100.0);
+        => Proportion is 0 or 100 ? emSize : Length.FromTwips(emSize.Twips * Proportion / 100);
 
     /// <summary>
     /// How far the text sits above the baseline, negative for a subscript.
@@ -84,6 +101,4 @@ public readonly record struct Escapement(int Percent, int Proportion)
         double height = Math.Round((double)LineSpacing.Resolve(face).ScaledLineHeight(emSize).Twips);
         return Length.FromTwips((long)(height * Percent / 100.0));
     }
-
-    private static Length Twips(double value) => Length.FromTwips((long)Math.Round(value));
 }
