@@ -185,6 +185,17 @@ public sealed partial class Ww8DocumentReader
         public Length Tracking { get; init; }
 
         /// <summary>
+        /// The character width the paragraph mark's own formatting states, 100 for none.
+        /// </summary>
+        /// <remarks>
+        /// The mark's, for the same reason as <see cref="Tracking"/> above it: a paragraph set end to
+        /// end in one scaled style carries no runs at all — it is uniform by every test <c>RunsOf</c>
+        /// makes — so without this it would be measured at the face's nominal advances. [bin] 26.2.4.2
+        /// draws exactly that document at 0.59974 of its unscaled width.
+        /// </remarks>
+        public int WidthPerCent { get; init; } = 100;
+
+        /// <summary>
         /// The text frame this paragraph asks to be part of, empty when it asks for none.
         /// </summary>
         /// <remarks>
@@ -260,6 +271,18 @@ public sealed partial class Ww8DocumentReader
     /// <see cref="MatchesFormatting"/> compares it and a run carrying it survives the
     /// uniform-paragraph shortcut — see <see cref="Ww8LayoutFormat.CharacterSpacing"/>.
     /// </param>
+    /// <param name="WidthPerCent">
+    /// The character width <c>sprmCCharScale</c> states, as a percentage.
+    /// <para>
+    /// The same duty as <paramref name="Tracking"/> and a sharper one, because it <em>multiplies</em>
+    /// the advance rather than adding to it — and sharper again in this reader than in the other
+    /// three, because <b>this one builds its runs one character at a time</b> and merges each into its
+    /// predecessor when <see cref="MatchesFormatting"/> finds the formatting identical. A property
+    /// missing from that comparison does not merely fail to vary the paragraph: the scaled characters
+    /// are absorbed into the unscaled run beside them and take <em>its</em> width, so the file's own
+    /// boundary is gone before <c>RunsOf</c> is ever asked.
+    /// </para>
+    /// </param>
     public readonly record struct Ww8LayoutRun(
         int Start,
         int Length,
@@ -276,7 +299,8 @@ public sealed partial class Ww8DocumentReader
         bool IsStruckThrough = false,
         bool AutoKerning = false,
         char? SymbolSlot = null,
-        Length Tracking = default)
+        Length Tracking = default,
+        int WidthPerCent = 100)
     {
         /// <summary>One past the run's last character.</summary>
         public int End => Start + Length;
@@ -1397,6 +1421,7 @@ public sealed partial class Ww8DocumentReader
             ListRule = paragraph.ListNumber,
             AutoKerning = character.AutoKerning ?? false,
             Tracking = TrackingOf(character),
+            WidthPerCent = ScaleOf(character),
             Borders = layout.ToParagraphBorders(),
 
             // Resolved for a paragraph in a table too, and the assembler decides what to do with it.
@@ -1583,7 +1608,8 @@ public sealed partial class Ww8DocumentReader
                 format.IsStruckThrough ?? false,
                 format.AutoKerning ?? false,
                 format.SymbolSlot,
-                TrackingOf(format));
+                TrackingOf(format),
+                ScaleOf(format));
 
             if (runs.Count > 0 && MatchesFormatting(runs[^1], run))
             {
@@ -1620,7 +1646,8 @@ public sealed partial class Ww8DocumentReader
            && a.Underline == b.Underline
            && a.IsStruckThrough == b.IsStruckThrough
            && a.AutoKerning == b.AutoKerning
-           && a.Tracking == b.Tracking;
+           && a.Tracking == b.Tracking
+           && a.WidthPerCent == b.WidthPerCent;
 
     /// <summary>
     /// The distance a character format puts between its characters, nought when it states none.
@@ -1634,6 +1661,20 @@ public sealed partial class Ww8DocumentReader
         => format.CharacterSpacing is { } twips and >= -1440 and <= 1440
             ? Length.FromTwips(twips)
             : Length.Zero;
+
+    /// <summary>
+    /// The character width a format states, as a percentage, 100 when it states none.
+    /// </summary>
+    /// <remarks>
+    /// The 1..600 bound is <em>the reference's own</em> and not a guard invented here:
+    /// <c>Read_ScaleWidth</c> replaces anything outside it with 100 (<c>ww8par6.cxx</c>:4991-4993),
+    /// which is what <c>WordParagraphFormats.WidthOf</c> already does for <c>w:w</c>, measured at the
+    /// boundary — 600 draws at 6.00621 and 601 at 1.00000. A zero would collapse the run to nothing.
+    /// </remarks>
+    private static int ScaleOf(Ww8LayoutFormat format)
+        => format.CharacterScale is { } percent and >= 1 and <= 600
+            ? percent
+            : TextWidthScale.Natural;
 
     /// <summary>
     /// The em size a character format states, defaulting to ten points.
@@ -2779,6 +2820,14 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.CharacterSpacing:
                     format = format with { CharacterSpacing = sprm.SignedWord };
                     break;
+
+                // One case covers a CHPX and a style's character UPX alike, because
+                // `ApplyCharacterException` resolves a style through this same switch. That is not a
+                // convenience: [bin] 26.2.4.2's own DOC export of a `\charscalex` stylesheet writes the
+                // sprm into the style UPX and into NO CHPX at all, and still draws 0.59974.
+                case LayoutSprms.CharacterScale:
+                    format = format with { CharacterScale = sprm.Word };
+                    break;
                 case LayoutSprms.Language or LayoutSprms.Language80:
                     format = format with { LanguageId = sprm.Word };
                     break;
@@ -2993,6 +3042,18 @@ public sealed partial class Ww8DocumentReader
         /// unsigned would expand by 65 000 twips exactly where the document meant to condense.
         /// </remarks>
         internal const ushort CharacterSpacing = 0x8840;
+
+        /// <summary>
+        /// <c>sprmCCharScale</c>: the character width, as a percentage.
+        /// </summary>
+        /// <remarks>
+        /// <c>sprmChr&lt;0x52, 0, SPRA::operand_2b_2&gt;</c> (<c>sprmids.hxx</c>:335) — two bytes,
+        /// <em>unsigned</em>, unlike <see cref="CharacterSpacing"/> beside it. The negative reading
+        /// would be out of range anyway and <c>Read_ScaleWidth</c> would answer 100 for it, so the
+        /// distinction costs nothing here; it is stated because the two sprms sit together and the
+        /// signedness is the one thing that differs.
+        /// </remarks>
+        internal const ushort CharacterScale = 0x4852;
 
         internal const ushort FontSize = 0x4A43;
         internal const ushort FontIndex = 0x4A4F;

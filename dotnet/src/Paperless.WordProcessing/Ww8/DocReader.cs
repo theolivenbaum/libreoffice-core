@@ -693,6 +693,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Shaping = new Text.Shaping.ShapingOptions(
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
                 Tracking = paragraph.Tracking,
+                WidthPerCent = paragraph.WidthPerCent,
                 Metrics = fonts.Metrics,
                 Fallback = fonts.Fallback,
                 AddsScriptSpace = true,
@@ -1243,6 +1244,11 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 // And tracking for the same reason again, read the other way: a run condensed inside a
                 // paragraph that is not would otherwise be measured at the paragraph's own spacing.
                 || run.Tracking != paragraph.Tracking
+                // And a character width, which multiplies the advance rather than adding to it, so a
+                // scaled run folded into an unscaled paragraph is measured and broken at the
+                // paragraph's own width. See `Ww8LayoutRun.WidthPerCent` for the merge that has to
+                // survive first.
+                || run.WidthPerCent != paragraph.WidthPerCent
                 // A symbol's face is its own even when it happens to equal the paragraph's: losing the
                 // runs here would draw its slot out of whatever the paragraph is set in.
                 || run.SymbolSlot is not null
@@ -1269,7 +1275,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Highlight: run.Highlight ?? default,
                 Underline: run.Underline,
                 IsStruckThrough: run.IsStruckThrough,
-                Tracking: run.Tracking));
+                Tracking: run.Tracking,
+                WidthPerCent: run.WidthPerCent));
         }
 
         return varies ? runs : [];

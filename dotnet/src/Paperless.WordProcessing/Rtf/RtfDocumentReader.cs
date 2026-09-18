@@ -945,6 +945,18 @@ public sealed partial class RtfDocumentReader
             case "strike" or "striked":
                 state.Strike = token.Parameter != 0;
                 return;
+            case "charscalex":
+                // A bare `\charscalex` is ONE HUNDRED, not zero: the tokeniser's own `defValue` is 100
+                // (`rtftokenizer.cxx`:253), which is the opposite of `\kerning` directly below and the
+                // one place the two differ. Out of range is 100 too, because the control word is
+                // dispatched to `NS_ooxml::LN_EG_RPrBase_w` (`rtfdispatchvalue.cxx`:193) -- the very
+                // sprm `w:w` uses, so it meets the DOCX filter's 1..600 rule in the same place.
+                // Measured at 26.2.4.2: 60 draws at 0.59974, 99 at 0.98665, 130 at 1.29981, and `0`,
+                // `900`, `-50` and a bare `\charscalex` all at 1.00000.
+                state.WidthPerCent = token.Parameter is { } scale and >= 1 and <= 600
+                    ? scale
+                    : TextWidthScale.Natural;
+                return;
             case "kerning":
                 // A size threshold rather than a switch, and read as a switch because that is all
                 // Writer's item can hold — see RtfState.AutoKerning. A bare `\kerning` with no

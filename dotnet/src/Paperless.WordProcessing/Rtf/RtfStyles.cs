@@ -82,6 +82,20 @@ public sealed record RtfStyleFormatting
     /// <summary><c>\lang</c>.</summary>
     public int? LanguageId { get; init; }
 
+    /// <summary>
+    /// <c>\charscalex</c>, the character width as a percentage.
+    /// </summary>
+    /// <remarks>
+    /// [bin] A paragraph style's and a character style's <c>\charscalex</c> each scale the run at
+    /// 26.2.4.2 — <c>{\stylesheet{\s1\charscalex60 …}}</c> applied with <c>\s1</c> and
+    /// <c>{\stylesheet{\*\cs2\charscalex60 …}}</c> applied with <c>\cs2</c> both draw at
+    /// <b>0.59974</b> — so the stylesheet half is not optional: <b>53 of the converted column's 1520
+    /// non-identity occurrences are declared in <c>{\stylesheet}</c> and nowhere else</b>, and the
+    /// <c>ListLabel</c> character styles are exactly that shape.
+    /// <c>probes/charscale-r149/results.md</c> §D.
+    /// </remarks>
+    public int? WidthPerCent { get; init; }
+
     /// <summary>The alignment one of the <c>\q</c> words gave, by page side.</summary>
     /// <remarks>
     /// Carried because <c>LN_CT_PPrBase_jc</c> has no entry in <c>getDefaultSPRM</c>, so nothing
@@ -141,6 +155,7 @@ public sealed record RtfStyleFormatting
         SmallCapitals = SmallCapitals ?? parent.SmallCapitals,
         ForegroundColourIndex = ForegroundColourIndex ?? parent.ForegroundColourIndex,
         LanguageId = LanguageId ?? parent.LanguageId,
+        WidthPerCent = WidthPerCent ?? parent.WidthPerCent,
         Alignment = Alignment ?? parent.Alignment,
         SpaceBeforeTwips = SpaceBeforeTwips ?? parent.SpaceBeforeTwips,
         SpaceAfterTwips = SpaceAfterTwips ?? parent.SpaceAfterTwips,
@@ -724,6 +739,7 @@ public sealed class RtfStyles
             SmallCapitals = chain.SmallCapitals,
             Strike = chain.Strike,
             LanguageId = chain.LanguageId,
+            WidthPerCent = chain.WidthPerCent,
             KeepWithNext = chain.KeepWithNext,
         };
 

@@ -418,6 +418,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Language = paragraph.Language,
                 Shaping = new Text.Shaping.ShapingOptions(
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
+                WidthPerCent = paragraph.WidthPerCent,
                 Fallback = fonts.Fallback,
                 Runs = runs,
                 Notes = NotesOf(fonts, paragraph.Notes),
@@ -704,6 +705,11 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
                 || run.AutoKerning != paragraph.AutoKerning
+                // And a character width, for the same reason and more strongly: it multiplies every
+                // advance in the run, so a scaled run folded into an unscaled paragraph is measured and
+                // broken at the paragraph's own width. See `RtfLayoutRun.MatchesFormatting`, which has
+                // to keep the run's boundary before this is ever asked.
+                || run.WidthPerCent != paragraph.WidthPerCent
                 // And a synthetic oblique, which is drawing-only in the same way and was the one
                 // missing from this list: an italic run whose family has no italic installed resolves to
                 // the *same* face as its upright neighbour, so nothing above can see it and the fold
@@ -726,7 +732,8 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 run.CaseMap,
                 Highlight: run.Highlight ?? default,
                 Underline: run.Underline,
-                IsStruckThrough: run.IsStruckThrough));
+                IsStruckThrough: run.IsStruckThrough,
+                WidthPerCent: run.WidthPerCent));
         }
 
         return varies ? runs : [];

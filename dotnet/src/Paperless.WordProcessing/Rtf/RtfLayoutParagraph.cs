@@ -34,6 +34,16 @@ namespace Paperless.WordProcessing.Rtf;
 /// <param name="AutoKerning">
 /// True when a nonzero <c>\kerning</c> asks for the run's pairs to be kerned. Off unless it does.
 /// </param>
+/// <param name="WidthPerCent">
+/// The character width <c>\charscalex</c> states, as a percentage.
+/// <para>
+/// It multiplies every advance in the run rather than adding to it, so it has to survive
+/// <see cref="RtfLayoutRun.MatchesFormatting"/> as well as the uniform-paragraph shortcut: a producer
+/// restates <c>\f0\fs22</c> before every run whether or not anything changed, and the merge is what
+/// keeps those restatements from breaking the shaping context — but a property missing from the
+/// comparison lets a scaled stretch be absorbed into the unscaled run beside it and take its width.
+/// </para>
+/// </param>
 public readonly record struct RtfLayoutRun(
     int Start,
     int Length,
@@ -48,7 +58,8 @@ public readonly record struct RtfLayoutRun(
     Colour? Highlight = null,
     TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
-    bool AutoKerning = false)
+    bool AutoKerning = false,
+    int WidthPerCent = 100)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
@@ -73,7 +84,8 @@ public readonly record struct RtfLayoutRun(
            && Highlight == other.Highlight
            && Underline == other.Underline
            && IsStruckThrough == other.IsStruckThrough
-           && AutoKerning == other.AutoKerning;
+           && AutoKerning == other.AutoKerning
+           && WidthPerCent == other.WidthPerCent;
 }
 
 /// <summary>
@@ -134,6 +146,11 @@ public readonly record struct RtfLayoutRun(
 /// True when a nonzero <c>\kerning</c> is in force at the paragraph's mark, which is what a paragraph
 /// with no runs of its own is set in and what its label is drawn in.
 /// </param>
+/// <param name="WidthPerCent">
+/// The character width <c>\charscalex</c> states at the paragraph's mark, as a percentage. The mark's,
+/// for the same reason as <paramref name="AutoKerning"/>: a paragraph set end to end in one scaled
+/// style carries no runs at all and is uniform by every test the layout reader makes.
+/// </param>
 public readonly record struct RtfLayoutParagraph(
     string Text,
     ParagraphFormat Format,
@@ -149,7 +166,8 @@ public readonly record struct RtfLayoutParagraph(
     IReadOnlyList<RtfLayoutFrame>? Frames = null,
     IReadOnlyList<Layout.PageFieldSpan>? PageFields = null,
     string? ListMarker = null,
-    bool AutoKerning = false);
+    bool AutoKerning = false,
+    int WidthPerCent = 100);
 
 /// <summary>
 /// A floating frame as RTF states it: a shape's rectangle, its wrap, and the text inside it.

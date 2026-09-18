@@ -176,6 +176,26 @@ public sealed partial class RtfDocumentReader
         /// </remarks>
         public bool AutoKerning { get; set; }
 
+        /// <summary>
+        /// <c>\charscalexN</c>: the character width, as a percentage, 100 when nothing states one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// [src] The tokeniser's row is
+        /// <c>{ "charscalex", { RTFControlType::VALUE, RTFKeyword::CHARSCALEX, <b>100</b> } }</c>
+        /// (<c>sw/source/writerfilter/rtftok/rtftokenizer.cxx</c>:253), and the dispatch is
+        /// <c>nSprm = NS_ooxml::LN_EG_RPrBase_w</c> (<c>rtfdispatchvalue.cxx</c>:193) — the very sprm
+        /// <c>w:w</c> uses, so out of range resets to 100 exactly as the DOCX filter does.
+        /// </para>
+        /// <para>
+        /// <strong>A bare <c>\charscalex</c> is 100, not 0</strong>, because that <c>defValue</c> is
+        /// 100 — the opposite of <see cref="AutoKerning"/> beside it, whose bare <c>\kerning</c> is
+        /// zero by RTF's own default-of-zero rule. It is the one place the two differ and the easy
+        /// thing to copy wrongly; measured at 26.2.4.2, a bare <c>\charscalex</c> draws at 1.00000.
+        /// </para>
+        /// </remarks>
+        public int WidthPerCent { get; set; } = 100;
+
         /// <summary>True inside <c>\caps</c>: drawn in capitals whatever the text says.</summary>
         public bool Capitals { get; set; }
 
@@ -313,6 +333,7 @@ public sealed partial class RtfDocumentReader
             Capitals = Capitals,
             SmallCapitals = SmallCapitals,
             AutoKerning = AutoKerning,
+            WidthPerCent = WidthPerCent,
             Revised = Revised,
             RevisionAuthor = RevisionAuthor,
             RevisionDate = RevisionDate,
@@ -369,6 +390,7 @@ public sealed partial class RtfDocumentReader
             Capitals = false;
             SmallCapitals = false;
             AutoKerning = false;
+            WidthPerCent = 100;
             Revised = false;
             VerticalPosition = 0;
             CharacterStyleId = 0;
@@ -1222,7 +1244,8 @@ public sealed partial class RtfDocumentReader
             ColourAt(state.HighlightColourIndex),
             state.Underline,
             state.Strike,
-            state.AutoKerning);
+            state.AutoKerning,
+            state.WidthPerCent);
 
         flow.LayoutLength += length;
 
@@ -1365,7 +1388,8 @@ public sealed partial class RtfDocumentReader
             // and an outline level that shows no number writes the group with nothing but that tab,
             // which trims to nothing rather than to a label made of whitespace.
             flow.ListMarker.ToString().Trim() is { Length: > 0 } marker ? marker : null,
-            state.AutoKerning);
+            state.AutoKerning,
+            state.WidthPerCent);
 
         if (cell is not null) cell.Add(new RtfLayoutBlock(recorded));
         else into!.Add(recorded);
@@ -1416,7 +1440,8 @@ public sealed partial class RtfDocumentReader
             ColourAt(state.HighlightColourIndex),
             state.Underline,
             state.Strike,
-            state.AutoKerning);
+            state.AutoKerning,
+            state.WidthPerCent);
 
     /// <summary>The escapement <c>\super</c> or <c>\sub</c> put in force, if either did.</summary>
     /// <remarks>
@@ -1997,6 +2022,7 @@ public sealed partial class RtfDocumentReader
             SmallCapitals = Said("scaps") ? state.SmallCapitals : null,
             ForegroundColourIndex = Said("cf") ? state.ForegroundColourIndex : null,
             LanguageId = Said("lang", "langnp") ? state.LanguageId : null,
+            WidthPerCent = Said("charscalex") ? state.WidthPerCent : null,
 
             // The paragraph half. Three properties, not the whole of `\pard`'s vocabulary, and
             // which three is measured against 26.2.4.2 rather than chosen — see
@@ -2102,6 +2128,7 @@ public sealed partial class RtfDocumentReader
         if (f.SmallCapitals is { } smallCapitals) state.SmallCapitals = smallCapitals;
         if (f.ForegroundColourIndex is { } colour) state.ForegroundColourIndex = colour;
         if (f.LanguageId is { } language) state.LanguageId = language;
+        if (f.WidthPerCent is { } width) state.WidthPerCent = width;
     }
 
     /// <summary>
@@ -2121,6 +2148,7 @@ public sealed partial class RtfDocumentReader
         if (f.SmallCapitals is not null) state.SmallCapitals = false;
         if (f.ForegroundColourIndex is not null) state.ForegroundColourIndex = null;
         if (f.LanguageId is not null) state.LanguageId = 0;
+        if (f.WidthPerCent is not null) state.WidthPerCent = TextWidthScale.Natural;
     }
 
 }
