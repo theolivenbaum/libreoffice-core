@@ -3883,10 +3883,12 @@ public sealed class Paginator
             TableLayouter.RowSlice? tail =
                 TableLayouter.SliceRow(
                     table.Rows[from], rowCells, drawn, room - placed, acrossSpans,
-                    _options.KeepsSpacingAtTopOfPage)
+                    _options.KeepsSpacingAtTopOfPage,
+                    TableLayouter.BoundaryBand(table, from))
                 ?? TableLayouter.SliceRow(
                     table.Rows[from], rowCells, drawn, Length.FromEmu(long.MaxValue), acrossSpans,
-                    _options.KeepsSpacingAtTopOfPage);
+                    _options.KeepsSpacingAtTopOfPage,
+                    TableLayouter.BoundaryBand(table, from));
 
             // A remainder with nothing in it, which the cut said there was: the row is finished rather
             // than unfinished. Asking again is what would not terminate.
@@ -3954,7 +3956,8 @@ public sealed class Paginator
                     Length.Zero,
                     room - placed,
                     SpansMayBeCut(heights[end], body.Height),
-                    _options.KeepsSpacingAtTopOfPage)
+                    _options.KeepsSpacingAtTopOfPage,
+                    TableLayouter.BoundaryBand(table, end))
                 is { } head)
             {
                 cells.AddRange(TableLayouter.Offset(head.Cells, body.X, body.Y + top + placed));

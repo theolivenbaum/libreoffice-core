@@ -357,13 +357,20 @@ public static class TableLayouter
     /// The document's <c>PARA_SPACE_MAX_AT_PAGES</c> — <see cref="UpperSpaceAbove"/>, which is the only
     /// thing it reaches here. A document without it gives a follow part no upper space at all.
     /// </param>
+    /// <param name="bandAbove">
+    /// The resolved band at the boundary above this row, which the part occupies as well as its own
+    /// content — <see cref="BoundaryBand"/>, because this method is handed one row and cannot resolve it.
+    /// Nought is safe and is what a caller measuring a borderless table passes; it costs a part one
+    /// line's worth of room only where the boundary is really ruled.
+    /// </param>
     public static RowSlice? SliceRow(
         PageTableRow row,
         IReadOnlyList<PlacedTableCell> cells,
         Length drawn,
         Length room,
         bool acrossRowSpans = false,
-        bool keepsSpacingAtPages = true)
+        bool keepsSpacingAtPages = true,
+        Length bandAbove = default)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(cells);
@@ -389,13 +396,31 @@ public static class TableLayouter
             rowTop = Length.Min(rowTop, cell.Area.Y);
         }
 
-        // What a PART of this row pays for its rules. Under the band model a whole row pays the resolved
-        // band above it and nothing below, so a part pays the same -- but `SliceRow` is handed one row and
-        // cannot see the row above, so this is the row's OWN stated top rule, which is the resolved band
-        // wherever the row above does not state a thicker one. **A page cut is O83 and is not measured
-        // here**: `probes/tablerow-r146/results.md` §4 shows 26.2.4.2 drawing a full-width line at a cut
-        // whatever the cells state, so the continuation part's charge is the cut's rule and not this one.
-        Length border = TopBand(null, row);
+        // What a PART of this row pays for its rules, and at a cut that is the row's own BOTTOM rule
+        // rather than its top.
+        //
+        // [src] `lcl_IsFirstRowInFollowTableWithoutRepeatedHeadlines`
+        // (`sw/source/core/layout/paintfrm.cxx`:2815-2833, used at :3089): the first row of a follow
+        // table draws its **top** line from the cell's **bottom** border style. The master's own foot
+        // draws that same bottom rule, so both halves of a split row are ruled by it and each pays for
+        // it once. [bin] `probes/tablerow-r146/results.md` §4 on `split.docx`, whose cells state
+        // `w:top nil` and a 1 pt `w:bottom`: 26.2.4.2 rules the foot of page 1 at 759.201..760.201 and
+        // the head of page 2 at 70.901..71.901, both 1 pt, both hanging downwards from the frame edge,
+        // and the follow's first line starts at 71.901 -- so the follow really is charged the whole of
+        // it. Charging the row's own TOP here instead, which is what this did until round 152, charges
+        // nothing at all for a table ruled the way this one is, and one line too many then fits above
+        // the cut.
+        Length border = BottomBand(row);
+
+        // What the part pays at its HEAD, and the two parts of a split row do not pay the same thing.
+        // The row's FIRST part begins on the row's own boundary, so it occupies the band there --
+        // `bandAbove`, which the caller resolves because this method is handed one row. A FOLLOW part
+        // begins at the top of a page with no boundary above it, and what is ruled at its head is the
+        // CUT's rule: [src] `lcl_IsFirstRowInFollowTableWithoutRepeatedHeadlines` has the first row of a
+        // follow table draw its top line from the cell's BOTTOM border style. The two coincide on
+        // `split.docx`, whose every boundary is 1 pt, which is why charging `bandAbove` to both looked
+        // right there and cost `review-welsh-...-mandelson.docx` a page it should not have.
+        Length head = drawn > Length.Zero ? border : bandAbove;
         Length above = rowTop + drawn;
 
         // The spans a cut may not fall inside: a table nested in a cell is placed as one rectangle and
@@ -446,7 +471,8 @@ public static class TableLayouter
         {
             if (chosen is { } already && already == candidate) continue;
 
-            Length needed = HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
+            Length needed = head
+                + HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
             if (needed > room) break;
 
             chosen = candidate;
@@ -492,7 +518,8 @@ public static class TableLayouter
             {
                 if (chosen is { } already && already == candidate) continue;
 
-                Length needed = HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
+                Length needed = head
+                    + HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
                 if (needed > room) break;
 
                 chosen = candidate;
@@ -533,8 +560,21 @@ public static class TableLayouter
         // A part holding every remaining line is not a split at all; the caller places the whole row.
         if (complete && drawn <= Length.Zero) return null;
 
+        // Only a part the page CUTS pays a band at its foot. A part that finishes the row pays none:
+        // the boundary below it is an ordinary one and the row after it pays for it as `TopBand`, so
+        // charging it here as well rules that boundary twice, one band apart. [bin] on `split.docx`
+        // that drew bands at 118.050 and 119.050 where 26.2.4.2 draws one at 118.101, and pushed every
+        // later row down with it.
+        if (complete) height -= border;
+
+        // The cells are built to the part's DRAWN extent and the part reports the whole of it, which
+        // differ by the band at the cut: that band hangs below the last line rather than inside the
+        // rectangle, exactly as the table's own outer bottom band does in `LayOut` -- charged after the
+        // rectangles are built so the caller advances past it while no cell claims it. Building the
+        // rectangles to the full height instead draws the cut's rule one band too low and starts the
+        // follow part one band too far down, which is the +0.999 this round measured before fixing it.
         return new RowSlice(
-            Sliced(cells, rowTop, above, cut, height, keepsSpacingAtPages),
+            Sliced(cells, rowTop, above, cut, complete ? height : height - border, keepsSpacingAtPages),
             height, cut - rowTop, complete);
     }
 
@@ -1150,6 +1190,24 @@ public static class TableLayouter
         }
 
         return band;
+    }
+
+    /// <summary>
+    /// The resolved band at the boundary above a row, for a caller that has the table and the index.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SliceRow"/> is handed one row and its placed cells, so it cannot resolve this itself —
+    /// and it needs it, because a part of a row occupies the boundary band above it as well as its own
+    /// content. Without it a part measures only from its text and the row fits one line too many on the
+    /// page. See <see cref="HeightAt"/>.
+    /// </remarks>
+    public static Length BoundaryBand(PageTable table, int row)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        return row >= 0 && row < table.Rows.Count
+            ? TopBand(row > 0 ? table.Rows[row - 1] : null, table.Rows[row])
+            : Length.Zero;
     }
 
     /// <summary>
