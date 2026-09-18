@@ -273,3 +273,26 @@ a size half a tenth out in either direction, and the other alternative, printing
 our own PDF, is making our output worse to make a comparison exact. The rise, the pen and the glyph
 counts keep their own resolution, and the five citation sizes this test distinguishes (11.00, 6.40,
 5.80, 10.00) are a tenth apart or more, so nothing it was built to catch is given up.
+
+## 12. The suite
+
+Every project run individually and totalled, on the binary this round ships:
+
+| project | result |
+|---|---|
+| `Paperless.Core` | 591 passed |
+| `Paperless.Text` | 750 passed |
+| `Paperless.Vector` | 309 passed |
+| `Paperless.Containers` | 109 passed |
+| `Paperless.WordProcessing` | **2072** passed (2048 at the round's base, plus this round's 24) |
+| `Paperless.Spreadsheets` | 1484 passed |
+| `Paperless.Presentations` | 1205 passed |
+| `Paperless.Markup` | 259 passed |
+| `Paperless.Fidelity` | **10 failed of 552**, 0 skipped — the round's base figure exactly |
+
+The ten are the known set: `TabStopComparisonTests` on `list-label-overrun` in four formats,
+`JustificationShrinkComparisonTests`, `PageDrawingComparisonTests` on `paginated` in four formats
+and `SheetDrawingComparisonTests` — the families `dotnet/CLAUDE.md` records as left failing on
+purpose. The five that §11 corrected are green and the suite is back on its baseline, not below it.
+
+Build: 0 warnings, 0 errors.
