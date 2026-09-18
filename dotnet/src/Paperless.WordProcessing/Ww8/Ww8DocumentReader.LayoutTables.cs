@@ -354,9 +354,28 @@ public sealed partial class Ww8DocumentReader
         foreach (Ww8RowDraft row in rows)
         {
             List<Ww8LayoutCell> cells = [];
+            Length coveredTop = Length.Zero;
+            Length coveredBottom = Length.Zero;
+
             foreach (Ww8CellDraft cell in row.Cells)
             {
-                if (cell.ContinuesMergeAbove) continue;
+                if (cell.ContinuesMergeAbove)
+                {
+                    // Dropped from the row, and still charged to its height -- through the same border
+                    // resolution as a cell that is kept. `PageTableRow.CoveredTopRule` carries the
+                    // measurement.
+                    CellBorders covered = ResolveBorders(
+                        cell.Borders,
+                        row.DefaultBorders,
+                        isFirstRow: row.Index == 0,
+                        isLastRow: row.Index == rows.Count - 1,
+                        isFirstCell: cell.ColumnStart == 0,
+                        isLastCell: cell.ColumnStart + cell.ColumnSpan >= widths.Count);
+
+                    coveredTop = Length.Max(coveredTop, covered.Top.Width);
+                    coveredBottom = Length.Max(coveredBottom, covered.Bottom.Width);
+                    continue;
+                }
 
                 cells.Add(new Ww8LayoutCell(
                     cell.ColumnStart,
@@ -382,7 +401,9 @@ public sealed partial class Ww8DocumentReader
                 row.IsHeader,
                 Length.FromTwips(Math.Abs(row.HeightTwips)),
                 row.HeightTwips < 0,
-                CanSplit: !row.CannotSplit));
+                CanSplit: !row.CannotSplit,
+                CoveredTopRule: coveredTop,
+                CoveredBottomRule: coveredBottom));
         }
 
         // `sprmTJc90` on the first row, which is where WW8TabDesc reads it: the whole table takes the
@@ -744,12 +765,22 @@ public sealed record Ww8LayoutTable(
 /// False when <c>sprmTFCantSplit</c> forbade breaking the row across a page — see
 /// <see cref="Layout.PageTableRow.CanSplit"/>.
 /// </param>
+/// <param name="CoveredTopRule">
+/// The widest top rule stated by the cells this row drops because they continue a vertical merge —
+/// charged to the row's height and drawn nowhere. See <see cref="Layout.PageTableRow.CoveredTopRule"/>.
+/// </param>
+/// <param name="CoveredBottomRule">
+/// Their widest bottom rule, which is charged to the band below the row and <em>is</em> drawn, because it
+/// is the merge's own outer edge. See <see cref="Layout.PageTableRow.CoveredBottomRule"/>.
+/// </param>
 public sealed record Ww8LayoutRow(
     IReadOnlyList<Ww8LayoutCell> Cells,
     bool IsHeader,
     Length MinHeight = default,
     bool HasExactHeight = false,
-    bool CanSplit = true);
+    bool CanSplit = true,
+    Length CoveredTopRule = default,
+    Length CoveredBottomRule = default);
 
 /// <summary>One cell of a DOC table.</summary>
 /// <param name="Column">The grid column it starts at.</param>

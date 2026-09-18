@@ -371,12 +371,22 @@ public sealed record RtfLayoutTable(
 /// False when <c>\trkeep</c> forbade breaking the row across a page — see
 /// <see cref="Layout.PageTableRow.CanSplit"/>.
 /// </param>
+/// <param name="CoveredTopRule">
+/// The widest top rule stated by the cells this row drops because they continue a vertical merge —
+/// charged to the row's height and drawn nowhere. See <see cref="Layout.PageTableRow.CoveredTopRule"/>.
+/// </param>
+/// <param name="CoveredBottomRule">
+/// Their widest bottom rule, which is charged to the band below the row and <em>is</em> drawn, because it
+/// is the merge's own outer edge. See <see cref="Layout.PageTableRow.CoveredBottomRule"/>.
+/// </param>
 public sealed record RtfLayoutRow(
     IReadOnlyList<RtfLayoutCell> Cells,
     Core.Units.Length MinHeight,
     bool IsHeader,
     bool HasExactHeight = false,
-    bool CanSplit = true);
+    bool CanSplit = true,
+    Core.Units.Length CoveredTopRule = default,
+    Core.Units.Length CoveredBottomRule = default);
 
 /// <summary>One cell of an RTF table.</summary>
 /// <param name="Column">The grid column it starts at.</param>

@@ -1170,6 +1170,11 @@ public static class TableLayouter
     /// cells disagreeing share the thicker one's band, which is what the drawing does when it consolidates.
     /// </para>
     /// <para>
+    /// And over the cells the row <em>dropped</em> as well — see <see cref="PageTableRow.CoveredTopRule"/>.
+    /// A covered cell's stated top is charged here and drawn nowhere, which is the one place in this file
+    /// where the height and the ink are deliberately not the same set of statements.
+    /// </para>
+    /// <para>
     /// The model this replaced charged half of each of the two stated rules to each row and drew the bands
     /// centred, which is <em>algebraically identical</em> for as long as every horizontal rule in the table has
     /// one width and the table does not split — which is why the family seated as three separate defects
@@ -1180,12 +1185,14 @@ public static class TableLayouter
     /// <param name="row">The row that pays.</param>
     private static Length TopBand(PageTableRow? above, PageTableRow row)
     {
-        Length band = Length.Zero;
+        Length band = row.CoveredTopRule;
 
         foreach (PageTableCell cell in row.Cells) band = Length.Max(band, cell.Borders.Top.Width);
 
         if (above is not null)
         {
+            band = Length.Max(band, above.CoveredBottomRule);
+
             foreach (PageTableCell cell in above.Cells) band = Length.Max(band, cell.Borders.Bottom.Width);
         }
 
@@ -1221,7 +1228,7 @@ public static class TableLayouter
     /// </remarks>
     private static Length BottomBand(PageTableRow row)
     {
-        Length band = Length.Zero;
+        Length band = row.CoveredBottomRule;
         foreach (PageTableCell cell in row.Cells) band = Length.Max(band, cell.Borders.Bottom.Width);
         return band;
     }
@@ -1238,7 +1245,7 @@ public static class TableLayouter
     /// </remarks>
     private static Length OwnTopRule(PageTableRow row)
     {
-        Length top = Length.Zero;
+        Length top = row.CoveredTopRule;
         foreach (PageTableCell cell in row.Cells) top = Length.Max(top, cell.Borders.Top.Width);
         return top;
     }

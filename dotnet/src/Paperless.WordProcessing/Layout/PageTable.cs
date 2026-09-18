@@ -700,6 +700,35 @@ public sealed record PageTableRow
     /// </remarks>
     public bool HasExactHeight { get; init; }
 
+    /// <summary>
+    /// The widest top and bottom rule stated by the cells this row <em>drops</em> because they continue a
+    /// vertical merge — the cells that are not in <see cref="Cells"/> at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A covered cell is dropped because nothing draws it: the merge above owns its space. But Writer still
+    /// builds a cell frame for it, and <c>lcl_GetTopSpace</c> (<c>sw/source/core/layout/tabfrm.cxx</c>:5175-5194)
+    /// walks every lower of the row and takes the maximum of each one's own
+    /// <c>CalcLineSpace(TOP, true)</c> <b>without testing the row span</b>, although the code around it
+    /// tests <c>getRowSpan() &lt; 1</c> in eight other places. So a covered cell's stated rule is charged to
+    /// the row's height while contributing nothing to the ink.
+    /// </para>
+    /// <para>
+    /// [bin] Measured on 26.2.4.2 over 34 one-attribute arms in <c>probes/vmergetop-r154/</c>: a
+    /// <c>w:trHeight</c> floor is raised by a covered cell's stated top (fixture 7, 2 arms of 18 differ), the
+    /// band above a row includes it and <em>no rule is drawn for it</em> (fixture 8), the band at a boundary
+    /// includes the covered cell's stated bottom from the row above and that one <em>is</em> drawn, because it
+    /// is the merge's own outer edge (fixture 9), and so is the band below the table's last row (fixture 10).
+    /// </para>
+    /// <para>
+    /// Zero when the row drops no cell, which is every row of a table with no vertical merge in it.
+    /// </para>
+    /// </remarks>
+    public Length CoveredTopRule { get; init; }
+
+    /// <inheritdoc cref="CoveredTopRule"/>
+    public Length CoveredBottomRule { get; init; }
+
     /// <summary>True when the row is one of the table's repeating heading rows.</summary>
     public bool IsHeader { get; init; }
 

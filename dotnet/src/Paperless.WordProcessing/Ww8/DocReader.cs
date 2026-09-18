@@ -627,6 +627,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             rows.Add(new PageTableRow
             {
                 Cells = cells,
+                CoveredTopRule = row.CoveredTopRule,
+                CoveredBottomRule = row.CoveredBottomRule,
                 IsHeader = row.IsHeader,
                 MinHeight = row.MinHeight,
                 HasExactHeight = row.HasExactHeight,

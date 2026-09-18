@@ -601,9 +601,19 @@ public sealed partial class RtfDocumentReader
         foreach (RowDraft row in rows)
         {
             List<RtfLayoutCell> cells = [];
+            Length coveredTop = Length.Zero;
+            Length coveredBottom = Length.Zero;
+
             foreach (CellDraft cell in row.Cells)
             {
-                if (cell.ContinuesMergeAbove) continue;
+                if (cell.ContinuesMergeAbove)
+                {
+                    // Dropped from the row, and still charged to its height:
+                    // `PageTableRow.CoveredTopRule` carries the measurement.
+                    coveredTop = Length.Max(coveredTop, cell.Borders.Top.Width);
+                    coveredBottom = Length.Max(coveredBottom, cell.Borders.Bottom.Width);
+                    continue;
+                }
 
                 cells.Add(new RtfLayoutCell(
                     cell.ColumnStart,
@@ -619,7 +629,8 @@ public sealed partial class RtfDocumentReader
 
             layoutRows.Add(new RtfLayoutRow(
                 cells, Length.FromTwips(Math.Abs(row.Height)), row.IsHeader, row.Height < 0,
-                CanSplit: !row.IsKeptTogether));
+                CanSplit: !row.IsKeptTogether,
+                CoveredTopRule: coveredTop, CoveredBottomRule: coveredBottom));
         }
 
         // A nested table's indent is relative to the enclosing cell's text, which it cannot start to the

@@ -1377,6 +1377,12 @@ public sealed partial class DocxLayoutSource
     /// downstream needs a placeholder for a cell that is not drawn: the layout engine finds a cell by the
     /// column it states, so an absent cell simply leaves the column to the merge above it.
     /// </para>
+    /// <para>
+    /// One number does need them, and it is the row's <em>height</em>: a covered cell's stated top and bottom
+    /// rules are charged to the boundary bands and to a <c>w:trHeight</c> floor although nothing is drawn for
+    /// the top one. They leave here as <see cref="PageTableRow.CoveredTopRule"/> and
+    /// <see cref="PageTableRow.CoveredBottomRule"/>, whose remarks carry the measurement.
+    /// </para>
     /// </remarks>
     private static List<PageTableRow> Resolved(List<PendingRow> rows)
     {
@@ -1385,10 +1391,19 @@ public sealed partial class DocxLayoutSource
         for (int row = 0; row < rows.Count; row++)
         {
             List<PageTableCell> cells = [];
+            Length coveredTop = Length.Zero;
+            Length coveredBottom = Length.Zero;
 
             foreach (PendingCell cell in rows[row].Cells)
             {
-                if (cell.Merge == VerticalMerge.Continue) continue;
+                if (cell.Merge == VerticalMerge.Continue)
+                {
+                    // Dropped from the row's cells, because nothing draws it -- but its stated rules are
+                    // still charged to the row's height, which is `PageTableRow.CoveredTopRule`'s remark.
+                    coveredTop = Length.Max(coveredTop, cell.Definition.Borders.Top.Width);
+                    coveredBottom = Length.Max(coveredBottom, cell.Definition.Borders.Bottom.Width);
+                    continue;
+                }
 
                 int span = cell.Merge == VerticalMerge.Restart
                     ? 1 + Continuations(rows, row, cell.Definition.Column)
@@ -1400,6 +1415,8 @@ public sealed partial class DocxLayoutSource
             resolved.Add(new PageTableRow
             {
                 Cells = cells,
+                CoveredTopRule = coveredTop,
+                CoveredBottomRule = coveredBottom,
                 IsHeader = rows[row].IsHeading,
                 MinHeight = rows[row].Height.Height,
                 HasExactHeight = rows[row].Height.IsExact,

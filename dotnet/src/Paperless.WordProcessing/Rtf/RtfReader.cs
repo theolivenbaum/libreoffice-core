@@ -257,6 +257,8 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             rows.Add(new PageTableRow
             {
                 Cells = cells,
+                CoveredTopRule = row.CoveredTopRule,
+                CoveredBottomRule = row.CoveredBottomRule,
                 MinHeight = row.MinHeight,
                 HasExactHeight = row.HasExactHeight,
                 IsHeader = row.IsHeader,
