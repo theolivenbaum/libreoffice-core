@@ -2968,3 +2968,11 @@ dotnet/probes/docxref-r158/make-probe.py	2026-09-19	current	26.2.4.2	present	cur
 dotnet/probes/docxref-r158/reference-arms.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/docxref-r158/reference-crossref.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/docxref-r158/results.md	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/census.py	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/census.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/confine-rows.tsv	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/make-probe.py	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/movers.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/reference-arms.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/results.md	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/listshare-r159/score.py	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md

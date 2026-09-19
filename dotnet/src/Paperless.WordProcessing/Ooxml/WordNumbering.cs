@@ -137,9 +137,57 @@ public sealed class WordNumbering
     /// </remarks>
     private readonly Dictionary<string, string> _abstractNumStyleLinks = new(StringComparer.Ordinal);
 
-    // Live counters, per list instance and level. Advanced as paragraphs are read, which is the
-    // only way to know a level's value: the file records the label nowhere.
-    private readonly Dictionary<(string NumId, int Level), int> _counters = [];
+    /// <summary>
+    /// Live counters, per <em>list</em> and level. Advanced as paragraphs are read, which is the
+    /// only way to know a level's value: the file records the label nowhere.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on <see cref="ListOf"/> rather than on the <c>w:numId</c>, because several instances
+    /// over one <c>w:abstractNumId</c> are <em>one list</em> in Writer — see that method.
+    /// </remarks>
+    private readonly Dictionary<(string List, int Level), int> _counters = [];
+
+    /// <summary>
+    /// The instances whose <c>w:startOverride</c> has already fired.
+    /// </summary>
+    /// <remarks>
+    /// <c>DomainMapper_Impl::finishParagraph</c> keeps exactly this set —
+    /// <c>m_aListOverrideApplied</c>, keyed on the <c>w:numId</c> and on nothing else — and applies
+    /// an override only while the id is absent from it
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx</c>:2986-2997, under the comment
+    /// <em>"this was not done for this list before: we can do this only once on first occurrence of
+    /// list with override"</em>). Because it is keyed on the id alone, an instance that has restarted
+    /// at one level cannot restart at another.
+    /// </remarks>
+    private readonly HashSet<string> _overridesApplied = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The list a <c>w:numId</c> counts in, which is its <c>w:abstractNumId</c> and not itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Several <c>w:num</c> over one <c>w:abstractNumId</c> are one list.</strong>
+    /// <c>AbstractListDef::MapListId</c> (<c>dmapper/NumberingManager.cxx</c>:405-412) records the
+    /// first such paragraph's Writer list id on the <em>abstract</em> definition and hands that same
+    /// id back for every later one, and <c>DomainMapper_Impl::finishParagraph</c>
+    /// (<c>DomainMapper_Impl.cxx</c>:2962-2976) writes it onto the paragraph — so the numbering runs
+    /// on across the instance boundary instead of starting again.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over seven arms of <c>tests/corpus/features/words-list-instance-share.docx</c>:
+    /// two instances over one abstract number <b>1, 2, 3, 4</b>, two instances over two abstracts
+    /// number <b>1, 2, 1, 2</b>, and the style route — paragraphs with no <c>w:numPr</c> taking their
+    /// style's instance — shares the counter as well.
+    /// </para>
+    /// <para>
+    /// The <c>w:numStyleLink</c> indirection is deliberately <em>not</em> followed here: the id
+    /// Writer keys on belongs to the abstract definition the instance names, and
+    /// <see cref="FollowStyleLink"/> is about where a level's <em>definition</em> comes from.
+    /// </para>
+    /// </remarks>
+    /// <param name="numId">The instance a paragraph named.</param>
+    private string ListOf(string numId)
+        => _instanceToAbstract.TryGetValue(numId, out string? abstractId) ? abstractId : numId;
 
     /// <summary>Reads a <c>numbering.xml</c> root element.</summary>
     public void Add(XElement root)
@@ -295,10 +343,16 @@ public sealed class WordNumbering
         WordNumberingLevel? definition = FindLevel(numId, level);
         if (definition is null) return null;
 
-        int current = _counters.TryGetValue((numId, level), out int existing)
-            ? existing + 1
-            : StartOf(numId, level, definition);
-        _counters[(numId, level)] = current;
+        string list = ListOf(numId);
+
+        // A `w:startOverride` is a *restart*, not a start: it fires wherever the instance is first
+        // used, whatever the shared counter already stands at, and then never again.
+        int current = TakeStartOverride(numId, level) is { } restart
+            ? restart
+            : _counters.TryGetValue((list, level), out int existing)
+                ? existing + 1
+                : definition.Start;
+        _counters[(list, level)] = current;
 
         // A shallower level advancing restarts everything under it, unless a level says
         // otherwise with w:lvlRestart. Without this every sub-list continues the last one.
@@ -306,7 +360,7 @@ public sealed class WordNumbering
         {
             WordNumberingLevel? deeperDefinition = FindLevel(numId, deeper);
             if (deeperDefinition?.RestartAfterLevel == 0) continue;
-            _counters.Remove((numId, deeper));
+            _counters.Remove((list, deeper));
         }
 
         SeedLevelsShownBy(numId, level, definition);
@@ -357,11 +411,11 @@ public sealed class WordNumbering
             at++;
 
             if (shown < 0 || shown >= level) continue;
-            if (_counters.ContainsKey((numId, shown))) continue;
+            if (_counters.ContainsKey((ListOf(numId), shown))) continue;
 
             if (FindLevel(numId, shown) is { } component)
             {
-                _counters[(numId, shown)] = StartOf(numId, shown, component);
+                _counters[(ListOf(numId), shown)] = StartOf(numId, shown, component);
             }
         }
     }
@@ -401,7 +455,7 @@ public sealed class WordNumbering
             if (placeholder is < 0 or >= LevelCount) continue;
 
             WordNumberingLevel? component = FindLevel(numId, placeholder);
-            int value = _counters.TryGetValue((numId, placeholder), out int counter)
+            int value = _counters.TryGetValue((ListOf(numId), placeholder), out int counter)
                 ? counter
                 : component is null ? 1 : StartOf(numId, placeholder, component);
 
@@ -442,7 +496,35 @@ public sealed class WordNumbering
     /// Headers, footnotes and comments are separate flows. Numbering inside them restarts
     /// rather than continuing the body's count, so the reader resets between flows.
     /// </remarks>
-    public void ResetCounters() => _counters.Clear();
+    public void ResetCounters()
+    {
+        _counters.Clear();
+
+        // The overrides go with them. Writer's own set spans the whole import, but its counters do
+        // too — resetting one without the other would leave a restarting instance taking its
+        // level's plain `w:start` the first time the new flow reached it.
+        _overridesApplied.Clear();
+    }
+
+    /// <summary>
+    /// The value an instance's <c>w:startOverride</c> restarts its list at, the once.
+    /// </summary>
+    /// <remarks>
+    /// Null when the instance states none at this level, or when it has already restarted. The
+    /// value is taken verbatim, zero included: the reference's test is
+    /// <c>GetStartOverride() != -1</c>, and <c>-1</c> is *unstated* rather than a value a file can
+    /// write. Measured on 26.2.4.2: an override of 5 on the second of two instances over one
+    /// abstract numbers <b>1, 2, 5, 6</b>, and using that instance a second time gives
+    /// <b>1, 2, 1, 2, 3, 4, 5, 6</b> rather than restarting again.
+    /// </remarks>
+    private int? TakeStartOverride(string numId, int level)
+    {
+        if (_overridesApplied.Contains(numId)) return null;
+        if (!_startOverrides.TryGetValue((numId, level), out int value)) return null;
+
+        _overridesApplied.Add(numId);
+        return value;
+    }
 
     private int StartOf(string numId, int level, WordNumberingLevel definition)
         => _startOverrides.TryGetValue((numId, level), out int overridden)
