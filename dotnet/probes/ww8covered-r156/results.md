@@ -115,3 +115,14 @@ master's bottom `nil`, so nothing but the covered cell can charge a row: both re
 four-row merge, exact. What deep.doc adds is a covered cell that carries a **bottom** rule as well,
 and there the two disagree from the second covered row on. Seated as **O107**; the witness is
 `deep.doc` and the corpus one is this document.
+
+## 8. The suite
+
+| project | result |
+|---|---|
+| `Paperless.WordProcessing` | **2088** passed — 2084 at the round's base plus this round's 4 |
+| `Paperless.Core` / `Text` / `Vector` / `Containers` | 591 / 750 / 309 / 109 passed |
+| `Paperless.Spreadsheets` / `Presentations` / `Markup` | 1484 / 1205 / 259 passed |
+| `Paperless.Fidelity` | **10 failed of 552**, 0 skipped — the base figure exactly, and the known set |
+
+Build: 0 warnings, 0 errors.
