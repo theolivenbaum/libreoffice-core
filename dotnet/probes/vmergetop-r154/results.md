@@ -207,6 +207,8 @@ Three, each measured here and none implemented, all in `OPEN-ISSUES.md`:
 | `Paperless.Containers` | 109 passed |
 | `Paperless.WordProcessing` | **2076** passed — 2072 at the round's base plus this round's 4 |
 | `Paperless.Spreadsheets` | 1484 passed |
-| `Paperless.Presentations`, `Paperless.Markup`, `Paperless.Fidelity` | *still running as this was written; §10 records them* |
+| `Paperless.Presentations` | 1205 passed |
+| `Paperless.Markup` | 259 passed |
+| `Paperless.Fidelity` | **10 failed of 552**, 0 skipped — the round's base figure exactly, and the known set: `TabStopComparisonTests` and `PageDrawingComparisonTests` in four formats each, `JustificationShrinkComparisonTests` and `SheetDrawingComparisonTests` |
 
 Build: 0 warnings, 0 errors.
