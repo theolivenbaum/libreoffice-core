@@ -352,6 +352,10 @@ public sealed partial class DocxLayoutSource
         _indexFieldDepth = 0;
         _sectionLeftMargins = LeftMargins(body);
 
+        // Before the walk, because a REF may name a bookmark the walk has not reached yet -- which in
+        // a document whose references point forward is most of them. See `DocxReferenceFields`.
+        _referenceText = DocxReferenceFields.Expansions(body);
+
         // The body is where the document's lists start counting. Reset rather than assumed clean,
         // because the numbering may be the same instance the extraction pass already walked.
         _numbering.ResetCounters();
@@ -878,7 +882,7 @@ public sealed partial class DocxLayoutSource
 
         RunWalker walker = new(
             CitationOf, Symbol, _constants, _footnoteNumber, _endnoteNumber, StyleReferenceText,
-            _indexFieldDepth);
+            _indexFieldDepth, ReferenceText);
         walker.Walk(element, citation);
 
         // Carried to the paragraph after this one, exactly as the note counters are: a `TOC` field's
@@ -1048,6 +1052,30 @@ public sealed partial class DocxLayoutSource
 
         return null;
     }
+
+    /// <summary>
+    /// What each <c>REF</c>-named bookmark expands to, or null when the body quotes none.
+    /// </summary>
+    /// <remarks>
+    /// Document-level and computed up front, unlike <see cref="_styleText"/>: a <c>STYLEREF</c> quotes
+    /// backwards and a <c>REF</c> quotes a name, so the one can be answered as the walk goes and the
+    /// other cannot. Survives into the headers and footers, which are read after the body and may
+    /// quote a bookmark in it.
+    /// </remarks>
+    private Dictionary<string, string>? _referenceText;
+
+    /// <summary>
+    /// The text a <c>REF</c> naming a bookmark draws, or null when this document holds no such mark.
+    /// </summary>
+    /// <remarks>
+    /// Null leaves the producer's cached result in place, which is this reader's standing policy for a
+    /// field it cannot compute: our own bookmark table is what the lookup missed, and Writer's
+    /// "Error: Reference source not found" would be a confident wrong answer where the cache is a
+    /// stale right one.
+    /// </remarks>
+    /// <param name="name">The bookmark the field named.</param>
+    private string? ReferenceText(string name)
+        => _referenceText is not null && _referenceText.TryGetValue(name, out string? text) ? text : null;
 
     /// <summary>Whether the paragraph read next begins a page, because the one before ended with a break.</summary>
     private bool _pageBreakPending;
@@ -1537,6 +1565,11 @@ public sealed partial class DocxLayoutSource
         /// What a <c>STYLEREF</c> naming a style quotes, or null when nothing has been read in that
         /// style yet. Supplied by the source because the answer is a paragraph this walker never sees.
         /// </param>
+        /// <param name="referenceText">
+        /// What a <c>REF</c> naming a bookmark draws, or null when the document holds no such mark.
+        /// Supplied by the source because the answer is a bookmark in another paragraph, which a
+        /// per-paragraph walker cannot see.
+        /// </param>
         /// <param name="indexFieldDepth">
         /// How many index fields' results were still open when the paragraph before this one ended.
         /// A walker is built per paragraph and a <c>TOC</c> field's result is dozens of them, so
@@ -1550,7 +1583,8 @@ public sealed partial class DocxLayoutSource
             int footnote = 0,
             int endnote = 0,
             Func<string, string?>? styleReference = null,
-            int indexFieldDepth = 0)
+            int indexFieldDepth = 0,
+            Func<string, string?>? referenceText = null)
         {
             _citationOf = citation;
             _symbolOf = symbol;
@@ -1558,12 +1592,16 @@ public sealed partial class DocxLayoutSource
             _footnote = footnote;
             _endnote = endnote;
             _styleReference = styleReference;
+            _referenceText = referenceText;
             _indexResults = indexFieldDepth;
             _inheritedIndexResults = indexFieldDepth;
         }
 
         /// <summary>What a <c>STYLEREF</c> quotes, or null when the source cannot answer.</summary>
         private readonly Func<string, string?>? _styleReference;
+
+        /// <summary>What a <c>REF</c> naming a bookmark draws, or null when the source cannot answer.</summary>
+        private readonly Func<string, string?>? _referenceText;
 
         /// <summary>What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</summary>
         private readonly ConstantFields _constants;
@@ -1758,6 +1796,17 @@ public sealed partial class DocxLayoutSource
             if (FieldInstructions.StyleReferenceName(instruction) is { } style)
             {
                 return _styleReference?.Invoke(style) is { Length: > 0 } quoted ? quoted : null;
+            }
+
+            // A REF's text is the bookmark's, recomputed on load -- not the {w:fldChar separate}
+            // result Word cached. An empty expansion is a legitimate answer for a collapsed bookmark
+            // and is *not* taken, because emitting nothing where the cache says something is the one
+            // substitution that cannot be checked against the page.
+            if (FieldInstructions.ReferenceBookmark(instruction) is { } bookmark)
+            {
+                return _referenceText?.Invoke(bookmark) is { Length: > 0 } referenced
+                    ? referenced
+                    : null;
             }
 
             return FieldInstructions.ConstantFieldOf(instruction) switch

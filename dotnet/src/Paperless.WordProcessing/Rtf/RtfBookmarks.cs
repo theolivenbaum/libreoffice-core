@@ -151,10 +151,6 @@ internal sealed class RtfBookmarkRotation
 /// </remarks>
 internal static class RtfReferenceFields
 {
-    /// <summary>What Writer draws for a <c>REF</c> whose bookmark it cannot find.</summary>
-    /// <remarks><c>STR_GETREFFLD_REFITEMNOTFOUND</c>, <c>sw/inc/strings.hrc</c>:787.</remarks>
-    public const string NotFound = "Error: Reference source not found";
-
     /// <summary>
     /// The expansion of every <c>REF</c> in the document whose bookmark says something other than the
     /// cached result, keyed by the bookmark's name; null when nothing needs replacing.
@@ -208,7 +204,7 @@ internal static class RtfReferenceFields
         {
             // #i81002#: a collapsed *cross-reference* bookmark stands for its whole node. Writer
             // makes one of those for a heading it references, and names it this way.
-            end = IsCrossReference(bookmark.Name) ? text.Length : start;
+            end = ReferenceFieldText.IsCrossReference(bookmark.Name) ? text.Length : start;
         }
         else if (ReferenceEquals(range.Start.Paragraph, range.End.Paragraph))
         {
@@ -219,52 +215,6 @@ internal static class RtfReferenceFields
             end = text.Length;
         }
 
-        return Filter(text[start..end]);
-    }
-
-    /// <summary>
-    /// The two names Writer gives its own cross-reference bookmarks.
-    /// </summary>
-    /// <remarks>
-    /// <c>IDocumentMarkAccess::GetType</c> and <c>CrossRefBookmark</c>'s two subclasses
-    /// (<c>sw/inc/crossrefbookmark.hxx</c>); the prefixes are what its ODF and Word filters write.
-    /// </remarks>
-    private static bool IsCrossReference(string name)
-        => name.StartsWith("__RefHeading__", StringComparison.Ordinal)
-           || name.StartsWith("__RefNumPara__", StringComparison.Ordinal);
-
-    /// <summary>
-    /// <c>FilterText</c> (<c>reffld.cxx</c>:461-489): no soft hyphens, no control characters and no
-    /// non-breaking hyphen in a reference's text.
-    /// </summary>
-    private static string Filter(string text)
-    {
-        if (text.Length == 0) return text;
-
-        char[]? buffer = null;
-        int length = 0;
-        for (int i = 0; i < text.Length; i++)
-        {
-            char character = text[i];
-            char replaced = character switch
-            {
-                '\u00ad' => '\0',   // a soft hyphen is removed outright, so nought stands for "drop"
-                '\u2011' => '-',
-                < ' ' => ' ',
-                _ => character,
-            };
-
-            if (buffer is null)
-            {
-                if (replaced == character) { length++; continue; }
-
-                buffer = new char[text.Length];
-                text.AsSpan(0, length).CopyTo(buffer);
-            }
-
-            if (replaced != '\0') buffer[length++] = replaced;
-        }
-
-        return buffer is null ? text : new string(buffer, 0, length);
+        return ReferenceFieldText.Filter(text[start..end]);
     }
 }
