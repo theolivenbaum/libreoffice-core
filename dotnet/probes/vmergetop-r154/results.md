@@ -124,3 +124,89 @@ they failed on `.docx`, and ODF spells the covered cell `table:covered-table-cel
 which is the two writers' own text-origin constant — the same 0.05 that separates every rule in this
 round's fixtures. Round 152 simulated both seats together and predicted −0.05; the two shipped fixes
 reproduce its simulation exactly.
+
+## 6. [bin] Confinement and reach: 44 of 1620 renderings move
+
+Our half of the whole corpus, of the 337 converted `.odt` and of the 337 converted `.rtf`, rendered
+once at the round's base and once with the fix under `SOURCE_DATE_EPOCH=0`, one output directory per
+document. `sweep.sh`, `diff-legs.py`, `confinement.txt`.
+
+| family | ext | moved | of |
+|---|---|--:|--:|
+| words | docx | **17** | 271 |
+| words | doc | **4** | 66 |
+| rtf column | rtf | **23** | 337 |
+| odt column | odt | **0** | 337 |
+| slides + sheets | — | **0** | 609 |
+
+**44 moved, 1576 byte-identical.** The `.odt` column is zero by construction — its reader is the one
+of the four that does not fill the carrier — and that is the confinement statement: a change made in
+three readers and one layouter reaches nothing else.
+
+***A container restart killed the head leg at 1319 of 1620 and it was finished rather than
+restarted.*** CLAUDE.md's rule — restart into a fresh directory — is about two *live* writers in one
+directory; a run the container killed is not one. What its death can leave is a truncated file, so
+`resume.py` opens every PDF the leg already held and deletes any that does not parse: **1318 good, 1
+empty**, which was the render in flight when the machine went down. The remaining 302 were rendered
+against the same binary, stated mtime unchanged.
+
+## 7. [bin] Scoring, and the format the corpus says least about
+
+Per span, pairing the reference's spans with each leg's by `(page, text)` in draw order and counting
+only the spans that moved between the two legs (`score2.py`):
+
+| | spans moved | closer to 26.2.4.2 | further | documents better / worse |
+|---|--:|--:|--:|---|
+| `.docx` | 13 156 | **12 884** | 270 | **15 / 1** |
+| `.rtf` | 3 678 | **3 246** | 429 | 12 / 7 |
+| `.doc` | 593 | **433** | 160 | 1 / 3 |
+| all | 17 427 | **16 563** | 859 | 28 / 11 |
+
+Summed mean |Δy| over the 44 movers goes **1105.45 → 1089.63 pt** — `.docx` −12.16, `.rtf` −3.68,
+`.doc` +0.12 — and |Δx| is flat at +0.1 %.
+
+**The witness improves on the measure as well as on its grid**: `FAA 2025-26 Holdover Tables.docx`
+mean |Δy| **1.0460 → 0.7540** and `24-25_FAA_Holdover_Tables.docx` **2.0940 → 1.6631**, with no page
+or alphanumeric count moving on either.
+
+**Two documents' counts move and both are the same template family**; a third moves *towards* the
+reference. `047_Visual_Product_Roadmap_Template` draws one alphanumeric more than before in both its
+`.docx` and its `.rtf` — 182 and 224 against the reference's 178 and 218 — while its mean |Δy| goes
+0.1256 → 0.0190, and `24-25_FAA_Holdover_Tables.rtf` goes **221 → 222 pages against the reference's
+223** and 320 241 → 320 315 characters against 321 294, closer on both.
+
+**`.doc` is the format this round can say least about, and its numbers are noise rather than a
+verdict.** Its four movers' mean |Δy| changes by −0.077, +0.178, +0.013 and +0.005 pt on documents
+already 7 to 45 pt from the reference. The fixture explains why: in a `.doc` round trip the covered
+cell's borders are **not** what the `.docx` stated — four of fixture 7's arms have 26.2.4.2 charging a
+rule that the file states nowhere — so the carrier is being fed borders that are themselves wrong.
+The change is kept because the rule is the same rule and it closes two measured arms, and the WW8
+border question is recorded as a seat of its own.
+
+**The `.rtf` split is a threshold, not a direction.** Within one template family three improve —
+`049` to **0.0000**, an exact match, and `044` by 3.92 — and two worsen by 3.24 and 2.22, which is
+what a table whose height now crosses a boundary differently looks like.
+
+## 8. The seats this round opened
+
+Three, each measured here and none implemented, all in `OPEN-ISSUES.md`:
+
+| | |
+|---|---|
+| **O103** | An `.odt` never charges a row's insets or its own top rule to a declared height, because `MinRowHeightInclBorder` is a *document setting* that `OdtLayoutSource` does not read — and **all 337 converted `.odt` state it**. Ten of fixture 7's eighteen arms fail on `.odt` and five of the ten hold no merge at all, so this is the larger half of that column's row-height error. |
+| **O104** | The ODF twin of this seat: a `table:covered-table-cell`'s stated rules are not charged. 3 arms. |
+| **O105** | A `.doc`'s covered cell carries borders the file does not state, so reading them is not enough: 4 arms still differ after the WW8 carrier, and on all four the reference charges a rule nobody states. |
+
+## 9. The suite
+
+| project | result |
+|---|---|
+| `Paperless.Core` | 591 passed |
+| `Paperless.Text` | 750 passed |
+| `Paperless.Vector` | 309 passed |
+| `Paperless.Containers` | 109 passed |
+| `Paperless.WordProcessing` | **2076** passed — 2072 at the round's base plus this round's 4 |
+| `Paperless.Spreadsheets` | 1484 passed |
+| `Paperless.Presentations`, `Paperless.Markup`, `Paperless.Fidelity` | *still running as this was written; §10 records them* |
+
+Build: 0 warnings, 0 errors.
