@@ -79,3 +79,39 @@ Mutation-pinned (`mutate.sh`) against three rival rules:
 | the thicker of the two | **1 of 4 failed** — arm B alone |
 | no borders at all (before round 154) | **2 of 4 failed** |
 | base (the master, always) | 4 passed |
+
+## 6. [bin] Confinement and reach: 4 of 1620, all `.doc`
+
+| family | moved | of |
+|---|--:|--:|
+| words `.doc` | **4** | 66 |
+| everything else | **0** | 1554 |
+
+`confinement.txt`. Per span, over the four movers (`score2.py`): **529 closer to 26.2.4.2 and 84
+further**, 3 documents net better and 1 worse.
+
+| document | spans moved | closer | further |
+|---|--:|--:|--:|
+| `150_5300_13_chg10.doc` | 329 | **329** | 0 |
+| `150_5300_13_chg12.doc` | 143 | **143** | 0 |
+| `foca_form_1.doc` | 2 | **2** | 0 |
+| `P200904290238_0238_51880.doc` | 140 | 55 | **84** |
+
+## 7. [bin] The one document that worsens is a deeper defect, and it is not this one
+
+`P200904290238_0238_51880.doc` goes from a mean baseline distance of 7.84 pt to 17.20, and the shift
+is on **pages 2 and 3 only** — page 1 *improves*, from −8.12 to −5.93 — so a table early in the
+document grew by about 18 pt. It holds **merges of depth 2, 3, 4 and 7** (`paperless extract
+--format xhtml`, counting `rowspan`), and depth is the attribute this round's arms do not vary.
+
+`make-deep.py` varies it: a four-row merge whose master states a 3 pt top and a 3 pt bottom, with a
+no-merge control. 26.2.4.2 gives the merged arm **25.5, 25.5, 25.5** — every covered row charged the
+master's 3 pt — and this tree gives **25.5, 19.5, 22.5**, *before this round's change as well as
+after it*, so the gap is neither caused nor closed here.
+
+**And it is not `CoveredTopRule` failing at depth.** `make-deep2.py` is the same fixture with the
+master's bottom `nil`, so nothing but the covered cell can charge a row: both renderers give
+**25.5, 25.5, 25.5** for the merge and **22.5, 22.5, 22.5** for the control — four rows of a
+four-row merge, exact. What deep.doc adds is a covered cell that carries a **bottom** rule as well,
+and there the two disagree from the second covered row on. Seated as **O107**; the witness is
+`deep.doc` and the corpus one is this document.
