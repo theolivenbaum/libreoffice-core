@@ -83,3 +83,44 @@ set of arms** and `OdtTableRowHeightTests` asserts the same numbers as
 `TableCoveredCellRuleTests` does for the `.docx`. 8 tests. Mutation-pinned (`mutate.sh`) over all
 four carriers — the setting, the covered top, the covered bottom and the break — 2, 2, 2 and 5 of 8
 red respectively, and 8 of 8 green at the base.
+
+## 5. [bin] Confinement: 117 of 1620 renderings move and every one of them is an `.odt`
+
+Our half of the whole corpus, of the 337 converted `.odt` and of the 337 converted `.rtf`, rendered
+once at the round's base and once with the fix under `SOURCE_DATE_EPOCH=0`, one output directory per
+document. `sweep.sh`, `diff-legs.py`, `confinement.txt`.
+
+| family | moved | of |
+|---|--:|--:|
+| **odt column** | **117** | 337 |
+| rtf column | 0 | 337 |
+| words `.docx` / `.doc` | 0 | 337 |
+| slides + sheets | 0 | 609 |
+
+**117 moved and 1503 are byte-identical.** A change confined to `OpenDocument/OdtLayoutSource*`
+reaching exactly the ODF column is what the layering predicts, and the other 1283 renderings are the
+measurement of it rather than the assumption.
+
+## 6. [bin] What it is worth: the gate gains four verdicts and loses none
+
+The 117 movers, each scored against its own 26.2.4.2 rendering with the gate's own rule — equal page
+counts, and an alphanumeric difference that fails only when it exceeds **both** 2 % and a floor of 15.
+`gatescore.py`, `gatescore.txt`.
+
+| | before | after |
+|---|--:|--:|
+| gate verdict `match`, of the 117 movers | 92 | **96** |
+| verdicts gained / lost | — | **4 / 0** |
+| page count closer to 26.2.4.2 / further | — | **6 / 1** |
+| mean \|Δy\| per span, median over the documents | 7.2343 pt | **5.7512 pt** |
+| documents closer / further on that | — | **87 / 15** |
+
+**No document that matched now fails.** The one page-count regression,
+`03_Technical_Report_(progress)_template`, was already failing on glyphs and now fails on pages
+instead: 11 against the reference's 10, where the base drew 10 and still failed the character band.
+
+**Fifteen documents are further and the largest is worth naming.**
+`gpp-pr-top-7-office-markets-4q-2023.odt` goes 9.33 → 23.45 pt of mean baseline distance; the rest
+move by a point or so on documents already 16 to 86 pt out. That is the shape of a pagination change
+on a document whose pages do not agree in the first place, and it is not evidence against the rule —
+the rule itself is measured at the reference on 34 arms with no free parameter.
