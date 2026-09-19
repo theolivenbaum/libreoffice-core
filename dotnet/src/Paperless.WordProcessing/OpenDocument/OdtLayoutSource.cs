@@ -132,6 +132,7 @@ public sealed partial class OdtLayoutSource
         _shrinksJustifiedBlanks = ShrinksJustifiedBlanks(settings);
         _breaksWrappedTables = BreaksWrappedTables(settings);
         _tabsRelativeToIndent = TabsRelativeToIndent(settings);
+        _rowHeightsIncludeInsets = RowHeightsIncludeInsets(settings);
     }
 
     /// <summary>
@@ -164,6 +165,12 @@ public sealed partial class OdtLayoutSource
     /// the setting is document-wide.
     /// </remarks>
     private readonly bool _tabsRelativeToIndent;
+
+    /// <summary>
+    /// Whether a row's declared height carries its insets and its own top rule.
+    /// </summary>
+    /// <remarks>See <see cref="RowHeightsIncludeInsets"/>, which has the measurement.</remarks>
+    private readonly bool _rowHeightsIncludeInsets;
 
     /// <summary>
     /// Whether two consecutive paragraphs' spacings add rather than the larger one winning, as the
@@ -239,6 +246,36 @@ public sealed partial class OdtLayoutSource
     /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
     internal static bool FliesMayOverlapTheBottomMargin(XElement? settings)
         => Setting(settings, "TabOverMargin") == "true";
+
+    /// <summary>
+    /// Whether a row's declared height is raised by its insets and its own top rule, as the settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>DocumentSettingId::MIN_ROW_HEIGHT_INCL_BORDER</c>, which ODF spells
+    /// <c>MinRowHeightInclBorder</c> (<c>sw/source/uibase/uno/SwXDocumentSettings.cxx</c>:288). It is read
+    /// twice by the row's own formatting — <c>lcl_CalcMinRowHeight</c>
+    /// (<c>sw/source/core/layout/tabfrm.cxx</c>:5061 for an <c>exact</c> row and :5074-5090 for an
+    /// <c>atLeast</c> one) — and it is what <see cref="Layout.PageTable.MinHeightIncludesInsets"/> gates.
+    /// </para>
+    /// <para>
+    /// <b>It is a document setting and not a property of the filter, which is what this reader had wrong.</b>
+    /// The only filter that sets it is WW8's (<c>sw/source/filter/ww8/ww8par.cxx</c>:1966), and
+    /// LibreOffice's ODF <em>export</em> then writes the resulting state into <c>settings.xml</c> — so every
+    /// <c>.odt</c> it wrote from a Word-family document carries <c>true</c>, and **all 337 of the converted
+    /// corpus state it**. Absent means <em>false</em>: <c>mbMinRowHeightInclBorder(false)</c>,
+    /// <c>sw/source/core/doc/DocumentSettingManager.cxx</c>:113 — Writer's own answer, which is why an
+    /// unread setting is a missing charge rather than a spurious one.
+    /// </para>
+    /// <para>
+    /// [bin] Measured on 26.2.4.2 over the eighteen arms of <c>probes/vmergetop-r154/</c>'s fixture 7
+    /// converted to <c>.odt</c> by the reference itself: <b>ten differed before this was read and two after</b>,
+    /// and five of the ten held no merged cell at all. <c>probes/odtrowheight-r155/</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool RowHeightsIncludeInsets(XElement? settings)
+        => Setting(settings, "MinRowHeightInclBorder") == "true";
 
     /// <summary>
     /// Whether a fly holding a table may be broken across pages at all, as the settings say.
