@@ -97,24 +97,37 @@ further**, 3 documents net better and 1 worse.
 | `foca_form_1.doc` | 2 | **2** | 0 |
 | `P200904290238_0238_51880.doc` | 140 | 55 | **84** |
 
-## 7. [bin] The one document that worsens is a deeper defect, and it is not this one
+## 7. [bin] The one document that worsens — and a wrong seat, withdrawn
 
 `P200904290238_0238_51880.doc` goes from a mean baseline distance of 7.84 pt to 17.20, and the shift
 is on **pages 2 and 3 only** — page 1 *improves*, from −8.12 to −5.93 — so a table early in the
 document grew by about 18 pt. It holds **merges of depth 2, 3, 4 and 7** (`paperless extract
---format xhtml`, counting `rowspan`), and depth is the attribute this round's arms do not vary.
+--format xhtml`, counting `rowspan`), and depth is the attribute this round's arms did not vary.
 
-`make-deep.py` varies it: a four-row merge whose master states a 3 pt top and a 3 pt bottom, with a
-no-merge control. 26.2.4.2 gives the merged arm **25.5, 25.5, 25.5** — every covered row charged the
-master's 3 pt — and this tree gives **25.5, 19.5, 22.5**, *before this round's change as well as
-after it*, so the gap is neither caused nor closed here.
+***The first version of this section said a deep merge whose master states a bottom rule leaves the
+later covered rows short, and seated it as O107. That is withdrawn: the rendering it rested on was
+made with the BASE binary and attributed to the head one.*** Re-rendered with the binary this round
+ships, `deep.doc` and `deep2.doc` agree with 26.2.4.2 on **all four rows of both arms of both
+files** — merged and unmerged, with the master's bottom stated and with it `nil`.
+`data/deep-recheck.txt`:
 
-**And it is not `CoveredTopRule` failing at depth.** `make-deep2.py` is the same fixture with the
-master's bottom `nil`, so nothing but the covered cell can charge a row: both renderers give
-**25.5, 25.5, 25.5** for the merge and **22.5, 22.5, 22.5** for the control — four rows of a
-four-row merge, exact. What deep.doc adds is a covered cell that carries a **bottom** rule as well,
-and there the two disagree from the second covered row on. Seated as **O107**; the witness is
-`deep.doc` and the corpus one is this document.
+| fixture | arm | 26.2.4.2 | ours |
+|---|---|---|---|
+| `deep` (master states a 3 pt bottom) | merged | 25.5, 25.5, 25.5 | **25.5, 25.5, 25.5** |
+| | control | 25.5, 19.5, 22.5 | **25.5, 19.5, 22.5** |
+| `deep2` (master states no bottom) | merged | 25.5, 25.5, 25.5 | **25.5, 25.5, 25.5** |
+| | control | 22.5, 22.5, 22.5 | **22.5, 22.5, 22.5** |
+
+So the rule holds at depth four as well as at depth two, and the corpus document's 18 pt is
+**unexplained**. O107 is re-seated as that one document with no mechanism attached, and the two
+instrumented readings that did survive the correction are worth keeping for whoever takes it: the
+WW8 reader's covered rules are identical for the two fixtures (top 3.00, bottom 1.00 on every
+covered row), and `TableLayouter.Measure` computes 25.50 for all four rows of both.
+
+**The lesson is the one CLAUDE.md already states and this round paid for anyway**: a rendering is
+evidence about the binary that produced it, and a probe directory holding `ours/` and `ours-base/`
+side by side will hand you the wrong one if you do not re-render after a rebuild.
+
 
 ## 8. The suite
 
