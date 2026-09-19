@@ -2959,3 +2959,12 @@ dotnet/probes/faa-r152/ref-render.sh	2026-09-18	current	26.2.4.2	present	current
 dotnet/probes/faa-r152/results.md	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/faa-r152/rules.py	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/faa-r152/vrules.py	2026-09-18	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/census.py	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/census.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/confine.sh	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/confine-rows.tsv	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/make-crossref.py	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/make-probe.py	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/reference-arms.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/reference-crossref.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/docxref-r158/results.md	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
