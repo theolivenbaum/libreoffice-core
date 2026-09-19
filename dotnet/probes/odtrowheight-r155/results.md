@@ -124,3 +124,19 @@ instead: 11 against the reference's 10, where the base drew 10 and still failed 
 move by a point or so on documents already 16 to 86 pt out. That is the shape of a pagination change
 on a document whose pages do not agree in the first place, and it is not evidence against the rule —
 the rule itself is measured at the reference on 34 arms with no free parameter.
+
+## 7. The suite
+
+| project | result |
+|---|---|
+| `Paperless.Core` | 591 passed |
+| `Paperless.Text` | 750 passed |
+| `Paperless.Vector` | 309 passed |
+| `Paperless.Containers` | 109 passed |
+| `Paperless.WordProcessing` | **2084** passed — 2076 at the round's base plus this round's 8 |
+| `Paperless.Spreadsheets` | 1484 passed |
+| `Paperless.Presentations` | 1205 passed |
+| `Paperless.Markup` | 259 passed |
+| `Paperless.Fidelity` | **10 failed of 552**, 0 skipped — the round's base figure exactly, and the known set |
+
+Build: 0 warnings, 0 errors.
