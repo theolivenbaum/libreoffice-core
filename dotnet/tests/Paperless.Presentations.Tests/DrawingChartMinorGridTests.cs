@@ -113,7 +113,10 @@ public class DrawingChartMinorGridTests
             "<c:minorGridlines><c:spPr><a:ln w=\"6350\"><a:prstDash val=\"sysDash\"/></a:ln>"
             + "</c:spPr></c:minorGridlines>")).ValueMinorGrid!.Value;
 
-        grid.Width.ShouldBe(Length.FromEmu(6350));
+        // `convertEmuToHmm` rounds a DrawingML width to a whole hundredth of a millimetre, so the
+        // reference never holds the EMU the file states. `DrawingChartAutoFormat.LineWidth` has
+        // the two legs; `probes/stroke-resid-r117/results.md` §3 has the measurements.
+        grid.Width.ShouldBe(Length.FromMm100(18));
         grid.Dash.ShouldNotBeNull();
         grid.Dash!.Count.ShouldBeGreaterThan(1);
     }

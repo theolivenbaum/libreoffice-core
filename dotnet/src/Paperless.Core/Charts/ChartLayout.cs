@@ -388,6 +388,26 @@ public static partial class ChartLayout
     /// </remarks>
     private static readonly Length PieMargin = Length.FromMm100(350);
 
+    /// <summary>How many chart units a BIFF chart's frame is divided into on each axis.</summary>
+    /// <remarks><c>EXC_CHART_TOTALUNITS</c>, <c>sc/source/filter/inc/xlchart.hxx</c>:163.</remarks>
+    private const int ChartTotalUnits = 4000;
+
+    /// <summary>
+    /// The border a BIFF chart's unit grid leaves at each edge, in hundredths of a millimetre.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclChRootData::InitConversion</c> (<c>sc/source/filter/excel/xlchart.cxx</c>:1245-1251,
+    /// this tree) takes <c>GetHmmFromPixelX(5.0)</c> off each edge before dividing the rest into
+    /// <see cref="ChartTotalUnits"/>. A screen pixel is <c>XclRootData</c>'s
+    /// <c>mfScreenPixelX</c>, initialised to <strong>50.0</strong> hundredths of a millimetre
+    /// (<c>xlroot.cxx</c>:105) and replaced only when an active frame can be asked for its device
+    /// (<c>:150-163</c>) — which headless conversion cannot, so the default stands and five
+    /// pixels is 250. That is the reference this project calibrates against, and it is measured:
+    /// solving the two charts of <c>Template Pilot Logbook JAR-FCL V3.0.xls</c> for the gap gives
+    /// 249.7 and 249.4 against 26.2.4.2's own resolved plot rectangles.
+    /// </remarks>
+    private const int ChartBorderGapMm100 = 250;
+
     /// <summary>The gap between the legend and the diagram, left or right.</summary>
     /// <remarks>
     /// <para>
@@ -1182,7 +1202,12 @@ public static partial class ChartLayout
         // and the scale and the rectangle are computed again if it came out lower.
         if (plot.HasAxes)
         {
-            int fitting = IntervalsThatFit(plot, area, columns, scale, measurer);
+            int fitting = IntervalsThatFit(
+                plot, area, columns, scale, measurer,
+                columns
+                    ? area.Width
+                    : MaximumPassWidth(
+                        plot, frame, area, scale, domain, categories, measurer));
             if (fitting < ChartScale.MaximumAutoIntervalCount)
             {
                 scale = ChartScale.Resolve(
@@ -1203,14 +1228,62 @@ public static partial class ChartLayout
             }
         }
 
+        // And the value axis' own arrangement, once its interval is settled. Same two-step shape
+        // as the category axis above: the arrangement is decided against the rectangle its labels
+        // were reserved room in, and a turned arrangement is deeper and narrower than an upright
+        // one, so the rectangle is composed again around it.
+        //
+        // Only the horizontal branch, and only after the interval — see ArrangeValueLabels.
+        ChartAxisLabelLayout? valueArranged = null;
+
+        if (plot.HasAxes && !columns && domain is null && plot.DataTable is null)
+        {
+            valueArranged = ArrangeValueLabels(plot, area, scale, measurer);
+
+            if (valueArranged is { } turned && Reshapes(turned))
+            {
+                area = PlotAreaOf(
+                    plot, frame, scale, secondary, domain, categories, measurer, arranged,
+                    valueArranged);
+
+                if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                    return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+
+                valueArranged = ArrangeValueLabels(plot, area, scale, measurer);
+                area = PlotAreaOf(
+                    plot, frame, scale, secondary, domain, categories, measurer, arranged,
+                    valueArranged);
+
+                if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                    return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+            }
+        }
+
         // The pie's own second pass, and the only chart type that has one:
         // impl_createDiagramAndContent draws the series once, takes the bounding box of everything
         // the diagram group produced — the labels included — and recreates the whole thing at
-        // adjustInnerSize(consumedOuterRect). It is what makes a pie with best-fit labels smaller
-        // than a pie without them, measured at radius 99.78 against 110.44 on the corpus witness,
-        // and it is gated on there being a best-fit label because that is the only placement whose
-        // labels can leave the diagram rectangle at all.
-        if (HasBestFitLabels(plot))
+        // adjustInnerSize(consumedOuterRect).
+        //
+        // The gate is `if( bIsPieOrDonut )` at `ChartView.cxx:682`, and `lcl_IsPieOrDonut` is
+        // `xDiagram->isPieOrDonutChart()` (`:339-346`) — the chart type and nothing else. This
+        // stood on `HasBestFitLabels` for eleven rounds on the reasoning that only a best-fit
+        // label can leave the diagram rectangle, which is refuted by the reference's own resolved
+        // view: `--convert-to fodt` on `027_Unit_Circle_Chart_Graphical_Chart`, whose labels are
+        // all `outEnd`, gives `<chart:coordinate-region>` 0.876 of its `<chart:plot-area>`'s
+        // square, and on the 15 corpus doughnuts it gives 0.9999 — so the pass runs on both and
+        // simply consumes nothing on a doughnut, whose labels `AVOID_OVERLAP` turns into `CENTER`.
+        //
+        // And it is skipped for a chart that states its own *inner* rectangle, which is the other
+        // half of the same guard: `getAvailablePosAndSizeForDiagram` sets `mbUseFixedInnerSize` to
+        // the diagram's `PosSizeExcludeAxes` (`ChartView.cxx:946-981`), which is what
+        // `c:layoutTarget val="inner"` and ODF's `<chart:coordinate-region>` both set, and every
+        // call to `adjustInnerSize` in `impl_createDiagramAndContent` — the pie's at `:684-686`
+        // included — is guarded by `if (!rParam.mbUseFixedInnerSize)`. A BIFF chart is the
+        // opposite case and keeps the pass: `setDiagramPositionIncludingAxes` leaves
+        // `PosSizeExcludeAxes` false (`xichart.cxx:4038-4046`, `DiagramWrapper.cxx:843-853`), so
+        // its stated rectangle is the *available* one.
+        if ((plot.Kind is ChartPlotKind.Pie or ChartPlotKind.OfPie)
+            && plot.PlotArea is null && plot.PlotAreaFraction is null)
         {
             DocRect outer = DiagramAreaOf(plot, frame, measurer);
 
@@ -1235,7 +1308,8 @@ public static partial class ChartLayout
         if (plot.HasAxes)
         {
             AddValueAxis(
-                plot, area, scale, columns, plot.ValueFormat, false, measurer, lines, labels);
+                plot, area, scale, columns, plot.ValueFormat, false, measurer, lines, labels,
+                valueArranged);
 
             if (secondary is { } second && plot.SecondaryAxisVisible)
             {
@@ -1612,7 +1686,8 @@ public static partial class ChartLayout
         DocRect area,
         bool columns,
         ChartScaleResult scale,
-        ChartText measurer)
+        ChartText measurer,
+        Length capWidth)
     {
         // A stated interval is honoured whatever fits; only the automatic one is re-derived.
         if (plot.ValueScale.MajorUnit is { } stated && stated > 0.0)
@@ -1635,10 +1710,14 @@ public static partial class ChartLayout
         }
         else
         {
-            available = area.Width;
+            // NOT `area.Width` — see <see cref="MaximumPassWidth"/>. The numerator is the
+            // rectangle the *maximum-label* pass left, which is wider than the plot as drawn.
+            available = capWidth;
             needed = Length.Zero;
 
-            foreach (double tick in scale.MajorTicks())
+            // And only the first three ticks are measured, not all of them — see
+            // <see cref="MeasuredTicks"/>.
+            foreach (double tick in MeasuredTicks(scale))
             {
                 Length width = measurer.Measure(
                     ChartDataLabel.Write(tick, plot.ValueFormat), modelSize,
@@ -1652,10 +1731,378 @@ public static partial class ChartLayout
 
         if (needed <= Length.Zero) return ChartScale.MaximumAutoIntervalCount;
 
+        int fitting = (int)(available.Emu / needed.Emu);
+        int repeated = IntervalsThatReadDifferently(plot, scale);
+        if (repeated < fitting) fitting = repeated;
+
         return Math.Clamp(
-            (int)(available.Emu / needed.Emu),
+            fitting,
             ChartScale.MinimumAutoIntervalCount,
             ChartScale.MaximumAutoIntervalCount);
+    }
+
+    /// <summary>
+    /// The tick labels the interval cap is measured over: at most the first <em>three</em>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>m_nMaximumTextWidthSoFar</c> is not the widest label on the axis. It is the widest of
+    /// the labels <c>createMaximumLabels</c> actually built, and that pass iterates a
+    /// <c>MaxLabelTickIter</c> (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:455-511), not
+    /// the whole tick array: it seeds itself with <c>getIndexOfLongestLabel</c> for a text axis
+    /// and with <strong>zero</strong> for a value axis (<c>:1517-1530</c>,
+    /// <c>m_bUseTextLabels</c> false), takes the index before it when there is one, and then adds
+    /// following indices until it holds three. So a value axis is capped on
+    /// <c>{0, 1, 2}</c> — its first three labels — and every later one, however wide, is never
+    /// measured.
+    /// </para>
+    /// <para>
+    /// <strong>Measured directly at 26.2.4.2, by making the two halves of one axis disagree.</strong>
+    /// <c>027_Simple_personal_cash_flow_statement</c>'s savings chart runs a currency value axis
+    /// along the bottom over 0…12,000, and the reference labels it <c>$0 $2,000 … $14,000</c> —
+    /// seven intervals. With its <c>c:numFmt</c> alone changed to
+    /// <c>[&lt;5000]"$"#,##0;[&gt;=5000]"$"#,##0"WWWWWWWW";General</c>, so that every tick from
+    /// 6,000 up is eight characters wider, the reference draws <strong>the same seven
+    /// intervals</strong>. With the condition reversed, so that only <c>$0</c>, <c>$2,000</c> and
+    /// <c>$4,000</c> carry the suffix, it collapses to <strong><c>$0 $10,000 $20,000</c></strong>.
+    /// Nothing but the width of the first three labels moved the cap.
+    /// (<c>probes/chart-axis-r112</c> §2.)
+    /// </para>
+    /// <para>
+    /// Only the horizontal branch of <see cref="IntervalsThatFit"/> is affected. A vertical value
+    /// axis is capped on <c>m_nMaximumTextHeightSoFar</c>, and one line of digits is as tall as
+    /// any other, so measuring three of them or all of them is the same number.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<double> MeasuredTicks(ChartScaleResult scale)
+        => scale.MajorTicks().Take(3);
+
+    /// <summary>
+    /// The text a data label's <c>[CATEGORY NAME]</c> field draws for one point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It is the <em>axis'</em> number format, not the source cell's.</strong>
+    /// <c>VSeriesPlotter::getCategoryName</c>
+    /// (<c>chart2/source/view/charttypes/VSeriesPlotter.cxx</c>:2213-2224) is
+    /// <c>m_pExplicitCategoriesProvider-&gt;getSimpleCategories()[n]</c> — the same strings the
+    /// category axis draws — and those are built by
+    /// <c>ExplicitCategoriesProvider::convertCategoryAnysToText</c>
+    /// (<c>chart2/source/tools/ExplicitCategoriesProvider.cxx</c>:186-227), which takes one
+    /// number format <em>before</em> the loop, from <c>getAxisByDimension2(0, 0)</c> through
+    /// <c>AxisHelper::getExplicitNumberFormatKeyForAxis</c>, and writes every numeric category
+    /// through it. A category that is already a string is passed straight out
+    /// (<c>aAny &gt;&gt;= aText</c>), which is what <see cref="ChartDataLabel.WriteCategory"/>
+    /// answers for one.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 with one-attribute variants of
+    /// <c>055_Project_timeline_with_milestones</c></strong>, whose thirteen milestone labels are
+    /// a <c>CELLRANGE</c> field and a <c>CATEGORYNAME</c> field over a <c>c:dateAx</c> stating
+    /// <c>[$-409]d\ mmm;@</c> while the source cells are <c>m/d/yyyy</c>. Changing the axis'
+    /// <c>formatCode</c> to <c>yyyy</c> draws them <c>2023</c>, to <c>mmmm</c> draws them
+    /// <c>April</c>, to <c>0.00</c> draws them <c>45021.00</c>; changing the <em>cells'</em>
+    /// format to either <c>yyyy</c> or <c>0.00</c> leaves the rendering byte-identical to the
+    /// control. <c>probes/chart-cap-r113</c> §3, <c>catname-055.py</c>.
+    /// </para>
+    /// <para>
+    /// <strong>And the axis' <c>sourceLinked</c> is not consulted for an axis at all.</strong>
+    /// <c>ObjectFormatter::convertNumberFormat</c>
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:1143-1147) sets
+    /// <c>LinkNumberFormatToSource</c> from <c>maFormatCode.isEmpty()</c> when the object is an
+    /// axis — under a comment saying the property *"does not really work, at least not for
+    /// axis"* — so a stated code always wins. The <c>sourceLinked="1"</c> variant of the same
+    /// probe is byte-identical to the control, which is that line measured.
+    /// </para>
+    /// </remarks>
+    private static string? CategoryTextAt(ChartPlot plot, int index)
+    {
+        if (index < 0) return null;
+
+        // A date axis' categories reach this tree as *text already formatted by the source cell*
+        // — an OOXML chart in a workbook resolves its `c:cat` range against the live sheet, so
+        // `Categories[n]` is `4/5/2023` and not the serial 45021, and there is nothing left for
+        // WriteCategory to reformat. The serials survive on the resolved axis, which is where
+        // the reference's own numbers come from too, so the field is written from those.
+        if (plot.DateAxis is { } date
+            && index < date.CategoryValues.Count
+            && date.CategoryValues[index] is { } serial)
+        {
+            return date.LabelOf(serial);
+        }
+
+        return index < plot.Categories.Count
+            ? ChartDataLabel.WriteCategory(plot.Categories[index], plot.CategoryFormat)
+            : null;
+    }
+
+    /// <summary>
+    /// The length a <em>horizontal</em> value axis' interval cap is taken against — which is not
+    /// the axis as drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>estimateMaximumAutoMainIncrementCount</c> divides <c>nTotalAvailable</c> by
+    /// <c>m_nMaximumTextWidthSoFar</c>, and <c>nTotalAvailable</c> is
+    /// <c>get2DAxisMainLine</c>'s length <em>at the moment the second <c>doAutoScaling</c>
+    /// runs</em> (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1559-1618,
+    /// <c>VCoordinateSystem.cxx</c>:415-417). <c>ChartView::impl_createDiagramAndContent</c>
+    /// (<c>chart2/source/view/main/ChartView.cxx</c>:556-604) puts that moment between two
+    /// resizes and not after them:
+    /// </para>
+    /// <list type="number">
+    /// <item><c>aVDiagram.reduceToMinimumSize()</c> — the inner rectangle becomes the available
+    /// one over 2.2 (<c>VDiagram.cxx</c>:635-651);</item>
+    /// <item><c>createMaximumAxesLabels()</c> — every axis lays out the <em>three</em> labels
+    /// <c>MaxLabelTickIter</c> picks, <c>m_bOverlapAllowed</c> forced true and
+    /// <c>m_bLineBreakAllowed</c> forced false (<c>VCartesianAxis.cxx</c>:1769-1809);</item>
+    /// <item><c>adjustInnerSize(aConsumedOuterRect)</c> — the inner rectangle grows back by
+    /// <c>available − consumed</c> in each dimension, floored at a third of the available one
+    /// (<c>VDiagram.cxx</c>:653-698);</item>
+    /// <item><strong>then</strong> the estimate.</item>
+    /// </list>
+    /// <para>
+    /// The <c>2.2</c> cancels: the consumed rectangle is the reduced diagram plus whatever its
+    /// labels hang outside it, so the rectangle the cap is taken against is the
+    /// <em>available</em> width less that overhang. On a bar chart the overhang on the near side
+    /// is the vertical category axis' own maximum labels, and on the far side it is nothing at
+    /// all — the value labels the maximum pass drew are <c>{0, 1, 2}</c>, which are at the near
+    /// end of the axis. So the numerator is <em>wider than the plot area as drawn</em>, and
+    /// wider than the reference's own drawn plot area.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2, on the axis at right angles to round 112's.</strong> On
+    /// <c>027_Simple_personal_cash_flow_statement</c>'s savings chart the five categories are
+    /// <c>Other 1</c>, <c>Other 2</c>, <c>Cash Reserves</c>, <c>Savings/Investment</c>,
+    /// <c>401(k)/Etc</c>; the longest is index 3, which is <c>nMaxIndex-1</c>, so
+    /// <c>MaxLabelTickIter</c> resets to zero and the set is <c>{0, 1, 2}</c> — widest
+    /// <c>Cash Reserves</c>, not <c>Savings/Investment</c>. Rewriting one category at a time in
+    /// the chart's own <c>c:strCache</c>:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>index 3 or index 4 eight characters wider — the value axis keeps
+    /// <c>$0 $2,000 … $14,000</c> exactly, while the drawn axis collapses from 115.67 pt to
+    /// <strong>75.10</strong>;</item>
+    /// <item>index 0, 1 or 2 eight characters wider — it coarsens to
+    /// <c>$0 $5,000 $10,000 $15,000</c>.</item>
+    /// </list>
+    /// <para>
+    /// A drawn axis a third shorter with the same interval is what rules the plot rectangle out.
+    /// The fine sweep pins the numerator: padding <c>Cash Reserves</c> with <c>l</c> (1.4225 pt
+    /// each at that document's drawn scale) holds seven intervals to three <c>l</c> and drops to
+    /// three at four, so <c>nTotalAvailable ∈ [129.7, 131.1) pt</c> against a 170.1 pt available
+    /// width, a 39.4 pt category band and a 115.7 pt drawn axis. The model above predicts 130.7.
+    /// <c>probes/chart-cap-r113</c> §1, <c>cat-set-027.py</c>, <c>cat.tsv</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The vertical branch is left alone, and that is measured too.</strong> On a column
+    /// chart the crossing axis is horizontal and its maximum labels <em>do</em> take the depth
+    /// they take when drawn, so the numerator and the drawn plot height differ by at most the
+    /// half label the top edge gives up. Four variants of one probe over a 120 pt frame —
+    /// category names of 2, 20, 40 and 60 characters, drawn axes of 96.61, 86.12, 60.36 and
+    /// 42.40 pt — give seven intervals, seven, three and three, which both readings fit.
+    /// <c>probes/chart-cap-r113</c> §2, <c>colcap.py</c>.
+    /// </para>
+    /// <para>
+    /// <strong>And a chart that states its own inner rectangle skips all of it.</strong>
+    /// <c>mbUseFixedInnerSize</c> guards <c>reduceToMinimumSize</c> and every
+    /// <c>adjustInnerSize</c> alike, and it is the diagram's <c>PosSizeExcludeAxes</c> — which
+    /// <c>c:layoutTarget val="inner"</c> and ODF's <c>chart:coordinate-region</c> both set. For
+    /// those the cap is taken against the stated rectangle, which is <c>area</c> itself.
+    /// </para>
+    /// </remarks>
+    private static Length MaximumPassWidth(
+        ChartPlot plot,
+        DocRect frame,
+        DocRect area,
+        ChartScaleResult scale,
+        ChartScaleResult? domain,
+        int categories,
+        ChartText measurer)
+    {
+        // mbUseFixedInnerSize — the stated rectangle IS the inner one, and nothing resizes it.
+        if (plot.PlotArea is not null || plot.PlotAreaFraction is not null) return area.Width;
+
+        DocRect outer = StatedOuterArea(plot, frame) ?? DiagramAreaOf(plot, frame, measurer);
+        if (outer.Width <= Length.Zero) return area.Width;
+
+        // A category axis whose line runs *inside* the plot hangs its labels inside it and
+        // overflows nothing, exactly as PlotAreaOf has it.
+        double along = CategoryLabelsAt(plot, scale);
+        bool inside = along > 0.0 && along < 1.0;
+
+        bool categoryLabels = plot.CategoryAxisVisible && plot.CategoryLabelsVisible && !inside;
+
+        Length band = Length.Zero;
+        if (plot.CategoryAxisVisible && !inside)
+        {
+            band = OuterTick(plot.CategoryTicks);
+            if (categoryLabels)
+            {
+                band += (domain is { } across
+                            ? WidestValueLabel(
+                                  across, plot.DomainFormat, plot.LabelSize, measurer,
+                                  plot.IsLabelBold)
+                            : WidestMaximumCategoryLabel(plot, categories, measurer))
+                        + LabelSpacing;
+            }
+        }
+
+        // The maximum pass' own first label is centred on the near corner and hangs half of
+        // itself past it; the labels after it are further along the axis and hang past nothing,
+        // which is why no room comes off the far end.
+        Length near = Length.Zero;
+        if (plot.ValueAxisVisible && plot.ValueLabelsVisible)
+        {
+            foreach (double tick in MeasuredTicks(scale))
+            {
+                near = measurer.Measure(
+                    ChartDataLabel.Write(tick, plot.ValueFormat), plot.LabelSize,
+                    plot.IsLabelBold).Width / 2;
+                break;
+            }
+        }
+
+        Length width = outer.Width - Length.Max(band, near);
+        Length floor = outer.Width / 3;
+        return width < floor ? floor : width;
+    }
+
+    /// <summary>
+    /// The widest of the category labels <c>createMaximumLabels</c> actually builds — at most
+    /// three of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MaxLabelTickIter</c>'s own arithmetic (<c>VCartesianAxis.cxx</c>:472-495): seed with
+    /// the index of the longest label, reset that to zero when it is the last or the
+    /// last-but-one, take the index before it when there is one, then add following indices
+    /// until three are held. <c>createMaximumLabelTickIterator</c> (<c>:672-690</c>) uses it for
+    /// a plain text axis and hands a <em>complex</em> category axis and a <em>date</em> axis
+    /// every label instead, which is why both fall through to
+    /// <see cref="WidestCategoryLabel"/> here.
+    /// </para>
+    /// <para>
+    /// <strong>"Longest" is a character count and not a width, and that is not a detail.</strong>
+    /// <c>VAxisBase::getIndexOfLongestLabel</c> (<c>chart2/source/view/axes/VAxisBase.cxx</c>
+    /// :195-212) compares <c>getLength()</c> under its own <c>//todo: get real text width
+    /// (without creating shape) instead of character count</c>, and the comparison is strictly
+    /// greater, so the <em>first</em> of two equally long labels wins. On
+    /// <c>026_Monthly_cash_flow_statement</c>'s expenses chart the two longest are
+    /// <c>Disability premiums</c> at index 12 and <c>Federal/SS/Medicare</c> at index 16 —
+    /// nineteen characters each, and the second is <c>nMaxIndex-1</c>. Choosing by width picks
+    /// index 16, which the reset then sends to <c>{0, 1, 2}</c> — <c>Other 1</c>,
+    /// <c>Other 2</c>, <c>Garbage</c> — and leaves the numerator 25 pt too large, which is
+    /// exactly one interval on that axis: eight where 26.2.4.2 draws four. Counting characters
+    /// picks index 12, holds <c>{11, 12, 13}</c>, and reproduces the reference.
+    /// </para>
+    /// </remarks>
+    private static Length WidestMaximumCategoryLabel(
+        ChartPlot plot, int categories, ChartText measurer)
+    {
+        if (plot.DateAxis is not null || plot.CategoryLevels is { Count: > 1 })
+            return WidestCategoryLabel(plot, categories, measurer);
+
+        int count = Math.Min(categories, plot.Categories.Count);
+        if (count <= 0) return Length.Zero;
+
+        var texts = new string?[count];
+        int longest = 0;
+
+        for (int at = 0; at < count; at++)
+        {
+            texts[at] = ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat);
+            if ((texts[at]?.Length ?? 0) > (texts[longest]?.Length ?? 0)) longest = at;
+        }
+
+        int last = count - 1;
+        if (longest >= last - 1) longest = 0;
+
+        int first = longest > 0 ? longest - 1 : longest;
+        int end = longest;
+        for (int held = longest > 0 ? 2 : 1; held < 3 && end < last; held++) end++;
+
+        Length widest = Length.Zero;
+        for (int at = first; at <= end; at++)
+        {
+            if (texts[at] is not { Length: > 0 } text) continue;
+            Length width = measurer.Measure(text, plot.LabelSize, plot.IsLabelBold).Width;
+            if (width > widest) widest = width;
+        }
+
+        return widest;
+    }
+
+    /// <summary>
+    /// The second half of the cap: how many intervals the axis may have before two neighbouring
+    /// ticks would read the same.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// tdf#48041, in <c>VCartesianAxis::estimateMaximumAutoMainIncrementCount</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1578-1600, lowering the estimate at
+    /// :1611-1615). Every tick of the pass just
+    /// finished is formatted through the axis' own number format, the longest run of consecutive
+    /// equal strings is counted, and the estimate is lowered to
+    /// <c>m_aAllTickInfos[0].size() / (nMaxSameLabel + 1)</c> whenever that is smaller. It is
+    /// skipped for a date axis and for no other kind.
+    /// </para>
+    /// <para>
+    /// <strong>The comparison starts against an empty string</strong> — <c>OUString
+    /// sPreviousValueLabel;</c> at :1582, and the first tick is compared with it before it is ever
+    /// assigned. So an axis whose <em>first</em> tick formats to nothing scores one repeat although
+    /// no two of its labels are alike, and its cap is halved. That is not an incidental detail: it
+    /// is the whole of the disagreement on <c>048_Expense_trends_budget</c>, whose value axis
+    /// states <c>c:numFmt formatCode="#,##0;;"</c> — two empty sections, so zero and every negative
+    /// draw as nothing — over a 0…500 range. Eleven ticks, one repeat, <c>11 / 2 = 5</c>, and five
+    /// intervals of 0…500 is the 1/2/5 ladder's 100 where ten is its 50.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 with one attribute changed at a time</strong>
+    /// (<c>probes/chart-fit-r97/axis-variants.py</c>), which is what separates this from the
+    /// interval cap <c>probes/chart-axis-r87</c> corrected: the document's own rendering steps by
+    /// 100; with <c>formatCode</c> alone changed to <c>#,##0</c> it steps by <b>50</b>; with the
+    /// sheet's <c>fitToPage</c> and <c>pageSetup/@scale</c> alone removed it still steps by
+    /// <b>100</b>, at an axis 180.29 pt long with 13.42 pt labels. So the print zoom is not in it
+    /// and the length is not in it — <c>151 / 9.04</c> and <c>180 / 13.42</c> are both over ten,
+    /// where the clamp saturates.
+    /// </para>
+    /// </remarks>
+    /// <param name="plot">The chart, for the value axis' number format.</param>
+    /// <param name="scale">The scale of the pass just finished, whose ticks are the ones counted.</param>
+    private static int IntervalsThatReadDifferently(ChartPlot plot, ChartScaleResult scale)
+    {
+        // `m_aAxisProperties.m_nAxisType != css::chart2::AxisType::DATE` (:1578). A date axis'
+        // labels legitimately repeat at a resolution coarser than the tick, and its cap is 500
+        // rather than 10 in the first place.
+        if (plot.DateAxis is not null) return ChartScale.MaximumAutoIntervalCount;
+
+        int ticks = 0;
+        int repeats = 0;
+        int longest = 0;
+
+        // The seed is the empty string and the first tick is compared against it, exactly as
+        // :1582-1597 does. Reading this as "no two labels are alike" would miss the witness.
+        string previous = string.Empty;
+
+        foreach (double tick in scale.MajorTicks())
+        {
+            ticks++;
+            string label = ChartDataLabel.Write(tick, plot.ValueFormat);
+            if (label == previous)
+            {
+                repeats++;
+                if (repeats > longest) longest = repeats;
+            }
+            else
+            {
+                repeats = 0;
+            }
+
+            previous = label;
+        }
+
+        return longest > 0 ? ticks / (longest + 1) : ChartScale.MaximumAutoIntervalCount;
     }
 
     /// <summary>
@@ -1694,6 +2141,37 @@ public static partial class ChartLayout
     /// proportional margin.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The outer plot rectangle a BIFF chart states, resolved against the frame, or null.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChRoot::CalcHmmFromChartRect</c> (<c>sc/source/filter/excel/xichart.cxx</c>:320-327,
+    /// this tree) run in hundredths of a millimetre, which is the unit its integer truncation is
+    /// defined in. Its border gap is added to the <em>width</em> as well as to the position — that
+    /// is what the function does, and both charts of <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>
+    /// confirm it against 26.2.4.2's own resolved model, in x and in y.
+    /// </remarks>
+    private static DocRect? StatedOuterArea(ChartPlot plot, DocRect frame)
+    {
+        if (plot.OuterPlotAreaUnits is not { } units) return null;
+
+        static long Resolve(long span, int chartUnits)
+        {
+            double unit = Math.Max(span - (2 * ChartBorderGapMm100), ChartBorderGapMm100)
+                          / (double)ChartTotalUnits;
+            return (long)((unit * chartUnits) + ChartBorderGapMm100 + 0.5);
+        }
+
+        long width = frame.Width.Mm100;
+        long height = frame.Height.Mm100;
+
+        return new DocRect(
+            frame.X + Length.FromMm100(Resolve(width, units.X)),
+            frame.Y + Length.FromMm100(Resolve(height, units.Y)),
+            Length.FromMm100(Resolve(width, units.Width)),
+            Length.FromMm100(Resolve(height, units.Height)));
+    }
+
     private static DocRect DiagramAreaOf(ChartPlot plot, DocRect frame, ChartText measurer)
     {
         Length marginX = plot.Kind is ChartPlotKind.Pie or ChartPlotKind.OfPie && !plot.Rings
@@ -1780,7 +2258,8 @@ public static partial class ChartLayout
         ChartScaleResult? domain,
         int categories,
         ChartText measurer,
-        ChartAxisLabelLayout? arranged)
+        ChartAxisLabelLayout? arranged,
+        ChartAxisLabelLayout? valueArranged = null)
     {
         // Absolute, in the chart's own coordinates — ODF's chart:coordinate-region, which is
         // already in whatever space Place composed in.
@@ -1800,7 +2279,9 @@ public static partial class ChartLayout
         // The computed path, which is what every OOXML chart takes: the outer rectangle, then the
         // axes' labels and titles out of it — AXIS2D_TICKLENGTH and AXIS2D_TICKLABELSPACING for
         // the gaps, ChartView.cxx:1070-1077 for the axis titles.
-        DocRect area = DiagramAreaOf(plot, frame, measurer);
+        // A BIFF chart states that outer rectangle instead of leaving it to be computed, and the
+        // labels still come out of it: setDiagramPositionIncludingAxes.
+        DocRect area = StatedOuterArea(plot, frame) ?? DiagramAreaOf(plot, frame, measurer);
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return DocRect.Empty;
 
         Length left = area.Left;
@@ -1868,7 +2349,10 @@ public static partial class ChartLayout
         // label is deeper and narrower than an upright one. Both halves move: the band the plot
         // gives up is the rotated shape's height, and the overhang past the last tick is half its
         // rotated width. Zero rotation leaves both exactly as they were.
-        double valueTurn = plot.ValueAxisText.Rotation;
+        // And a value axis with nothing stated may still turn, because its labels collided and
+        // it turned itself — see ArrangeValueLabels. Both are the same number to everything
+        // below; only where it came from differs.
+        double valueTurn = valueArranged?.Rotation ?? plot.ValueAxisText.Rotation;
         double valueCos = Math.Abs(Math.Cos(valueTurn));
         double valueSin = Math.Abs(Math.Sin(valueTurn));
 
@@ -1983,8 +2467,32 @@ public static partial class ChartLayout
             if (ValueLabelsFar(plot, false)) top += valueBand + valueSpace;
             else bottom -= valueBand + valueSpace;
 
-            // The last value label is centred on the axis' right end, so half of it overhangs.
-            right -= ((valueLabel * valueCos) + (valueHeight * valueSin)) / 2;
+            // What the last value label overhangs the axis' far end by — and it is two rules
+            // rather than one, because `lcl_correctRotation_Bottom`
+            // (`chart2/source/view/main/LabelPositionHelper.cxx`:241-256) does *nothing at all*
+            // at zero degrees and jumps to `-(h·sin + w·cos)/2` at any other angle.
+            //
+            // The label's shape is autogrown around a centred paragraph, so before that
+            // correction its top *centre* sits on the tick — `makeTransformation`'s own comment,
+            // "as autogrow is active the rectangle is automatically expanded to that side to
+            // which the text is not adjusted" (`ShapeFactory.cxx`). Rotating that box about the
+            // tick puts its right edge at `w·cos/2 + h·sin`, and the correction then takes
+            // `(w·cos + h·sin)/2` off it, leaving **`h·sin/2`** — a quantity with no `w` in it at
+            // all. Upright, no correction is applied and the plain half-width stands.
+            //
+            // Measured on `027_Simple_personal_cash_flow_statement`'s savings chart against
+            // 26.2.4.2, with the value axis' scale pinned so the tick set cannot move
+            // (`probes/chart-slide-r117/turn027.py`): widening every value label from 19.18 pt of
+            // ink to 40.69 by its number format alone moves the drawn plot width by **0.02 pt**
+            // in 8 of 8 variants, where half the width would have moved it 10.8; the last
+            // label's right edge stays at 2.00 pt past its own tick throughout. Over three
+            // stated sizes (6, 9, 14 pt) and four angles (22.5, 45, 67.5, 90) the reserve is
+            // `h·sin/2` with `h` the chart's own line height to within 1.6 %. The upright control
+            // — the same chart with two labels, which therefore do not collide and are not turned
+            // — has the last label centred on its tick to 0.04 pt at four label widths.
+            right -= valueTurn == 0.0
+                ? valueLabel / 2.0
+                : (valueHeight * valueSin) / 2.0;
         }
 
         return right <= left || bottom <= top
@@ -2103,7 +2611,8 @@ public static partial class ChartLayout
         bool secondary,
         ChartText measurer,
         List<ChartLine> lines,
-        List<ChartLabel> labels)
+        List<ChartLabel> labels,
+        ChartAxisLabelLayout? arranged = null)
     {
         // The axis line itself runs the full extent of the plot area on the side the value axis
         // is on: the left edge for columns, the bottom edge for bars — and the far side of each
@@ -2155,6 +2664,11 @@ public static partial class ChartLayout
         // The minor grid needs the *next* tick, so the ticks are taken as a list rather than
         // walked lazily. Only the primary axis draws a grid, exactly as for the major one.
         List<double> ticks = [.. scale.MajorTicks()];
+
+        // An arranged axis draws every nth label and all of its ticks and gridlines, exactly as
+        // a thinned category axis does: the rhythm is a property of the *labels*.
+        int rhythm = arranged is { Rhythm: > 1 } thinned ? thinned.Rhythm : 1;
+        int drawn = 0;
 
         if (!secondary && plot.ValueMinorGrid is { } minor && plot.ValueMinorIntervals > 1)
         {
@@ -2238,6 +2752,8 @@ public static partial class ChartLayout
 
                 if (!labelled) continue;
 
+                if (rhythm > 1 && drawn++ % rhythm != 0) continue;
+
                 string written = ChartDataLabel.Write(tick, format);
                 Length edge = labelY - ((outer + LabelSpacing) * labelOutward);
 
@@ -2252,9 +2768,10 @@ public static partial class ChartLayout
                 // document states one: the only value axis in the corpus that carries a rotation
                 // on its own c:txPr is N2_E_Maestroni_Swarm_COP.pptx's, at -45 degrees, and it
                 // runs along the bottom of a bar chart. See ChartPlot.ValueAxisText.
-                double turn = secondary
-                    ? plot.SecondaryValueAxisText.Rotation
-                    : plot.ValueAxisText.Rotation;
+                double turn = arranged?.Rotation
+                    ?? (secondary
+                        ? plot.SecondaryValueAxisText.Rotation
+                        : plot.ValueAxisText.Rotation);
 
                 if (turn == 0.0)
                 {
@@ -3058,6 +3575,70 @@ public static partial class ChartLayout
             direction, room);
     }
 
+    /// <summary>
+    /// How a <em>value</em> axis running along the bottom arranges its own labels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A value axis reaches <c>createTextShapes</c> by exactly the same road a category axis
+    /// does — <c>VCartesianAxis::createLabels</c> is <c>while (!createTextShapes(…)) {}</c> for
+    /// every axis it is called on — so a value axis whose labels collide turns 45° in the same
+    /// way. Nothing in this tree drew that until now: <see cref="AddValueAxis"/> read only the
+    /// axis' <em>stated</em> rotation, so a value axis could be left drawing labels on top of one
+    /// another where 26.2.4.2 turns them.
+    /// </para>
+    /// <para>
+    /// <strong>It is reachable only because the value axis' flags are now chart2's own.</strong>
+    /// <c>canAutoAdjustLabelPlacement</c> (<c>VCartesianAxis.cxx</c>:539-556) refuses both
+    /// rotation and staggering while <c>m_bLineBreakAllowed</c> is set, and OOXML's importer sets
+    /// it only inside <c>case CATEGORY/SERIES/DATE</c> — a <c>c:valAx</c> is <c>REALNUMBER</c> or
+    /// <c>PERCENT</c> and never enters that case (<c>axisconverter.cxx</c>:306-326). Round 111
+    /// corrected the reader; this is the half that draws. Confirmed a second time against the
+    /// binary rather than only in the tree: <c>--convert-to fods</c> on
+    /// <c>027_Simple_personal_cash_flow_statement</c> gives every one of its four value axes
+    /// <c>text:line-break="false"</c> with no <c>chart:label-arrangement</c> at all, against
+    /// <c>text:line-break="true" chart:label-arrangement="side-by-side"</c> on the category axes
+    /// beside them.
+    /// </para>
+    /// <para>
+    /// <strong>Only the horizontal branch.</strong> A value axis running down the left has one
+    /// label per tick on separate lines and cannot collide with itself; and
+    /// <see cref="AddValueAxis"/>'s rotation path is written for the bottom edge alone — see the
+    /// remarks there. A scatter chart's domain axis is left alone for the same reason it is left
+    /// alone in <see cref="IntervalsThatFit"/>: it is arranged by <see cref="AddDomainAxis"/>,
+    /// which is a separate seat.
+    /// </para>
+    /// </remarks>
+    /// <param name="plot">The chart, for the axis' stated flags and its number format.</param>
+    /// <param name="area">The plot rectangle the labels are arranged against.</param>
+    /// <param name="scale">The resolved scale, whose major ticks are the labels.</param>
+    /// <param name="measurer">Measures a line of text.</param>
+    /// <returns>The arrangement, or null when this axis is not arranged here at all.</returns>
+    private static ChartAxisLabelLayout? ArrangeValueLabels(
+        ChartPlot plot, DocRect area, ChartScaleResult scale, ChartText measurer)
+    {
+        if (!plot.ValueAxisVisible || !plot.ValueLabelsVisible) return null;
+
+        // A stated rotation is the file's own statement and outranks any arrangement, exactly as
+        // AddValueAxis already reads it.
+        if (plot.ValueAxisText.Rotation != 0.0) return null;
+
+        List<double> ticks = [.. scale.MajorTicks()];
+        if (ticks.Count < 2) return null;
+
+        string?[] texts = new string?[ticks.Count];
+        Length[] centres = new Length[ticks.Count];
+
+        for (int at = 0; at < ticks.Count; at++)
+        {
+            texts[at] = ChartDataLabel.Write(ticks[at], plot.ValueFormat);
+            centres[at] = area.Left + (area.Width * scale.Fraction(ticks[at]));
+        }
+
+        return ChartAxisLabels.Resolve(
+            texts, centres, plot.ValueAxisText, plot.LabelSize, measurer, plot.IsLabelBold,
+            ChartAxisDirection.Horizontal);
+    }
 
     /// <summary>
     /// Where a category sits along the axis, 0 at the plot area's start and 1 at its end.
@@ -3188,8 +3769,16 @@ public static partial class ChartLayout
 
             GraphicsPath path = new();
 
-            foreach (List<DocPoint> whole in runs)
+            foreach (List<DocPoint> stated in runs)
             {
+                // A smoothed series is flattened *before* it is clipped, which is the order
+                // AreaChart::impl_createLine uses — CalculateCubicSplines, then
+                // clipPolygonAtRectangle (AreaChart.cxx:331-336). Clipping first and smoothing
+                // the remains would curve through the points where the polyline met the plot's
+                // edge instead of through the series' own.
+                IReadOnlyList<DocPoint> whole =
+                    series.Smooth ? ChartSpline.Flatten(stated) : stated;
+
                 foreach (IReadOnlyList<DocPoint> piece in ChartClipping.ClipPolyline(whole, area))
                 {
                     path.MoveTo(piece[0]);
@@ -3275,10 +3864,7 @@ public static partial class ChartLayout
             if (series.LabelAt(index) is not { Draws: true } label) continue;
 
             string? text = label.Compose(
-                index < plot.Categories.Count ? plot.Categories[index] : null,
-                series.Name,
-                value,
-                total);
+                CategoryTextAt(plot, index), series.Name, value, total);
 
             if (text is not { Length: > 0 }) continue;
 
@@ -3329,6 +3915,34 @@ public static partial class ChartLayout
     private const double MarkerSize = 0.7;
 
     /// <summary>One marker, as a path centred on the point.</summary>
+    /// <remarks>
+    /// <strong>A filled marker is filled <em>and</em> stroked, at a hairline.</strong> chart2
+    /// builds every symbol as one shape carrying both a fill colour and a border colour
+    /// (<c>VSeriesPlotter</c>'s <c>createSymbol2D</c>, and
+    /// <c>VLegendSymbolFactory.cxx</c>:115-155 for the legend's copy of it), so the reference
+    /// emits two operations per marker: the filled path, then the same path stroked in the
+    /// border colour at width zero. Measured on 26.2.4.2's own PDF of
+    /// <c>022_Pareto_Chart_Template</c>, whose line series states
+    /// <c>c:marker/c:spPr</c> with a <c>6B0C00</c> fill and a <c>6B0C00</c> <c>a:ln</c>: the
+    /// reference draws sixteen <c>f</c> quads and sixteen <c>s</c> quads at the identical
+    /// rectangles, and this drew only the sixteen fills.
+    /// <para>
+    /// The outline is a hairline, so it is worth about a device pixel of ink each side and no
+    /// visible change on a marker whose border matches its fill — but it is a stroked item where
+    /// there was none, which is what an ink census counts.
+    /// </para>
+    /// <para>
+    /// <strong>And its colour is the marker's <em>fill</em>, not the <c>a:ln</c> the marker
+    /// states.</strong> <c>TypeGroupConverter::convertMarker</c> sets <c>Symbol::FillColor</c>
+    /// from the marker's fill and only reaches for the line colour when there is no fill at all
+    /// — the <c>tdf#124817</c> branch (<c>typegroupconverter.cxx</c>:656-679) — and
+    /// <c>VLegendSymbolFactory</c> says the same in a comment: <em>"border of symbols always same
+    /// as fill color"</em>. Measured on a purpose-built fixture that separates the two, a
+    /// diamond marker with an <c>ED7D31</c> fill and a stated <c>203864</c> outline: 26.2.4.2
+    /// strokes all four markers in <c>ED7D31</c> and <c>203864</c> appears nowhere in the page.
+    /// <see cref="ChartSeries.MarkerLine"/> therefore reaches only the stroke-only symbols.
+    /// </para>
+    /// </remarks>
     private static ChartShape Marker(
         ChartMarker kind, DocPoint at, Length size, Colour fill, Colour stroke)
     {
@@ -3356,7 +3970,7 @@ public static partial class ChartLayout
                     new DocPoint(at.X + k, at.Y - half), new DocPoint(at.X + half, at.Y - k),
                     new DocPoint(at.X + half, at.Y));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
             }
 
             case ChartMarker.Diamond:
@@ -3365,14 +3979,14 @@ public static partial class ChartLayout
                 path.LineTo(new DocPoint(at.X, at.Y + half));
                 path.LineTo(new DocPoint(at.X - half, at.Y));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
 
             case ChartMarker.Triangle:
                 path.MoveTo(new DocPoint(at.X, at.Y - half));
                 path.LineTo(new DocPoint(at.X + half, at.Y + half));
                 path.LineTo(new DocPoint(at.X - half, at.Y + half));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
 
             case ChartMarker.Cross:
                 path.MoveTo(new DocPoint(at.X - half, at.Y));
@@ -3394,7 +4008,7 @@ public static partial class ChartLayout
                 path.LineTo(new DocPoint(at.X + half, at.Y + half));
                 path.LineTo(new DocPoint(at.X - half, at.Y + half));
                 path.Close();
-                return new ChartShape(path, fill, null);
+                return new ChartShape(path, fill, fill);
         }
     }
 
@@ -3665,10 +4279,7 @@ public static partial class ChartLayout
                 double reach = label.Placement is ChartLabelPlacement.Outside ? 1.1 : 0.5;
 
                 string? text = label.Compose(
-                    at < plot.Categories.Count ? plot.Categories[at] : null,
-                    series.Name,
-                    value,
-                    total);
+                    CategoryTextAt(plot, at), series.Name, value, total);
 
                 if (text is { Length: > 0 })
                 {
@@ -4029,10 +4640,7 @@ public static partial class ChartLayout
         List<ChartLabel> labels)
     {
         string? text = label.Compose(
-            index < plot.Categories.Count ? plot.Categories[index] : null,
-            series.Name,
-            value,
-            series.Total());
+            CategoryTextAt(plot, index), series.Name, value, series.Total());
 
         if (text is not { Length: > 0 }) return;
 

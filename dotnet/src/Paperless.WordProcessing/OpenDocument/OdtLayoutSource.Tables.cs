@@ -71,6 +71,10 @@ public sealed partial class OdtLayoutSource
             HorizontalPosition = HorizontalPosition(styleName),
             Rows = rows,
             HeaderRowCount = headerRows,
+            StartsNewPage = StartsNewPage(styleName),
+            // A document setting rather than a property of this filter -- see
+            // `OdtLayoutSource.RowHeightsIncludeInsets`, and note that all 337 converted `.odt` state it.
+            MinHeightIncludesInsets = _rowHeightsIncludeInsets,
             LeftIndent = TableMeasure(styleName, OdfNamespaces.FoCompatible, "margin-left")
                 ?? Length.Zero,
             SpaceBefore = TableMeasure(styleName, OdfNamespaces.FoCompatible, "margin-top")
@@ -371,6 +375,8 @@ public sealed partial class OdtLayoutSource
     private PageTableRow Row(XElement element, bool isHeader)
     {
         List<PageTableCell> cells = [];
+        Length coveredTop = Length.Zero;
+        Length coveredBottom = Length.Zero;
         int column = 0;
 
         foreach (XElement child in element.Elements())
@@ -382,6 +388,14 @@ public sealed partial class OdtLayoutSource
             // it at all, since a row's cells are positional.
             if (child.Name.LocalName == "covered-table-cell")
             {
+                // It gets no cell, and its stated rules are still charged to the row's height -- the ODF
+                // spelling of what `PageTableRow.CoveredTopRule` carries for the three Word readers. A
+                // covered cell in a file LibreOffice wrote names a style like any other cell.
+                CellBorders coveredBorders =
+                    Borders(child.Attribute(XName.Get("style-name", OdfNamespaces.Table))?.Value);
+                coveredTop = Length.Max(coveredTop, coveredBorders.Top.Width);
+                coveredBottom = Length.Max(coveredBottom, coveredBorders.Bottom.Width);
+
                 column += Repeat(child, "number-columns-repeated");
                 continue;
             }
@@ -423,6 +437,8 @@ public sealed partial class OdtLayoutSource
         return new PageTableRow
         {
             Cells = cells,
+            CoveredTopRule = coveredTop,
+            CoveredBottomRule = coveredBottom,
             IsHeader = isHeader,
             MinHeight = RowHeight(element).Height,
             HasExactHeight = RowHeight(element).IsExact,
@@ -675,6 +691,28 @@ public sealed partial class OdtLayoutSource
 
     /// <summary>The width a border with no stated one is drawn at: half a point, Writer's hairline.</summary>
     private static readonly Length HairlineBorder = Length.FromPoints(0.5);
+
+    /// <summary>
+    /// Whether the table's own style asks for a page before it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The ODF spelling of what a DOCX says with a <c>&lt;w:br w:type="page"/&gt;</c> in the paragraph in
+    /// front of the table — <see cref="Layout.PageTable.StartsNewPage"/>, whose own remark cites this
+    /// attribute and which no ODF document could set until now. LibreOffice's exporter writes the break
+    /// onto the <c>style:table-properties</c> of the table's automatic style, so a Word document's break
+    /// before a table survives a round trip as an attribute of the table rather than of a paragraph.
+    /// </para>
+    /// <para>
+    /// [bin] Measured on 26.2.4.2's own conversion of <c>words-vmerge-covered-rule.docx</c>, whose eight
+    /// arms are one per page: the reference draws 8 pages of it and this tree drew <b>1</b> before this was
+    /// read. <b>12 of the 337 converted <c>.odt</c> state it, over 40 table styles.</b>
+    /// </para>
+    /// </remarks>
+    private bool StartsNewPage(string? styleName)
+        => _styles.ResolveProperty(
+            styleName, OdfStyleFamily.Table, OdfPropertyKind.Table,
+            OdfNamespaces.FoCompatible, "break-before").Value == "page";
 
     private Length? TableMeasure(string? styleName, string propertyNamespace, string propertyName)
         => OdfWriterUnits.ToCore(

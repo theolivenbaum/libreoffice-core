@@ -22,6 +22,18 @@ format (Paperless reads), macro execution (never — Paperless only reports that
 
 1. **Never build the C++ tree.** It takes hours and is never needed. Use an installed
    `soffice` for reference output — see the `libreoffice-reference` skill.
+
+   **And the tree is not the reference binary's source.** `configure.ac`:21 declares
+   `27.2.0.0.alpha0+`; the checkout is a single bulk import dated 2026-07-29; the binary at
+   `/opt/libreoffice26.2/program/soffice` is **26.2.4.2**. Do not write *"read out of 26.2's
+   source"* — write which tree you read, and treat a hunk as *probably* also 26.2's unless it
+   matters, in which case say you could not check. Per-file `git log` cannot help: every file
+   carries the import date. There is no 26.2 branch or tag in this checkout.
+
+   This is why every arm gets confirmed **twice** — once in source, once against 26.2.4.2's
+   own output via `--convert-to fods/fodt/fodp` or a rendered fixture. The second leg is a
+   measurement of the actual reference and stands on its own; the first is now known to be a
+   different version's explanation of it.
 2. **Never execute macros.** Macro-enabled formats are read as data. `CanCarryMacros` on
    `FormatInfo` exists so callers can surface the risk; nothing executes.
 3. **Rasterise with SkiaSharp, shape with HarfBuzzSharp.** HarfBuzz is what LibreOffice
@@ -206,6 +218,59 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    `probes/chart-layout` §2 refuted one of that test's two arms (a line *starting* with
    punctuation) and the other — an over-long word — is what this document needs. `ChartAxisLabels.Wraps`
    models it and answers false here.
+
+   ***`Wraps` models half of that test, and the missing half is HYPHENATION.*** *"A line starting
+   in the middle of a word"* is not the same thing as *"a word wider than the slot"*, because
+   `PropertyMapper::getTextLabelMultiPropertyLists` sets **`ParaIsHyphenation` true** beside
+   `TextMaximumFrameWidth`, inside the same `if (nLimitedSpace > 0)` and nowhere else
+   (`chart2/source/view/main/PropertyMapper.cxx`:550-557), and `DrawModelWrapper` installs
+   `LinguMgr::GetHyphenator()` on the drawing outliner under the comment *"Hyphenation and
+   spellchecking"* (`DrawModelWrapper.cxx`:72-86). So EditEngine may put a **hyphenated fragment of
+   the next word** on the current line, and `lcl_hasWordBreak` reports that as the mid-word break —
+   turning line breaking off and, if the one-line labels then collide, turning the axis 45°.
+   Measured on 26.2.4.2 with one-attribute variants of `038_Competitive_Advantage_Card.pptx`, whose
+   five category labels the reference turns and this tree wraps: **`Cost Efficiency` turns and
+   `Efficiency Cost` wraps** — the same two words, order swapped — and `Cost Efficiency` (word
+   43.638 pt) turns while `Cost Thoughts` (42.610), `Cost Strengths` (43.742), `Cost Stretched`
+   (44.401) and `Cost Scratched` (45.181) all wrap, so **no width rule can produce the ordering.**
+   **`TextBreak` is not what a brief will tell you it is**: `axisconverter.cxx`:356-365 sets it
+   **true** for every non-date category axis at zero rotation, an out-of-range `rot` reads as zero,
+   and both this tree and the reference have it on here. `probes/chart-axisrot-r91/results.md`;
+   the fix needs a hyphenator, the limit that applies to a line *inside* a wrapped label is
+   measurably below 0.95 of the pitch and is not yet characterised, and **no corpus document states
+   `c:layoutTarget val="inner"` at all**, which retires that lead for good.
+
+   ***Done, and it ships a dictionary — but it does NOT close `038`'s gate row, and r105's
+   arithmetic saying it would is a misreading.*** `hyph_en_US.dic` (106,414 bytes, BSD-style,
+   *"unlimited copying, redistribution and modification with this copyright and license
+   information"*) and `README_hyph_en_US.txt` are vendored into
+   `Paperless.Core/Globalization/Hyphenation` and copied beside the assembly like the bundled
+   faces; **`hyph_fr.dic` (LGPL-2.1+) and `hyph_es.dic` (GPL-3.0+/LGPL-3.0+/MPL-1.1+) are
+   deliberately not committed** and are supplied through `PAPERLESS_HYPHEN_DICTS` (a path list,
+   searched one level deep so a LibreOffice `share/extensions` resolves `dict-fr/hyph_fr.dic`) or
+   `Hyphenators.Register(language, stream)`; `=0` turns the lot off, which is the state a
+   deployment without the data is in. `IHyphenator` moved to `Paperless.Core.Globalization`
+   because `ChartAxisLabels` is in Core and Core may not reference `Paperless.Text`.
+
+   **Two rules to keep.** The leading limit EditEngine imposes is a **character count, not a
+   width**: `nMaxBreakPos - nWordStart - 1`, whose `+1` is commented *"Before the dickey letter"*
+   (`editeng/source/editeng/impedit3.cxx`:2143-2160), so one character's room is *reserved* for
+   the hyphen rather than the hyphen being measured, and measuring it admits breaks the reference
+   refuses. And **a turned label the reference outlines still costs us its characters**: we turn
+   `038`'s axis now and our column 9 is **1585 before and after**, because 26.2.4.2 reads 1449 by
+   drawing those labels as filled outlines. r105's *"the reference with its hyphenator off is
+   1585 too"* is an identity between the reference's own two states and says nothing about ours.
+   Closing that row is the shear rule's job, and outlining glyphs to green a text gate is not a
+   fix.
+
+   Reach, measured rather than censused: **3 renderings of 568 scored move, all chart-bearing,
+   all three better against 26.2.4.2 and none worse** (summed |ink|% 57.00 → 54.72 over r105's
+   eight candidates, one MAJOR page cleared), **0 gate verdicts**, **0 of 399 non-chart
+   documents**. Confirmed twice — the four hyphens 26.2.4.2 itself draws on corpus charts are
+   reproduced 4 of 4, and 22 authored one-word fixtures rendered with each renderer's dictionary
+   both on and off agree **19 of 22 against a base rate of 13**. Residual: `Service`, one word of
+   22, which this tree hyphenates and 26.2.4.2 does not; the leading room is refuted as the cause
+   and nothing replaces it. `probes/hyphen-r106/results.md`.
 
    ***The ODF twin of that document closed on a different attribute, and the `.pptx` is untouched.***
    `N2_E_Maestroni_Swarm_COP.odp` went from 340 alphanumeric characters clear of 26.2.4.2 to **84**
@@ -1125,6 +1190,73 @@ first's end indent plus the second's start indent. Reach **33 of the 338 convert
 **8.593 → 4.083 pt**, `.odt` gate 291 → 292. `.ods` and `.odp` hold no `text:section` at all.
 `probes/odt-startx-r88/results.md`.
 
+**And a section inside a section is a *sibling* of it, so the enclosing one's columns never reach
+it — an ODF index included.** Writer inserts a nested section's frame behind its parent, into the
+parent's own upper (`pFrame->InsertBehind(pTmp->GetUpper(), pTmp)`,
+`sw/source/core/layout/frmtool.cxx`:1795-1803), and splits the parent at the nested section's end
+node so that what follows is a **second frame of the parent's format** (`SwSectionFrame::SplitSect`,
+`:1954-1960`) — so a page reads *two columns, a full-measure index, two columns again*. What the
+child does take from the parent is the **indents**, because a nested section's format is derived
+from the enclosing one's (`pFormat->SetDerivedFrom(pSectNd ? pSectNd->GetSection().GetFormat() : …)`,
+`sw/source/core/docnode/ndsect.cxx`:1345) and `SwSectionFrame::Init` insets its print area by
+`GetFormat()->GetLRSpace()` (`sectfrm.cxx`:129-166); what it never takes is the **columns**, because
+`SwSectionFormat`'s constructor puts the pool's default one-column item on every section format
+outright — `LockModify(); SetFormatAttr(*GetDfltAttr(RES_COL)); UnlockModify();`,
+`sw/source/core/docnode/section.cxx`:608-614. The two indents are one `SvxLRSpaceItem`, so a child
+stating either **replaces the pair** and the side it left out is nought. Measured over sixteen
+one-element variants of one fixture (`probes/odt-sectable-r92/nested.py`). **Reach is 1 of the 338
+converted `.odt`** — `absrc-pac-01-info-note-en`, whose two-column section holds a
+`text:table-of-content` — and closing it takes the `.odt` gate **292 → 293**, recovering the verdict
+round 88 cost, with exactly one row and two renderings moving in the whole column.
+
+**Two of round 88's readings of that document are withdrawn, and one instrument produced both.**
+*"A table inside a columned `text:section` is laid out against the page rather than against its
+column"* is false at all three documents that hold one: every cell of all three is within **0.35 pt**
+of 26.2.4.2's, and a probe shows both renderers laying a table inside its column and both letting a
+table wider than the column overflow to the right of the *page*. *"26.2.4.2 draws that document's
+section in ONE column although the file states two"* is false too — it draws two, at the positions
+this tree computes, and removing `style:columns` moves the second column's paragraph to the next
+page. Both came from **a histogram of line starts taken with every span of one baseline merged,
+which reads a two-column page as one column** because a baseline crosses the gap;
+`probes/odt-sectable-r89/xhist.py`'s docstring is where that correction is written down and is the
+only thing that cut-off round left. **Cut a baseline into segments at a gap wider than a tab before
+counting columns.**
+
+**A third rule fell out of it and it is not an ODF one: a page carries one text area, and it is the
+last section's.** `LaidOutPage.BodyArea` is `geometry.TextArea` at the moment the page is *emitted*,
+so a `text:section`'s own indents reach the layout and not the drawing wherever a later section on
+the same page restores the master's margins — 26.2.4.2 draws a 0.5 in-indented two-column section's
+first column at 108.10 and this tree at 72.00, with the same wrap.
+
+***Done, and the gate could not have scored it — the fixture is where the 36 pt is.*** A
+`PlacedLine` now carries the text area it was laid out in (`BodyLeft`/`BodyWidth`, horizontal only:
+a text section's top and height are the page's) and `LaidOutPage.BodyAreaOf` divides *that* rather
+than `BodyArea`; `PageDrawing.DrawBody` groups by it as well as by the column, **and its
+single-column fast path had to learn about it too**, or a page of one-column text drawn from two
+different left edges takes that branch and is drawn from one. On `odt-sectable-r92/nested.py`'s
+`plain-margins` the three left edges go 72.00/—/324.00 to **72.00/108.00/315.00** against
+26.2.4.2's 72.10/108.10/315.10, with every span count equal; over five variants mean |Δx|
+**14.500 → 0.100 pt**, which is the two writers' constant text-origin offset. On the corpus **5 of
+338 `.odt` renderings move and they are exactly the five documents with an indented `text:section`**
+— 71 spans in all, each document moving its own by one constant — and the two whose pagination
+agrees with 26.2.4.2 improve (2.931 → 2.885 and 2.462 → 1.347 pt of left-edge distance). `.odt`
+gate 293 of 338 before and after, **no verdict either way**, and 1305 words, slides and sheets
+renderings byte-identical. `probes/words-seat-r94/`.
+
+**The instrument that hides this is the one two rounds already used.** A merged-baseline line
+matcher samples only the *first* column of a two-column page, so a wrong *second* column is
+invisible in it — `odt-startx-r88/startx.py` reports the three `150_5300_13` revisions as
+unchanged when 6, 14 and 1 of their spans moved. `probes/words-seat-r94/columnx.py` clusters every
+span's own left edge and merges nothing; `colscore.py` pairs those clusters with the reference's;
+`selfmove.py` pairs spans between our own two legs, which is what a document that sits a page out
+needs.
+
+What was closed with the line-level half of the same confusion in the round before: `PageContent.ColumnArea(PlacedLine)` used to send a line stating one column to the
+**page's** column at that line's index, which drew a full-measure heading inside a column — 4 of 696
+`.docx`/`.doc`/`.rtf` renderings move with it, none changes a page or a glyph count, and
+`150_5300_13_chg8`'s centred `Chapter 3.  RUNWAY DESIGN` goes from 205.05 to **231.75** against
+26.2.4.2's 231.80 in all three of its formats. `probes/odt-sectable-r92/results.md`.
+
 **And two instrument corrections came out of it that invalidate a stored ranking.**
 `probes/odt-page-r87/residual-startx.txt`'s columns are *matched, mean before, mean after, within-0.1pt
 before/after* — not *max, mean, pages agreeing*, which is how a brief read them, so
@@ -1187,6 +1319,75 @@ was 486 pages against 506 because we recomputed a shorter row, and
 is the **importer's** rule — the BIFF and SpreadsheetML filters have no such limit —
 so it belongs in `OdsPrintSetup` and not in `SheetOptimalRowHeights`.
 `probes/ods-resid-r80/results.md` §2.
+
+**Which of Calc's two row-height answers a row gets is decided by two things that are not
+properties of its text, and both were unread.** `ScColumn::GetOptimalHeight` takes the cheap
+arithmetic — `lcl_GetAttribHeight`, `trunc(sizeTwips × 1.18) + margins − 23` — only while
+`bStdOnly` holds, and clears it for a cell whose **pattern carries a conditional format**,
+whatever the condition says and whether or not it fires (`column2.cxx`:937-941, *"conditional
+formatting: loop all cells"*). It is the *pattern* that is tested, so a rule declared over a whole
+column makes every row of that column measured. Separately a **hyperlink** cell is an
+`EditTextObject` holding one field, the same object a rich string makes. Both come out at one
+EditEngine line of the cell's own face — **298 twips for Calibri 11 against the arithmetic's
+276** — and `StandingEditLine` had computed exactly that since round 56 without ever being asked.
+
+**The instrument is the reference's own `--convert-to fods`, and on a scaled sheet nothing else
+will do.** It prints the height Calc computed for every row as `style:row-height`;
+`Special-Procedures_2025-07-10.ods` prints at `style:scale-to="39%"`, so its rows reach the page at
+5.373 pt against 5.804 and neither number is a row height. One-attribute variants then settle it:
+deleting that document's `calcext:conditional-formats` element moves rows 6–200 from 298 to 276,
+and on `hdss-bulletin-index-2019-2022.ods` — a table of hyperlinks — rewriting every `<text:a>` to
+its own text does the same, while its header row, the one row holding no link, is 276 either way.
+A twelve-size sweep confirms the arithmetic branch is exact at every size (6–10 pt on the 256-twip
+floor, 11 → 276, 12 → 300, 24 → 583), so the 298 is the other branch and not a different sum.
+Reach **95 of the 307 converted `.ods` state a conditional format and 74 hold a `text:a`**; the
+`.ods` gate goes **274 → 278** and the same 307 documents as `.xlsx`/`.xls`/`.xlsm` stay at 294.
+The spelling read is `calcext:conditional-format`, which is what LibreOffice writes.
+`probes/ods-notes-r92/results.md` §2.
+
+***And reading that spelling alone is exact rather than a compromise — the "one of the 307 states a
+`style:map` without it" that stood here counted the wrong element.*** `style:map` is also how a
+`number:*-style` states its positive, negative and zero sub-formats, and a *conditional* one is the
+one that sits on a `style:style style:family="table-cell"` and carries `style:base-cell-address`.
+Censused that way over the 307 converted `.ods`: **53 documents carry a conditional `style:map`,
+every one of the 53 also states `calcext:conditional-format`, and 0 of them hold a single mapped
+cell outside a `calcext:target-range-address`.** LibreOffice writes both from one
+`ScConditionalFormatList` in one pass — `ScXMLExport::ExportConditionalFormat`
+(`sc/source/filter/xml/xmlexprt.cxx`:4779-4800) and `ScXMLAutoStylePoolP::exportStyleContent`
+(`sc/source/filter/xml/xmlstyle.cxx`:700-810) — so for any file it wrote they cannot disagree. The
+document that census named, `2025_Active_Civil_Airmen_Statistics_FINAL.ods`, states 23
+number-format maps and **no conditional format at all**.
+`probes/ods-residue-r95/results.md` §2.
+
+***The BIFF half is nil too, and for a reason that is not about `CONDFMT`.*** 4 of the corpus's 64
+`.xls` state one — 29 records over 35 ranges, reproducing 26.2.4.2's own
+`calcext:target-range-address` export of the same four workbooks 35 of 35 — and **no BIFF8 row
+height is ever recomputed**, because `ImportExcel8::Read` holds its `AdjustRowHeight()` inside an
+`#if 0` whose comment is the rule: *"Excel documents look much better without this call; better in
+the sense that the row heights are identical to the original heights in Excel"*
+(`sc/source/filter/excel/read.cxx`:1284-1288). `ImportExcel::Read`, BIFF2 through BIFF7, calls it
+unguarded (`:779-780`), which is exactly the version test `SheetGrid.RowHeightsAreManual` already
+makes. Measured: a BIFF8 workbook whose `ROW` records are patched to a uniform **100 twips** with
+`fUnsynced` clear comes back from `--convert-to fods` at 100. Reading `CONDFMT` anyway leaves 64 of
+64 `.xls` renderings byte-identical. *And `Special-Procedures_2025-07-10.xls`, named as the witness
+that the two spellings disagree, opens `PK\x03\x04` — an OPC zip wearing a `.xls` name, read by the
+SpreadsheetML path, and 22 pages of 22 before round 92 as well as after.*
+`probes/ods-residue-r95/results.md` §1.
+
+**And the ODF half of "Comments: at end of sheet" needed three inputs, not two.** The flag is a
+token inside a list — `style:print="… annotations …"`, mapped to `PROP_PrintAnnotations` by
+`XMLPMPropHdl_Print(XML_ANNOTATIONS)` (`xmloff/source/style/PageMasterStyleMap.cxx`:80,
+`PageMasterPropHdlFactory.cxx`:85) and read into `aTableParam.bNotes`
+(`sc/source/ui/view/printfun.cxx`:944). The notes are fastened to their cells by **containment**,
+as `office:annotation` children of the `table:table-cell`, so the address comes from a walk of the
+table and cannot come from the content tree, which hoists an annotation into a section of its own.
+And **the author line is inside the text rather than in `dc:creator`**: every annotation in both
+witnesses says `<dc:creator>Unknown Author</dc:creator>` and 26.2.4.2 prints none of them, while
+the page opens each note with the name the note's own first paragraph carries. Reach 2 of the 307
+and both were failing; both are page-exact after it. *`Paperless.Spreadsheets/TODO.md`'s "the
+flat-ODS export drops cell annotations entirely" is refuted — 12 of 12 and 8 of 8 survive
+`--convert-to fods`, and the wrong figure is `grep -c` on a one-line `content.xml`. Count
+occurrences, not lines.*
 
 **And a Calc cell the importer made several paragraphs of is measured by the EditEngine, which
 answers the widest *paragraph* and a line per paragraph — not the whole string and not one line.**
@@ -1479,6 +1680,15 @@ reproducible-builds convention (seconds since the Unix epoch, read as UTC) in bo
 `/CreationDate` and the header fields, so with it set two runs are byte-equal with nothing masked
 at all. Leave it unset for ordinary rendering; a printout's date is meant to be today's.
 
+**The signature of a forgotten pin is a *total*, and it reads as catastrophe.** The figure above
+— 17 of 171 — is what a day's drift costs on a track where only some documents print a date.
+Forget the pin on a track where the difference is the PDF's own `/CreationDate` and *every*
+document moves: round 111's first, unpinned sweep of the chart track reported **176 of 176
+moved**, with every page count and every alphanumeric count identical on both sides; pinned, the
+same sweep reported **0 of 176**. So a reach figure equal to the whole set is not a finding, it
+is a missing `SOURCE_DATE_EPOCH` until proven otherwise — and the tell is exactly that pairing,
+everything moving while nothing the gate scores does.
+
 **`TODO.raster-ceiling.md` lists 37 pages the word gate cannot win.** LibreOffice rasterises
 an embedded object on those, so its PDF holds a picture where ours holds real searchable text —
 ours is the better output and `wc -w` scores it as failure. An embedded metafile is the
@@ -1718,6 +1928,60 @@ installs it. `Paperless.Text/Fonts/Bundled/` holds 28 faces and no Narrow, the s
 and both answer DejaVu Sans for *Arial Narrow* — so **we agree with a stock machine and the tarball
 is the outlier.** Bundling one would be the same mistake as the first cut of the bundle, which
 shipped TDF's fuller DejaVu and made us draw a real italic where the reference synthesises a lean.
+
+### The seventh confound: on the draw layer 26.2.4.2 measures in one face and draws in another
+
+**A slide's text can be laid out at one font's advances and painted with another's, and it is a
+LibreOffice defect rather than anything to reproduce.** The declared family class survives into the
+*measurement* and is thrown away before the *drawing*:
+`drawinglayer::attribute::FontAttribute` (`include/drawinglayer/attribute/fontattribute.hxx`) has
+fields for the family *name*, weight, italic, symbol, vertical, outline and **monospaced** — and
+none for the family class or the charset — so `getVclFontFromFontAttribute`
+(`drawinglayer/source/primitive2d/textlayoutdevice.cxx`:416-448) rebuilds the font at
+`FAMILY_DONTKNOW`, while the DX array the primitive carries was measured by editeng with the class
+still on it. `VclProcessor2D` then draws the class-less face at the class-ful face's advances
+(`drawinglayer/source/processor2d/vclprocessor2d.cxx`:485-491).
+
+The one-line test, which needs no LibreOffice at all:
+
+```sh
+fc-match "Helvetica:bold"        # LiberationSans-Bold.ttf   <- what 26.2.4.2 DRAWS
+fc-match "Helvetica,sans:bold"   # DejaVuSans-Bold.ttf       <- what 26.2.4.2 MEASURES
+```
+
+**When those two agree there is no confound** — install `urw-base35` and both answer Nimbus Sans;
+remove Liberation and both answer DejaVu. So the effect is a property of this container's
+fontconfig graph, and a rule fitted to the gap between the two answers is fitted to
+`/etc/fonts/conf.d`. It is also *silent*: both sides draw the same characters, so no gate column
+moves, and the only symptom is a line that wraps a word early and a title that looks tracked out.
+Round 90 filed exactly that as a letter-spacing defect before correcting it.
+
+**Reach 101 of 803 zip corpus documents — slides 99, sheets 2, words 0 — and 91 of them are
+`Helvetica`.** Writer body text cannot show it: `SwTextPainter` never becomes a drawinglayer
+primitive, which is why the 24-of-24 agreement in the next section stands. `probes/title-font-r92/`
+has the census, fourteen one-attribute variants, and why no code changed.
+
+***And it reaches the LEGACY BINARIES, which that census could not see — a `.ppt` states the same
+class in the top nibble of `lfPitchAndFamily`.*** `ReadPptFontEntityAtom`
+(`filter/source/msfilter/svdfppt.cxx`:410-435) maps `FF_ROMAN`/`FF_SWISS` to
+`FAMILY_ROMAN`/`FAMILY_SWISS`, `:2186` puts it on the `vcl::Font`, and from there it is the same
+`FontConfigManager::Substitute`. The 101-of-803 figure is a **zip** census, so the whole
+`.ppt`/`.doc`/`.xls` track was invisible to it — the same trap this file already records for
+charts. Measured rather than censused, by rendering all **51** legacy PPT-family corpus documents
+twice with 26.2.4.2, as authored and with every `FontEntityAtom`'s family nibble cleared and
+nothing else changed: **20 of 51 state** a splitting class-ful family, and **3 of 51 have it reach
+drawn text** — `architecture6.ppt`, `RRM-training-syllabus-…` (O15's own witness, which the
+instrument rediscovered without being told) and `pres_ioc_phuket.ppt`, which is new. The other 48
+do not move by a thousandth, three of them from a *high* `TJ` level that is justification and
+kerning — which is why the discriminator has to be run as a **difference** and never as a level.
+
+***And a `.ppt` cannot state character spacing, so do not go looking for a record.***
+`PPTStyleTextPropReader::ReadCharProps` (`svdfppt.cxx`:5096-5185) reads the whole of a
+`TextCFException` and there is no tracking field in it and no `PPT_CharAttr_*` constant for one
+(`include/filter/msfilter/svdfppt.hxx`:1416-1428). O57 stood for three rounds as *"the reference
+draws the same string 3.3 % wider"* and then as a possible spacing record; it is this confound, and
+it is worth 268 → **52** run differences and 322.07 → **1.60 pt** worst origin shift over
+`architecture6.ppt`'s 31 pages when one byte of the file removes it. `probes/ppt-spacing-r115`.
 
 ### The two references differ in a *rule*, not only in their fonts, and it decides font fallback
 
@@ -2383,6 +2647,29 @@ states one gets neither its own size nor the pool's but `\pard\plain`'s 12 pt �
 style's space after, and the pool's six points is not an sprm at all, so it needs a carrier of its
 own.
 
+***`Title` and `Subtitle` are the same rule under two names that look nothing like a heading, and
+`Body Text` and `caption` are a different one.*** Round 87 left the four as *"26.2.4.2 answers 10,
+10, 14 and 14 where this tree answers 12"*; the numbers are right and **neither of the two 10s is a
+pool value**. What decides it is `GetPoolParent` (`sw/source/core/doc/poolfmt.cxx`:279-289): every
+id in `COLL_DOC_BITS` that is not `COLL_HEADLINE_BASE` itself has that style for a parent, so
+`COLL_DOC_TITLE` and `COLL_DOC_SUBTITLE` answer *Heading*'s 14 pt, 12/6 and keep-with-next — and
+**not** the 28 pt bold centring and 18 pt those two pool entries state for themselves
+(`DocumentStylePoolManager.cxx`:1365-1387), because the entry's own properties are what the import
+resets. `COLL_LABEL` and `COLL_TEXT` have `COLL_STANDARD` for a parent (`:201-204`, `:229-235`), so
+`caption` and `Body Text` inherit **the document's own `Normal` entry**: the same probe with
+`{\s0 … \fs20 Normal;}` draws them at 10 pt and with `\fs28` at 14, while `heading 4`, `Title` and
+`Subtitle` answer 14 to both. So the discriminator is one attribute of the *control* style, and a
+round that measures only one `Normal` size cannot tell a pool constant from inheritance.
+`Title` and `Subtitle` are **done**; the *Standard* half is measured, pinned by
+`APoolStyleUnderStandardIsNotModelledYet`, and left — it needs the whole of `ConvertStyleName`'s
+two hundred names to be safe, and the pool entry a reader would copy is the wrong half of it.
+**Reach is nil for the two that are implemented**, and finding that out corrected round 87's own
+figure: a census whose *used* set is taken from the whole file counts each stylesheet entry's own
+`\sN` as a paragraph using it, and both `Title` candidates are declared and never applied. Excluding
+the stylesheet, `Title` 0 documents of 338, `Subtitle` 0, `Body Text` 2, `caption` 0 — and the nine
+headings **17 → 12**, which is round 87's reach re-counted rather than its fix re-measured.
+`probes/rtf-bookmark-r88/results.md` §4.
+
 ### An RTF `REF` field expands from its bookmark, and writerfilter gives the bookmarks the wrong names
 
 **The reference draws more text from an RTF than the same document's `.odt` twin, and the extra text
@@ -2408,9 +2695,39 @@ A bookmark that thereby ends in a different text node from its start makes
 `SwGetRefField::UpdateField`'s `Bookmark` case read that as *to the end of the paragraph*
 (`nEnd = nNumEnd<0 ? nLen : nNumEnd`, `:604-607`).
 
-**Reach is 11 of the 338 `.rtf` and it is left open**: substituting the reference's expansions by
-hand takes `24-25_FAA_Holdover_Tables` from 158 pages to **219 against 223** and its alphanumeric
-distance to 0.80 %, which is inside the band but still fails on pages, so no verdict moves.
+***Done in round 88, and it is worth more than the hand-patched estimate.*** `RtfBookmarkRotation`
+is those three functions in the order a bookmark half goes through them and `RtfReferenceFields` is
+the expansion; `24-25_FAA_Holdover_Tables` goes from **158 pages to 221 against the reference's
+223** and from 6.71 % to **0.33 %** on alphanumeric characters, drawing the long caption 253 times
+where the reference draws it 253 times. **Reach is 11 of the 338 `.rtf`**, counted on the `fldinst`
+group rather than on the string `REF ` — which also matches `PAGEREF` and gave 13.
+
+**A fourth link the brief did not name, and the rotation is what makes it expensive.** A group
+nested inside a bookmark's name is *part of the name* and not a half of its own — `popState` guards
+both destinations with `if (&getDestinationText() != getCurrentDestinationText()) break; // not for
+nested group` (`:2736-2740`, `:2751-2755`), which skips the nested half and, because the two states
+share one buffer, keeps its text. Under a reader that pairs by name that is harmless; under the
+rotation a spurious half takes an id, and a spurious **end** naming nothing takes
+`m_aBookmarks[""]` — value-initialised to **0** — so it closes the document's *first* bookmark under
+the wrong name. Measured: 26.2.4.2 reads `{\*\bkmkstart A}first{\*\bkmkend {x}A}` as one bookmark
+called **`xA`**, so its `REF A` finds nothing, and the same file without the nested group draws
+`first`.
+
+Three things about it are worth carrying. **The rotation is verified against 26.2.4.2 on ten
+one-shape probes, 27 of 28 predictions exact** (`probes/rtf-bookmark-r88/`), the twenty-eighth being
+the flat-ODF *shape* of a cross-reference bookmark rather than what it expands to. **A document
+stating a `REF` is read twice**: a `REF` may name a bookmark the walk has not reached, and rewriting
+a paragraph after it has closed would rebase every offset counted against it — its runs, its notes,
+its frames and its own marks — so `RtfReader` computes the expansions from the first read's marks
+and hands them to a second. And **the "Error: Reference source not found" the reference draws for a
+name nobody holds is deliberately not reproduced**: it would fire wherever *our* bookmark table is
+the incomplete one, and it costs two occurrences across the eleven documents.
+
+**No gate verdict moves, and the verdict column is the wrong instrument here.** Both holdover
+documents fail on pages before and after; what the fix moves is the page count and the characters
+drawn. The other document to know about is `FAA 2025-26 Holdover Tables`, which is **172 pages
+against 233** with its glyph distance now at 1.70 %: whatever is left there adds pages without
+adding text, and it is not this mechanism — the long expansion appears 578 times on both sides.
 
 **The instrument for both of these is worth more than either.** `soffice --convert-to fodt` on the
 `.rtf` prints the reference's own answer for every bookmark, every style name and every parent, in
@@ -2473,6 +2790,319 @@ count a defect**; the comparable column there is the strokes, 123 against 128. A
 flat `.ods` shape probe is a trap of its own — a `draw:custom-shape` whose `draw:enhanced-geometry`
 names an `ooxml-` type and states no `draw:enhanced-path` is drawn by 26.2.4.2 as **nothing at
 all**, silently, so the fixture for this was authored as `.xlsx` and converted.
+
+### And round 84's two conservative choices meant the BIFF half read almost nothing
+
+**A `.xls` shape's fill and line colour are a palette reference, not a literal, and both defaults
+are real.** Round 84 wrote its own caution into `EscherInk`'s remarks — *presence is the test*,
+because MS-ODRAW's white and black defaults would otherwise "put a white box under the text of
+every shape that mentions neither", and *only the literal `MSO_CLR` form is honoured*, because the
+palette "cannot be seen from this layer". Both are wrong, and together they resolved **14 of the
+106** fill and line colours the corpus's 64 `.xls` state on a worksheet shape; the other 92 are
+scheme references. `TICAPCapability_Final.xls` — a document that **passes the gate** — was 16.87 %
+off on summed unsigned ink for exactly this: its two `Instructions` text boxes state
+`fillColor 0x08000041` and `lineColor 0x08000040`, nothing else at all, and those are palette 65
+and 64, Excel's *window background* and *window text*. The reference draws a white panel with a
+0.42 pt black border and we drew neither. `probes/sheet-shapefill-r92/results.md`.
+
+Three rules replace the two choices, and only one of them is "the shape said so".
+
+- **`EscherColour` is `SvxMSDffManager::MSO_CLR_ToColor`** (`filter/source/msfilter/msdffimp.cxx`:3420):
+  a `0xfe` header masks to the low three bytes; `nUpper & 0x08` makes the low *word* a scheme
+  index and `nUpper & 0x19` without `0x10` makes the top byte one; a bare `nUpper & 4` with no low
+  bits is a third scheme form; everything else is a literal `0x00BBGGRR`. An unresolvable
+  reference falls back **per property** — white for a fill, black for a line (`:3440-3453`). The
+  host's palette arrives as a callback because it is the host's: Excel's is
+  `XclImpPalette::GetColor` over the BIFF8 defaults, and its indices past the table are the ones
+  that matter — 64 black, 65 white, 77/79/81 black, 78 white, 80 the note background.
+  **The system-colour branch is not implemented and should not be**: it is the desktop theme's
+  answer, and **zero** of the corpus's 106 colours state one.
+- **Absence is not "no ink".** `mso_PropSetDefaults` (`filter/source/msfilter/dffpropset.cxx`)
+  gives property 385 the value `0xffffff` and 448 zero, and Calc puts the window background on a
+  filled object with no colour a second time (`xiescher.cxx`:3693-3695).
+  `014_Contextures_chart_sample_991ecfc5.xls`' `Rectangle 6` is the witness: `fLine` true, no
+  `lineColor`, and 26.2.4.2 draws `#000000`.
+- **An unstated boolean is the shape *type's* answer, not a constant.** The same table gives
+  property 447 the value `0x001C` and 511 `0x001E`, so `fFilled` and `fLine` both default *true* —
+  and `ApplyFillAttributes`/`ApplyLineAttributes` (`msdffimp.cxx`:1313-1323, :904-911) then clear
+  the bit again unless the shape stated it **hard** or the type is filled (stroked) by default.
+  `mso_DefaultFillingTable` and `mso_DefaultStrokingTable`
+  (`svx/source/customshapes/EnhancedCustomShapeGeometry.cxx`:6156-6213) are the tables and they
+  reduce to `stated ? statedValue : defaultForType`. A text box and a rectangle are both; a
+  **picture frame is neither**, which is the one entry in the stroking table. A stated boolean
+  wins either way, and the corpus needs both directions: **216** worksheet shapes state property
+  511 as `0x00080000` — `fLine` hard and *false*.
+
+**Three object kinds must take no Escher ink at all, and the OLE test is not the object type.**
+Calc replaces the DFF-built `SdrObject` for a chart, a TBX form control and an OLE object — the
+three that `SetCustomDffObj(true)` marks (`sc/source/filter/excel/xiescher.cxx`:1666, 2066, 2954) —
+and the replacement is not the object `ApplyAttributes` filled. A plain BIFF8 picture and an
+embedded object are *both* `ftCmo` type 8, and `SvxMSDffManager::ImportGraphic` separates them on
+the shape's own **`pictureId` (267)** (`msdffimp.cxx`:4025-4030): with it an `SdrOle2Obj` and no
+attributes, without it an `SdrGrafObj` that keeps them. `TICAPCapability_Final.xls`' `Picture 228`
+hard-states `fFilled` and `fLine` true with a white fill and a black line, carries `pictureId`, and
+26.2.4.2 draws neither.
+
+***The instrument that established every one of those answers rendered nothing.***
+`soffice --convert-to fods` on the `.xls` prints the reference's own graphic style for every shape
+— `draw:fill`, `draw:fill-color`, `draw:stroke`, `svg:stroke-color`, `svg:stroke-width` — in eight
+seconds, and joining it to a dump of the raw `msofbtOPT` by `draw:name` gives an exact expected
+value for one `MSO_CLR` per shape with no rasteriser and no tolerance anywhere in it. It is the
+`.rtf` rounds' *"convert to flat ODF first"* arriving on the sheets track;
+`probes/sheet-shapefill-r92/expected-ink.py` is the join.
+
+**It is BIFF-only, and the `.ods` twin was already ahead of its `.xls` original.** The scheme-index
+question does not exist in the other two readers — DrawingML states a theme colour and ODF a hex
+string — and 26.2.4.2's own `.ods` of `TICAPCapability_Final` states
+`draw:fill-color="#ffffff"` outright, which `OdsShapeInk` has read since round 84: this tree draws
+that twin's panel at `(85.9, 61.1, 515.8, 433.8)` against the reference's
+`(85.9, 61.0, 515.8, 433.8)`, stroked at 0.419 pt against 0.42, while the `.xls` of the same
+workbook drew nothing. **A converted-ODF column can be right where its original is wrong, and
+checking the twin is how you find out which half of a reader is at fault.**
+
+**Reach, measured on ink rather than censused.** Rendering our half of the whole 947-document
+corpus twice — at the round's base and with this fix, under `SOURCE_DATE_EPOCH`, one output
+directory per document — moves **6 renderings, all `.xls`, all on the sheets track**, and leaves
+the other **941 byte-identical**. Summed unsigned ink over the six: `TICAPCapability_Final`
+**20.66 → 7.45**, `SIL_TDB609` 2.73 → 1.07, `SIL_TDB605` 1.99 → 1.00 — and `EHEST` 14.16 → 14.95,
+`PC1000` 2.77 → 5.11, `apron-area` 1.41 → 1.53, which is the section below.
+**No gate verdict moves on this half**, because a fill adds no glyph and no page.
+
+### The drawing layer's paint region is a clip, and only the cull half of it was implemented
+
+**Reading a BIFF shape's fill is what made this visible, and it is worth more than the fill.**
+`ScOutputData::PrePrintDrawingLayer` builds the page's own cell-block rectangle and hands it to
+`SdrView::BeginDrawLayers` as the paint **region** (`sc/source/ui/view/output3.cxx`:41-102);
+`ScPrintFunc::PrintArea` calls the pair once per printed area (`printfun.cxx`:1641, 1651-1713). So
+every object the drawing layer paints is *clipped* to that rectangle as well as culled by it.
+`SheetPageGraphics.ReachesTheBlock` has computed exactly that rectangle since the round that
+closed `Part_375_Operators.xlsx` — with the same citation — and used it only to decide which page
+a drawing belongs on. `SheetPageGraphics.Block` is now both.
+
+**26.2.4.2 emits the whole shape and then clips it away, so a path census reads it as a shape the
+reference draws.** `PC1000.xls`' `Rectangle 16` is 244 pt wide and starts 6 pt inside the sheet's
+last column; the reference's page 2 opens the figure with
+`q 55.389 552.019 681.846 23.981 re W* n` and paints a 244 pt rectangle inside it, of which 4 pt
+show. **Count the pixels.**
+
+**And count the pixels rather than the bytes when measuring it too.** A clip emitted round the
+drawing pass changes the content stream of every page carrying a drawing: over the sheets track it
+changes **164 of 307** renderings' bytes and **83 of those 164 are pixel-identical**.
+`probes/sheet-shapefill-r92/pixel-diff.py` is the instrument, and a hash-based mover list without
+it overstates this change by a factor of two.
+
+Of the 81 that do move: **68 improve on summed unsigned ink, 3 worsen** (by 0.07, 0.12 and 0.48),
+10 are level, the sum goes **331.20 → 238.54** and MAJOR pages **148 → 85**.
+
+**This is the half the gate can see, and it gains 25 verdicts.** PyMuPDF and `pdftotext` both drop
+the text a clip removes, and the reference's counts already have it dropped — so the characters we
+lose are characters we were never entitled to draw. Scored with the gate's own `max(2 %, 15)` rule
+over all 307 sheets documents against the banked 26.2.4.2 reference: **262 → 287 match**, 40 → 15
+`glyphs`, pages unmoved at 3. Four of the 25 land on the reference's count **exactly** —
+`SSRO_Quarterly_Statistical_Bulletin` 2783 → 2532 against 2532, `044_Cash_flow_forecast`
+2313 → 2200 against 2200, `064_Small_business_cash_flow` 1803 → 1635 against 1635,
+`Foreign_SA-CAT-I_and_CAT-II-III` 7842 → 7558 against 7557 — which is as clean a statement as this
+corpus offers that the rule is the reference's own.
+
+**One test asserted the opposite and its premise was the right one.**
+`SheetPictureCropTests.AnUncroppedPictureIsNotClipped` held that *"an unconditional clip would put
+a `q`/`W n`/`Q` into every rendering carrying a picture and change all of them for nothing"*. The
+first half is exactly what this does; the second was never measured, and it is false.
+
+**The passing sheets set re-ranked on ink afterwards is `probes/sheet-shapefill-r92/ink-ranking.tsv`,
+and 41 of the 287 passing documents are at 5 % or worse.** `TICAPCapability_Final` has gone from the
+top of the seating probe's 48-document sample to **32nd of 287**. The next seats are
+`TK-Syllabus-Comparison-Document-v2.xlsx` (304.57 over 1235 pages), `alle einzeln.xlsx` (225.44),
+`Background_Declaration_Template.xls` (136.07 over 25) and `grants-2005.xls` (96.11) — and
+`6880ac7361ca…ST Capability List` is the one in the top ten with **no MAJOR page at all**, so its
+27 % is spread thin rather than concentrated. Read the column beside the MAJOR count and beside the
+page count: a summed percentage over pages is not comparable between a 25-page document and a
+1235-page one.
+
+**What is left, with its seat.** A BIFF text box's `TXO` formatting runs are not read at all —
+`XlsDrawingCollector.ReadText` takes the string and stops, and `TextOf` builds one run per line at
+a hardcoded ten point in the default face. The runs are eight bytes each in the `TXO`'s second
+`CONTINUE`, a character offset and a `FONT` index (`XclImpDrawing::ReadTxo`, `xiescher.cxx`:4242),
+and `XlsCellFormats.FontAt` already turns that index into a face, a size and a weight. Reach:
+**155 text boxes with text in 17 `.xls`, 522 runs, of which 62 boxes in 13 documents state more
+than the opening run**. On TICAP page 3 the reference draws its shape text at 6.30 pt with five
+bold spans and we draw all of it at 5.70 pt regular, which is most of the residual there.
+
+### And the head of that ranking is 413 conditional formats, which nothing read
+
+**`TK-Syllabus-Comparison-Document-v2.xlsx` was 304.57 % summed unsigned ink over 1235 pages with
+142 MAJOR pages, and it passes the gate.** It carries no drawing at all, so neither the Escher-ink
+round nor the clip could reach it. What it carries is **413 `<conditionalFormatting>` blocks, every
+one `type="expression"`**, and `XlsxConditionalFormats` read only `colorScale` — its own remarks
+named the gap and left it. Closed in round 94: `XlsxConditionalStyles` evaluates every `cfRule`
+naming a `dxfId` and hands the fill to `SheetFormatting.SetConditionalBackground` and the font to a
+differential `SheetConditionalText` over `SheetCellFormats`. **304.57 → 205.57, MAJOR 142 → 66.**
+`probes/sheet-ink-r94/results.md`.
+
+**The rank-8 document is the same workbook revised and the 6× between them is the rule count.**
+`tk-syllabus-comparison-document-v5.xlsx` states **3** expression rules where v2 states 413 — the
+revision baked the formatting into the cells and left 728 unused `dxf` entries behind — and their
+per-page ink was 0.0544 against 0.2466. *Two revisions of one document differing on a measure is a
+lead about what one of them stopped stating.*
+
+Three rules decide it and each is the reference's rather than the specification's:
+
+- **Exactly one rule wins a cell and two matching rules' properties are never merged.**
+  `ScDocument::GetCondResult` (`sc/source/core/data/documen4.cxx`) returns the *first* non-empty
+  style name's item set and `ScConditionalFormat::GetCellStyle` (`conditio.cxx`) the first matching
+  entry's style. A cell takes one `dxf` or none.
+- **What a `dxf` is silent about falls through to the cell's own pattern**, so the overlay is
+  differential and its toggles are three-valued: **287 of that document's 413 rules state
+  `<strike val="0"/>`**, which *removes* a strikethrough the cell states, and 26.2.4.2 writes that
+  out as `style:text-line-through-style="none"`.
+- **A `dxf`'s fill states its colour in `bgColor`, the opposite of a cell's.**
+  `Fill::finalizeImport`'s `if (mbDxf)` branch (`sc/source/filter/oox/stylesbuffer.cxx`) moves the
+  `bgColor` into the pattern colour and forces the pattern solid. **2734 of the corpus's `dxf`
+  fills state only a background**, so reading `fgColor` finds nothing on any of them.
+
+**The formula subset is where the corpus is, not where the specification is.** Of the 601
+`expression` rules in 34 documents, **461 are the single shape `<reference> = "<text>"`** — one
+comparison between a relative reference and a string, shifted from the `sqref`'s own top-left
+corner, which is what `calcext:base-cell-address` states in the reference's own view of the file.
+`cellIs` (123 rules, 18 documents) is read too. The rest — `AND`, `MOD(ROW())`, `ISERROR`,
+`TODAY()`, defined names, `#REF!` — paint nothing. *"`containsText` and its five siblings (1040
+rules in 8 documents) are the cheapest thing left in the area"* was right about the cost and wrong
+about the value: round 96 read them and they move three renderings — see the section below.
+
+**Reach and cost, measured rather than censused.** 55 of the 947 corpus documents state a `cfRule`
+naming a `dxf`; rendering our half of the whole corpus twice moves **21 renderings and leaves 926
+byte-identical**, every mover an `.xlsx` on the sheets track. 12 improve, 3 worsen, 6 are level, and
+the sum over the 21 goes **354.87 → 254.85** with MAJOR pages 165 → 86. **No gate verdict can move**
+— a colour, a strikethrough and a fill add no alphanumeric character and no page.
+
+***And the one worsening located a palette defect whose obvious fix is refuted.***
+`Computer and Software Services_50 State Comparison.xlsx` goes 20.15 → 27.95 because its
+`cellIs equal 0` rule names an `indexed` colour and the workbook overrides the palette with entries
+written **`ffRRGGBB`**. `ColorPalette::importPaletteColor` builds
+`::Color(ColorTransparency, decodeIntegerHex(rgb))` and `decodeIntegerHex_impl`
+(`oox/source/helper/attributelist.cxx`:72-79) is `o3tl::toUInt32(value, 16)` cast to signed — so an
+eight-digit entry's **top byte becomes the transparency**, and 26.2.4.2's own
+`--convert-to fods` gives all three of that workbook's `ConditionalStyle_N` a
+`fo:background-color="#ffffff"`. **Modelling that in `XlsxPalette` takes the same document to
+68.17** and was reverted: its *stated* cell fills name the same indices and the reference does draw
+those, so the transparency reaches the conditional style and not an ordinary fill, and where the two
+part company is not established. **Reach if anyone takes it is exactly one document** — 35 of the 55
+workbooks stating an `indexedColors` table carry a non-zero top byte and this is the only one that
+names such an entry by index.
+
+**What is left on the witness is a row-height question, not a formatting one.** The residual 205.57
+is 93.5 on pages 1-100 and is a within-sheet drift: on page 52 the same rows appear in the same
+order with ours two rows lower than the reference's, and the total page count is 1235 on both sides.
+
+**And ranks 2 and 3 of that ranking are neither of these.** `alle einzeln.xlsx` (225.44 over 186
+pages) states **no conditional formatting at all** and holds a `pivotTable` over `A4:I1013`;
+`Background_Declaration_Template.xls` (136.07 over 25) is BIFF, whose conditional formatting is
+`CONDFMT`/`CF` records and a different reader. Both keep their seat.
+
+### And the other seven `cfRule` families are read now — but 1215 rules move three renderings
+
+**Closed in round 96**, `probes/cond-format-r96/`. `containsText`, `endsWith`, `containsBlanks`,
+`notContainsBlanks` and `duplicateValues` are evaluated; `dataBar` and `iconSet` are left with
+their seat (O22) and belong beside the colour scale rather than beside the conditions. Four of the
+reference's arms are **not** what 18.3.1.10 would have you write, and each was confirmed against
+26.2.4.2's own view of a corpus document as well as of an authored fixture:
+
+- **`containsBlanks` is not a mode.** `CondFormatRule::finalizeImport`
+  (`sc/source/filter/oox/condformatbuffer.cxx`:860-866) replaces it with the formula
+  `LEN(TRIM(#B))=0` — `>0` for `notContainsBlanks` — and sets `ScConditionMode::Direct`. So **a
+  cell holding only spaces is blank** and **a number never is**, because `TRIM` stringifies it
+  first. `Application_Compliance_Checklist_5_Apr_2021.xlsx`'s 99 such rules come out of
+  `--convert-to fods` as `formula-is(LEN(TRIM([.M270]))=0)`.
+- **A text rule's `<formula>` is dead markup.** `finalizeImport`:938-947 builds a token array
+  holding only the `text` **attribute**, interned; the `NOT(ISERROR(SEARCH("xxx",A373)))` Excel
+  writes beside it is never compiled. Hence `contains-text("xxx")` in the fods, with no reference
+  in it.
+- **Case is folded for a text cell and not for a numeric one.** `IsValidStr`
+  (`conditio.cxx`:1219-1229) lowercases both sides; `IsValid`'s numeric arm (`:1130-1143`)
+  stringifies with `OUString::number(nArg)` and calls a bare `indexOf`. A numeric cell is searched
+  as its **number**, not as what is drawn.
+- **A multi-range `sqref`'s base cell is the smallest *column*, not the componentwise minimum.**
+  `ScRangeList::GetTopLeftCorner` (`sc/source/core/tool/rangelst.cxx`:1142-1155) is the smallest
+  range start under `ScAddress`'s `(tab, col, row)` ordering (`sc/inc/address.hxx`:396). **Excel
+  writes the formula against the componentwise minimum**, so the two disagree: `$G376="N/A"` on
+  `G443:G444 D491 G446:G490 G377` gets `base-cell-address="…D491"` in 26.2.4.2's own fods, and its
+  sibling block resolves to `formula-is(#ref!="N/A")` because the shift takes the row negative. 15
+  blocks in 3 corpus documents. On the fixture `sheet-cf-multi-range-anchor.xlsx` the two readings
+  paint **opposite** cells and the reference paints the top-left-corner one.
+
+**A fifth: precedence between two blocks is document order, then priority *within* a block** — not
+a global sort on `priority`. A cell's pattern carries an `ScCondFormatIndexes`, a
+`sorted_vector<sal_uInt32>` of format indices (`sc/inc/attrib.hxx`:271) handed out as each
+`<conditionalFormatting>` finalises, and `GetCondResult` walks it in that order;
+`CondFormat::insertRule` keys `maRules` by priority in a `std::map` inside one block.
+
+***And the headline is the reach, not the fix: a rule count is not a reach figure.***
+1215 unread rules over the corpus move **3 of 947 renderings** — sum `|ink|%` 27.62 → 27.02, no
+page count anywhere — and the nine candidates that do not move are each explained rather than
+broken. **358 `containsText` rules on `flightstandards-doc-Cross-reference-table_version02.xlsx`
+search for `xxx` and no cell on the sheet holds it**, the leftovers of a search-highlight;
+`Application_Compliance_Checklist`'s 668 are split between a `veryHidden` sheet and columns L and
+M of a sheet that hides columns 10 to 19; 14 `duplicateValues` rules over 357 positions in three
+documents find **no** value occurring twice; and 66 `notContainsBlanks` hits sit in helper columns
+outside their printed block. So the 27.04, 21.67 and 18.17 ink seats these families were expected
+to take are **not conditional formatting at all** and keep their seats. **Census what a rule
+*paints*, not how many rules there are** — the arithmetic is cheap, it is the same parse, and it
+would have re-scoped this round before a line was written.
+
+Two instrument notes. **`wiley-cancelled-title-list` is exact**: 0.42 → 0.01 on ink, and its
+`#FFC7CE` fill and `#9C0006` font operators go 0/0 → 2/2 against the reference's 2/2. And **count
+text spans, not colour operators, when the question is which cells took a font colour** — the fill
+count is subject to the reference's rectangle coalescing, while `get_text("dict")`'s per-span
+colour is not: on `6880ac7361ca…ST Capability List` the two sides then agree span for span on all
+sixteen of the reference's, and the two we add are §4's tab.
+
+**And an extension-keyed census misses a mislabelled file.** `Special-Procedures_2025-07-10.xls` is
+`Microsoft Excel 2007+` — a zip — with six `containsText` rules, and is one of the three movers. No
+census filtered on `.xlsx`/`.xlsm` can see it.
+
+***And the `iconSet` half of that census was corrected in the wrong direction: it is 20 rules in 10
+documents, not 2 in 2.*** Round 96 took an earlier over-count of 20 down to 2 by parsing each
+worksheet's `cfRule` elements instead of grepping for `type="iconSet"`, which is the right
+instrument for the wrong element — **an `x14:cfRule` in a worksheet's `extLst` can be a rule of its
+own** rather than an extension of a main-namespace one, carrying its own `xm:sqref`, and the
+reference imports and paints it. The source says so in as many words:
+`ExtLstLocalContext` builds a fresh format for an `x14:cfRule` whose `id` matches nothing, under
+the comment *"an ext entry does not need to have an existing corresponding entry"*
+(`sc/source/filter/oox/extlstcontext.cxx`:165-194). 18 of the corpus's 20 are of that kind, and
+`088_To-do_list_with_progress_tracker`'s `H3:H7` set is the proof in one file: it exists nowhere
+but the extension list and 26.2.4.2 draws an image for it. The test is whether some
+main-namespace rule claims the `x14` rule's `id` through an `<x14:id>`; `dataBar` is unaffected,
+because all nine of its extensions are claimed that way and r96's 9-in-6 is exact.
+**Census the extension list as well as the sheet, and match the two by `id`.**
+`probes/cond-format-r97/census-drawrules.py`.
+
+***The document count in that paragraph said 9 for a day, and the round's own data file said 10.***
+The two main-namespace `iconSet` documents (`075_Idea_planner_tasks`,
+`sistem-rekod-markah-srm`) are **disjoint** from the eight `x14`-only ones, so the union is ten, and
+`probes/cond-format-r97/icon-ink.txt` listed ten rows the whole time. **When a prose figure and a
+banked table disagree, the table is the measurement** — the prose is a transcription of it.
+
+***And `drawIconSets` does not paint the icon at a fixed ten points square.*** That constant
+(`output.cxx`:967) is a fallback for a null `mnHeight`, and `GetIconSetInfo` **always** sets that
+field from the cell's own `ATTR_FONT_HEIGHT` (`colorscale.cxx`:1222-1224), so the branch at
+`:969-980` always wins and the glyph is as tall as the cell's font. The banked areas are the
+refutation and were on disk before the claim was written: 19.4 pt² per icon on
+`066_Agile_Gantt_chart` against 103.9 on `069_Blue_modern_balance_sheet`, where a constant ten
+points would be 100 pt² throughout. **Divide a banked area by its count before quoting a size.**
+
+***And `mbNeg` is not "an `x14:negativeFillColor` was stated" — it defaults to TRUE.*** A `dataBar`
+read from OOXML therefore treats every negative value as negative, and one whose extension states
+no negative colour paints it in the source's own `COL_LIGHTRED` (`colorscale.cxx`:1082) rather than
+in the bar's positive colour. The default is at `sc/inc/colorscale.hxx`:107; the OOXML importer only
+ever sets it true again (`condformatbuffer.cxx`:1658-1664); **the one place in `sc/` that clears it
+is the ODF importer** (`sc/source/filter/xml/xmlcondformat.cxx`:483). So the fallback is not
+unreachable from SpreadsheetML, it is the *usual* answer there — eight of the corpus's nine rules
+resolve to it, and 26.2.4.2's `fods` writes `calcext:negative-color="#ff0000"` for every one.
+**Reach is nil** (75 numeric cells under a corpus `dataBar`, 0 negative;
+`probes/cond-format-r97/negative-under-databar.py`), which is exactly why the fixture that pinned
+the arm — one that *did* state a negative colour — could not see it. **A fixture built to exercise
+a feature will state the optional attribute; the corpus mostly does not, so author the absent case
+too.**
 
 ### A wrapping cell whose text begins outside its own column draws nothing at all
 
@@ -2785,6 +3415,23 @@ column for column, so the two are comparable:
 It is resumable, records the binary version in its header, and was validated against an
 independent known answer before use — reference page counts against `ppt/slides/slideN.xml`
 counts taken from the zip, 4 of 4 exact.
+
+### A corpus document whose page number never changes is O88, and the ODF copy agrees for the wrong reason
+
+26.2.4.2 does not import a field that sits in a text box inside a `wpg:wgp` group anchored in a
+table cell: it keeps the field's cached result as ordinary text. On the two words-track documents
+that carry that structure the footer prints one constant page number on every page —
+`Page 6 of 7` on all seven of `A1. EASA Form 2.docx`, `Page 3 of 6` on all six of
+`B11. TE.CAO.00129  Experience  logbook.docx` — and **ours counting 1..N is the right answer**.
+Established both ways on mutated corpus documents and on a 2×2 synthetic factorial, and present
+in 24.2.7.2 as well, so it is not a version artefact. `probes/pagefield-r137`, seat **O88**.
+
+Two traps follow. **The gate cannot see it**: a frozen page number has the same glyph count as a
+counted one, so both documents are `match` rows and always will be. And **`/home/user/corpus-odf`
+carries the defect forward** — those `.odt` were written by 26.2.4.2's own exporter from the
+already-broken import, so they hold the frozen string and no field, and an ODF-track comparison on
+them agrees with us because both sides are reading the same wrong text. Agreement on a converted
+file is not evidence about the construct that the conversion destroyed.
 
 ## Research notes
 

@@ -253,12 +253,18 @@ internal static class BiffChartFixture
     /// <param name="colourIndex">The palette index the line is drawn in.</param>
     /// <param name="pattern">0 for solid; <c>EXC_CHLINEFORMAT_NONE</c> is 5 and draws nothing.</param>
     /// <param name="automatic">Sets <c>EXC_CHLINEFORMAT_AUTO</c>.</param>
-    public static byte[] LineFormat(ushort colourIndex, ushort pattern = 0, bool automatic = false)
+    /// <param name="weight">
+    /// <c>EXC_CHLINEFORMAT_HAIR</c> is −1, <c>SINGLE</c> 0, <c>DOUBLE</c> 1 and <c>TRIPLE</c> 2 —
+    /// signed, and the default here stays at 1 so that every case written before the weight was
+    /// read keeps the bytes it was written against.
+    /// </param>
+    public static byte[] LineFormat(
+        ushort colourIndex, ushort pattern = 0, bool automatic = false, short weight = 1)
         => Record(ChLineFormat,
         [
             .. Dword(0x00000000),
             .. Word(pattern),
-            .. Word(1),                                    // weight
+            .. Word(unchecked((ushort)weight)),
             .. Word(automatic ? (ushort)1 : (ushort)0),
             .. Word(colourIndex),
         ]);
@@ -434,6 +440,12 @@ internal static class BiffChartFixture
     public const ushort ChAreaFormat = 0x100A;
     public const ushort ChLegend = 0x1015;
     public const ushort ChAxis = 0x101D;
+
+    /// <summary><c>CHTICK</c>, <c>EXC_ID_CHTICK</c>.</summary>
+    public const ushort ChTick = 0x101E;
+
+    /// <summary><c>CHAXISLINE</c>, which names which of an axis' lines the next format is for.</summary>
+    public const ushort ChAxisLine = 0x1021;
     public const ushort ChDefaultText = 0x1024;
     public const ushort ChText = 0x1025;
     public const ushort ChFont = 0x1026;
@@ -441,6 +453,9 @@ internal static class BiffChartFixture
     public const ushort ChBegin = 0x1033;
     public const ushort ChEnd = 0x1034;
     public const ushort ChAxesSet = 0x1041;
+
+    /// <summary><c>CHFRAMEPOS</c>, <c>xlchart.hxx</c>:641.</summary>
+    public const ushort ChFramePos = 0x104F;
     public const ushort ChTypeGroup = 0x1014;
     public const ushort ChSeriesGroup = 0x1045;
     public const ushort ChValueRange = 0x101F;

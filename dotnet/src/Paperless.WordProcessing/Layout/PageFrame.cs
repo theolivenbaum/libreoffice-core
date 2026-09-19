@@ -63,6 +63,83 @@ public enum TextWrap
     Optimal,
 }
 
+/// <summary>
+/// What Writer builds for an anchored object, which is what decides whether it is captured on its
+/// page.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>SwAnchoredObjectPosition</c>'s constructor
+/// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:125-144) asks a
+/// <em>different question of the two object kinds</em>, and its own comment says so:
+/// </para>
+/// <code>
+/// if (mbIsObjFly) bConsidered = bWrapThrough &amp;&amp; !bTextBox;   // draw case: wrap through OR not a textbox
+/// else            bConsidered = bWrapThrough || !bTextBox;   // fly case:  wrap through AND not a textbox
+/// mbDoNotCaptureAnchoredObj = bConsidered &amp;&amp; !mbFollowTextFlow &amp;&amp; DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE;
+/// </code>
+/// <para>
+/// So under a format that sets <c>DoNotCaptureDrawObjsOnPage</c> — DOCX and RTF, and no other, see
+/// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/> — a picture and a shape carrying a
+/// text box are captured unless they wrap through, and <b>a shape with no text box is never captured,
+/// whatever its wrap</b>. This tree's own remarks used to say the escape was wrap-through and nothing
+/// else, which is wrong for the third of those.
+/// </para>
+/// <para>
+/// Censused over <c>MANIFEST.tsv</c>'s 272 DOCX, every <c>wp:anchor</c> and every absolutely
+/// positioned VML shape (<c>probes/words-close-r95/capture-census.py</c>): of 6055 objects the two
+/// readings differ on <b>4, in 4 documents</b> — a draw object with no text box that does not wrap
+/// through. It is modelled because it is the rule, not because it moves anything.
+/// </para>
+/// </remarks>
+public enum FrameObjectKind
+{
+    /// <summary>
+    /// A Writer fly: a picture, an OLE object or chart, or a text frame. Captured unless it wraps
+    /// through. The default, which is the answer for every reader that does not distinguish the kinds
+    /// — they are the formats that capture everything anyway.
+    /// </summary>
+    Fly,
+
+    /// <summary>
+    /// A drawing object carrying a text box, so <c>SwTextBoxHelper::isTextBox</c> answers true for its
+    /// draw format and it is captured unless it wraps through — the same answer as a fly's.
+    /// </summary>
+    TextBoxShape,
+
+    /// <summary>
+    /// A drawing object with no text box, which <c>bConsidered</c> makes exempt from the capture
+    /// whatever its wrap.
+    /// </summary>
+    Shape,
+}
+
+/// <summary>
+/// Where an anchored object's anchor sits on the page, which two of the capture's own conditions ask
+/// about.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Both are in <c>SwAnchoredObjectPosition::ImplAdjustVertRelPos</c>
+/// (<c>anchoredobjectposition.cxx</c>:504-667). The <c>compatibilityMode</c> 15 narrowing of the
+/// capture area to the page body needs <c>mpAnchorFrame-&gt;FindBodyFrame()</c> to find a body frame
+/// whose upper is this page (:568-573), which a header, a footer and a footnote anchor have not; and
+/// tdf#123002 leaves a header- or footer-anchored object alone outright once its top is past the
+/// area's bottom (:637-647).
+/// </para>
+/// </remarks>
+public enum FrameAnchorPlace
+{
+    /// <summary>In the page's body: body text, or a cell of a table in it.</summary>
+    Body,
+
+    /// <summary>In the running head or foot.</summary>
+    Furniture,
+
+    /// <summary>Somewhere that is neither — the notes area, or another frame's own text.</summary>
+    Elsewhere,
+}
+
 /// <summary>What a frame's horizontal position is measured from.</summary>
 public enum FrameHorizontalOrigin
 {
@@ -253,6 +330,16 @@ public sealed record PageFrame
     /// not be read leaves the text exactly where it would have been rather than moving all of it.
     /// </remarks>
     public TextWrap Wrap { get; init; } = TextWrap.Through;
+
+    /// <summary>
+    /// What Writer builds for this object, which decides whether the page capture reaches it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="FrameObjectKind"/> carries the rule and the census. Only the DOCX reader sets it:
+    /// the other three formats capture every content anchor, so the distinction cannot change an
+    /// answer there and a wrong guess would.
+    /// </remarks>
+    public FrameObjectKind ObjectKind { get; init; }
 
     /// <summary>What the horizontal position is measured from.</summary>
     public FrameHorizontalOrigin HorizontalOrigin { get; init; } = FrameHorizontalOrigin.Paragraph;

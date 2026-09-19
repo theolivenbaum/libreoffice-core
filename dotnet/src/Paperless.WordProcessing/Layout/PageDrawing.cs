@@ -243,16 +243,20 @@ public static class PageDrawing
         IDrawingSink sink,
         Colour background = default)
     {
-        if (page.ColumnCount <= 1 && page.Lines.All(line => line.Columns <= 1))
+        if (page.ColumnCount <= 1
+            && page.Lines.All(line => line.Columns <= 1 && page.BodyAreaOf(line) == page.BodyArea))
         {
             DrawLines(page.BodyArea, page.Lines, blocks, sink, background);
             return;
         }
 
         // Grouped by the *line's* own band rather than by the page's column index, because one page can
-        // carry sections that disagree about how many columns there are — see `PlacedLine.Columns`.
-        foreach (IGrouping<(int Columns, int Column), PlacedLine> band in
-                 page.Lines.GroupBy(line => (line.Columns, line.Column)))
+        // carry sections that disagree about how many columns there are — see `PlacedLine.Columns` — and
+        // about the text area those columns divide, which is what the last two members are: a text
+        // section's own indents make a full-measure line above it and one below it different bands.
+        foreach (IGrouping<(int Columns, int Column, Length Left, Length Width), PlacedLine> band in
+                 page.Lines.GroupBy(
+                     line => (line.Columns, line.Column, line.BodyLeft, line.BodyWidth)))
         {
             DrawLines(page.ColumnArea(band.First()), [.. band], blocks, sink, background);
         }
@@ -395,8 +399,8 @@ public static class PageDrawing
         if (frame.Frame.Chart is { } chart)
             FrameChart.Draw(sink, chart, frame.Ink, frame.Frame.ChartFontFamily);
         else if (frame.Frame.Vector is { } vector && !vector.Value.IsEmpty)
-            DrawPicture(sink, frame, vector, null);
-        else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
+            DrawPicture(sink, frame, filled, vector, null);
+        else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, filled, null, image);
 
         Upright(sink, shape);
 
@@ -603,10 +607,20 @@ public static class PageDrawing
     /// than doing nothing.
     /// </para>
     /// <para>
-    /// Clipped only where there is a crop. Both backends already confine a picture to the
-    /// rectangle they are given — a raster is stretched onto exactly it, and
-    /// <c>VectorImage.Draw</c> clips to its destination — so an unconditional clip would be a
-    /// no-op that changed the bytes of every rendering carrying a picture.
+    /// <strong>And a picture frame need not be rectangular.</strong> A <c>pic:pic</c> carries an
+    /// <c>a:prstGeom</c> in its own <c>pic:spPr</c> exactly as a <c>wps:wsp</c> does, and
+    /// LibreOffice fills that geometry with the bitmap rather than the bounding box — <c>oox</c>
+    /// gives such a picture a <c>com.sun.star.drawing.CustomShape</c> service with a bitmap fill
+    /// (<c>Shape::createAndInsert</c>, <c>oox/source/drawingml/shape.cxx</c>), and 26.2.4.2's own
+    /// PDF emits the preset's outline as a clip path immediately before the image operator. So the
+    /// outline bounds the picture whenever the shape states one, whether or not anything is
+    /// cropped. The slide side has clipped to the outline all along; only this one did not.
+    /// </para>
+    /// <para>
+    /// Clipped nowhere else. Both backends already confine a picture to the rectangle they are
+    /// given — a raster is stretched onto exactly it, and <c>VectorImage.Draw</c> clips to its
+    /// destination — so an unconditional clip would be a no-op that changed the bytes of every
+    /// rendering carrying a picture.
     /// </para>
     /// <para>
     /// The border is drawn after this and is deliberately outside the clip: it belongs to the
@@ -614,12 +628,24 @@ public static class PageDrawing
     /// would have cut away.
     /// </para>
     /// </remarks>
+    /// <param name="sink">Where to draw.</param>
+    /// <param name="frame">The frame holding the picture.</param>
+    /// <param name="outline">
+    /// The shape's own filled geometry, placed in the page, or null when it states none and its
+    /// rectangle is its outline.
+    /// </param>
+    /// <param name="vector">The vector picture, where the frame has one.</param>
+    /// <param name="image">The raster picture, where the frame has one.</param>
     private static void DrawPicture(
-        IDrawingSink sink, PlacedFrame frame, Lazy<VectorImage>? vector, RasterImage? image)
+        IDrawingSink sink,
+        PlacedFrame frame,
+        GraphicsPath? outline,
+        Lazy<VectorImage>? vector,
+        RasterImage? image)
     {
         DocRect destination = frame.Frame.Crop.Apply(frame.Ink);
 
-        if (destination == frame.Ink)
+        if (destination == frame.Ink && outline is null)
         {
             PaintPicture(sink, frame.Ink, vector, image);
             return;
@@ -628,7 +654,7 @@ public static class PageDrawing
         sink.Save();
         try
         {
-            sink.ClipPath(GraphicsPath.Rectangle(frame.Ink));
+            sink.ClipPath(outline ?? GraphicsPath.Rectangle(frame.Ink));
             PaintPicture(sink, destination, vector, image);
         }
         finally
@@ -738,24 +764,50 @@ public static class PageDrawing
         // Collected per grid line and merged, so that a run of cells agreeing about an edge becomes one
         // stroke. Keyed on the line's own coordinate rounded to a twip, because two cells' shared edge is
         // computed from two different rectangles and can differ in the last EMU.
-        List<Edge> edges = Edges(table);
-        if (table.Table.JoinsBordersLikeWord) edges = WithWordJoins(edges);
+        List<Edge> edges = WithSpans(Edges(table), table.Table.JoinsBordersLikeWord);
 
         foreach (Edge edge in edges)
         {
             // The stated width is the whole rule's, so a double's two strokes are drawn inside it — one
-            // against each edge of the band the grid line is the middle of. See `BorderRules`.
+            // against each edge of the band. See `BorderRules`.
             BorderBands bands = edge.Border.Bands;
             IReadOnlyList<Length>? dashes = BorderRules.Dashes(edge.Border.Line);
             Length half = edge.Border.Width / 2;
-            Length from = edge.From - half;
-            Length to = edge.To + half;
 
-            Rule((bands.Outer / 2) - half, bands.Outer);
-            if (bands.HasTwoRules) Rule(half - (bands.Inner / 2), bands.Inner);
+            // A horizontal rule meets a vertical one, which is CENTRED on its line, so it overshoots by
+            // half a rule at each end. A vertical's own span is already final — `WithSpans` settles it,
+            // because a horizontal band HANGS DOWNWARDS and the two ends are therefore not symmetrical.
+            Length from = edge.IsHorizontal ? edge.From - half : edge.From;
+            Length to = edge.IsHorizontal ? edge.To + half : edge.To;
 
-            // `offset` is where the stroke's own centre sits relative to the grid line: nought for a
-            // single rule, since its width is the band's, and against each edge of the band for a double.
+            // Where this band's top edge sits, relative to the grid line. A vertical border is CENTRED
+            // on its line and a horizontal one HANGS DOWNWARDS FROM IT: [src] `SwTabFramePainter::Insert`
+            // (`sw/source/core/layout/paintfrm.cxx`:3061-3064) sets `RefMode::Begin` on a cell's two
+            // horizontal borders -- "drawn below the reference points", `mfRefModeOffset = +width/2` --
+            // and `Centered` on its two vertical ones. So every band on one horizontal line begins at the
+            // line, whatever its own width, and no reference to the widest of them is needed: the layout
+            // puts the grid line ON the row boundary and `TableLayouter.TopBand` charges the row below for
+            // the whole band. [bin] `probes/tablerow-r146/results.md` §3.1 -- three columns stating
+            // 0.5/3.0/1.5 pt across one boundary draw 95.001..95.501, 95.001..98.001 and 95.001..96.501.
+            //
+            // The two are written as separate expressions rather than as one parameterised by `top`,
+            // and that is not tidiness: `Length`'s division ROUNDS (`operator /`, `Length.cs`:140), so
+            // `half - Inner/2` and `-half + Width - Inner/2` — the same arithmetic re-associated —
+            // differ by one EMU whenever the width is an odd number of them. Written as one expression
+            // this round moved a doubled *vertical* border on `150_5300_13_chg12.doc` by 0.0001 pt,
+            // which it has no business touching at all; the confinement sweep is what caught it.
+            if (edge.IsHorizontal)
+            {
+                Rule(bands.Outer / 2, bands.Outer);
+                if (bands.HasTwoRules) Rule(edge.Border.Width - (bands.Inner / 2), bands.Inner);
+            }
+            else
+            {
+                Rule((bands.Outer / 2) - half, bands.Outer);
+                if (bands.HasTwoRules) Rule(half - (bands.Inner / 2), bands.Inner);
+            }
+
+            // `offset` is where the stroke's own centre sits relative to the grid line.
             void Rule(Length offset, Length thick)
             {
                 if (thick <= Length.Zero) return;
@@ -791,22 +843,53 @@ public static class PageDrawing
         bool IsHorizontal, Length At, Length From, Length To, TableBorder Border, bool IsOuter = false);
 
     /// <summary>
-    /// The grid lines with Word's joins applied: an inner line gives way to the outline it meets.
+    /// Every grid line's final span: how far a vertical reaches into the bands it meets, and Word's join
+    /// rule, by which an inner line gives way to the outline.
     /// </summary>
     /// <remarks>
-    /// By the <em>full</em> width of the outer line rather than half of it, which is what makes the two
-    /// rules differ by a whole border width at each end rather than by nothing. Ported from
-    /// <c>SwTabFramePainter::FindStylesForLine</c>, which adjusts an inner entry's start and end for every
-    /// outer entry it meets there, and does it before the half-width overshoot is added.
+    /// <para>
+    /// <strong>The two ends of a vertical are not symmetrical, because a horizontal band hangs downwards
+    /// from its line rather than being centred on it</strong> ([src] <c>SwTabFramePainter::Insert</c>,
+    /// <c>paintfrm.cxx</c>:3061-3064, <c>RefMode::Begin</c> on the horizontals and <c>Centered</c> on the
+    /// verticals). At its top the vertical already starts on the boundary, which is where that band
+    /// begins, so it reaches nothing; at its bottom it has to cross the whole band or the corner is left
+    /// open. Under the centred model this tree used until round 149 the two ends were one expression,
+    /// <c>± width/2</c>, which agrees for as long as every rule in the table has one width.
+    /// </para>
+    /// <para>
+    /// Word's join is then subtracted from both ends, by the <em>full</em> width of the outer line rather
+    /// than half of it — ported from <c>SwTabFramePainter::FindStylesForLine</c>, which adjusts an inner
+    /// entry's start and end for every outer entry it meets and does it before the half-width overshoot
+    /// is added. For a vertical that is what makes it stop at the table's outline instead of crossing it,
+    /// while still crossing every <em>interior</em> band on the way.
+    /// </para>
+    /// <para>
+    /// [bin] Measured on <c>table-borders.docx</c> against 26.2.4.2, whose three verticals run
+    /// <c>70.201..161.901</c> (outer: the first band's top to the last band's bottom),
+    /// <c>70.701..161.401</c> (interior, full height: below the outer top band, stopping at the top of
+    /// the outer bottom one) and <c>70.701..142.501</c> (interior, ending on an <em>interior</em>
+    /// boundary, which it crosses). Getting any one of the three wrong is a whole rule width, and all
+    /// three are reproduced.
+    /// </para>
     /// </remarks>
-    private static List<Edge> WithWordJoins(List<Edge> edges)
+    /// <param name="edges">The merged grid lines.</param>
+    /// <param name="joinsLikeWord">Whether the table applies Word's join rule; see <c>PageTable</c>.</param>
+    private static List<Edge> WithSpans(List<Edge> edges, bool joinsLikeWord)
     {
-        // Keyed on the coordinate in twips for the same reason the merge is: two cells' shared edge comes
-        // from two rectangles and can differ in the last EMU. The width is the widest outline stroke at
-        // that coordinate, since that is the one whose corner has to be cleared.
+        // The widest band at each horizontal line, and the widest OUTER band — the second is what an
+        // inner line has to give way to, since only the outline clears a corner.
+        Dictionary<long, Length> band = [];
         Dictionary<(bool, long), Length> outline = [];
+
         foreach (Edge edge in edges)
         {
+            if (edge.IsHorizontal)
+            {
+                long line = edge.At.Twips;
+                if (!band.TryGetValue(line, out Length seen) || edge.Border.Width > seen)
+                    band[line] = edge.Border.Width;
+            }
+
             if (!edge.IsOuter) continue;
 
             (bool, long) key = (edge.IsHorizontal, edge.At.Twips);
@@ -814,23 +897,29 @@ public static class PageDrawing
                 outline[key] = edge.Border.Width;
         }
 
-        List<Edge> joined = new(edges.Count);
+        List<Edge> spanned = new(edges.Count);
         foreach (Edge edge in edges)
         {
-            if (edge.IsOuter)
+            // A vertical crosses the band at its lower boundary. Its upper end needs nothing: the band
+            // there begins on the boundary it already starts at.
+            Length to = edge.IsHorizontal
+                ? edge.To
+                : edge.To + band.GetValueOrDefault(edge.To.Twips, Length.Zero);
+
+            if (edge.IsOuter || !joinsLikeWord)
             {
-                joined.Add(edge);
+                spanned.Add(edge with { To = to });
                 continue;
             }
 
-            joined.Add(edge with
+            spanned.Add(edge with
             {
                 From = edge.From + Meeting(edge, edge.From),
-                To = edge.To - Meeting(edge, edge.To),
+                To = to - Meeting(edge, edge.To),
             });
         }
 
-        return joined;
+        return spanned;
 
         Length Meeting(Edge edge, Length end)
             => outline.TryGetValue((!edge.IsHorizontal, end.Twips), out Length width)
@@ -851,9 +940,18 @@ public static class PageDrawing
         List<Edge> loose = [];
         int columns = table.Table.ColumnWidths.Count;
 
+        IReadOnlyList<PageTableRow> shared = table.Table.RowsWithSharedEdges;
+
         foreach (PlacedTableCell cell in table.Cells)
         {
-            CellBorders borders = cell.Cell.Borders;
+            // The shared-edge borders rather than the cell's own, which is what closes the hole a page
+            // break leaves: a row stating `w:top w:val="nil"` under a row stating a bottom border draws
+            // nothing of its own, and where the two are on the same page the row above's bottom covers
+            // the line, so the hole appears only at the top of a table's continuation page. See
+            // `PageTable.RowsWithSharedEdges`. The row *heights* are deliberately not on it — the same
+            // probe says they should be, and the corpus says our height model has other errors that
+            // change interacts with; `probes/wordstable-r131/results.md` §4.
+            CellBorders borders = Shared(shared, cell);
             DocRect area = cell.Area;
 
             // Which of a cell's edges belong to the table's outline, taken from where the cell sits
@@ -892,6 +990,23 @@ public static class PageDrawing
         }
 
         return merged;
+    }
+
+    /// <summary>One placed cell's borders, with the horizontal edges it shares resolved.</summary>
+    /// <remarks>
+    /// Matched on the row the cell starts in and the column it starts at, which is how a placed cell
+    /// names itself; a cell the resolution did not touch comes back as the row stated it.
+    /// </remarks>
+    private static CellBorders Shared(IReadOnlyList<PageTableRow> rows, PlacedTableCell cell)
+    {
+        if (cell.Row < 0 || cell.Row >= rows.Count) return cell.Cell.Borders;
+
+        foreach (PageTableCell other in rows[cell.Row].Cells)
+        {
+            if (other.Column == cell.Cell.Column) return other.Borders;
+        }
+
+        return cell.Cell.Borders;
     }
 
     /// <summary>Joins the runs along one grid line that touch or overlap.</summary>
@@ -1453,6 +1568,10 @@ public static class PageDrawing
                 runs.Add(filled);
             }
 
+            // Before the emptiness test for the same reason the leader is: a tab carries the decoration
+            // of the font at the tab whether or not anything follows it. See `TabRule`.
+            if (rules is not null) TabRule(paragraph, segment, lineLeft, baseline, rules, background);
+
             if (segment.IsEmpty) continue;
 
             // The justification belongs to the last stretch alone. A tab is a fixed portion whose glue is
@@ -1614,40 +1733,149 @@ public static class PageDrawing
     {
         if (run.EmSize <= Length.Zero || extent <= Length.Zero) return;
 
-        int unitsPerEm = run.Face.UnitsPerEm > 0 ? run.Face.UnitsPerEm : 1000;
-        FontVerticalMetrics metrics =
-            LineSpacing.ResolveDecorations(run.Face, LineSpacing.Resolve(run.Face));
+        LineMetrics line = LineSpacing.Resolve(run.Face);
 
-        Length Scaled(int designUnits) => run.EmSize * ((double)designUnits / unitsPerEm);
+        // A rule's weight AND its offset are whole numbers of the PDF writer's own 720 dpi pixels
+        // rounded to whole units of the map mode the page is painted in, which on a Writer page is
+        // the TWIP. See `LineSpacing.ResolveRuleWidths` and `MetricGrid.WriterTextLine`.
+        LineSpacing.RuleWidths widths =
+            LineSpacing.ResolveRuleWidths(run.Face, line, run.EmSize, MetricGrid.WriterTextLine);
 
         // The rise carries the rules with the text, exactly as it carries the band: a struck-through
         // superscript is struck where it is drawn rather than where it would have sat unraised.
         Length baselineOfRun = baseline - run.Rise;
 
-        if (run.IsUnderlined)
+        if (run.Underline == TextUnderline.SingleLine)
         {
-            // The face records the underline's offset as negative below the baseline.
-            Length thickness = Scaled(metrics.UnderlineThickness);
+            Length thickness = widths.Underline;
             if (thickness > Length.Zero)
             {
                 rules.Add((
                     new DocRect(
-                        pen, baselineOfRun - Scaled(metrics.UnderlinePosition), extent, thickness),
+                        pen, baselineOfRun + widths.UnderlineOffset, extent, thickness),
+                    run.ColourOn(background)));
+            }
+        }
+        else if (run.Underline == TextUnderline.BoldLine)
+        {
+            Length thickness = widths.BoldUnderline;
+            if (thickness > Length.Zero)
+            {
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun + widths.BoldUnderlineOffset, extent, thickness),
+                    run.ColourOn(background)));
+            }
+        }
+        else if (run.Underline == TextUnderline.DoubleLine)
+        {
+            // Both the thickness AND the two offsets come off the device here, where a single
+            // underline still takes its offset from the design units: a double underline's lines
+            // straddle where a single one would sit, their separation is floored on the device
+            // rather than scaled with the em, and the second carries the writer's extra thickness.
+            // See `LineSpacing.RuleWidths.DoubleUnderlineSecond`.
+            Length thickness = widths.DoubleUnderline;
+            if (thickness > Length.Zero)
+            {
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun + widths.DoubleUnderlineFirst, extent, thickness),
+                    run.ColourOn(background)));
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun + widths.DoubleUnderlineSecond, extent, thickness),
                     run.ColourOn(background)));
             }
         }
 
         if (run.IsStruckThrough)
         {
-            Length thickness = Scaled(metrics.StrikeoutThickness);
+            Length thickness = widths.Strikeout;
             if (thickness > Length.Zero)
             {
                 rules.Add((
                     new DocRect(
-                        pen, baselineOfRun - Scaled(metrics.StrikeoutPosition), extent, thickness),
+                        pen, baselineOfRun + widths.StrikeoutOffset, extent, thickness),
                     run.ColourOn(background)));
             }
         }
+    }
+
+    /// <summary>
+    /// The rule a decorated tab carries across the blank it advanced over, if it carries one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Writer underlines the line, not the runs.</b> A tab is painted as a run of literal blanks in
+    /// the font at the tab itself, so whatever line that font carries is drawn across it —
+    /// <c>SwTabPortion::Paint</c> (<c>sw/source/core/text/txttab.cxx</c>:626-641), under the comment
+    /// <c>// Tabs should be underlined at once</c>. The switch is not "is it underlined":
+    /// <c>SwFntObj</c>'s constructor sets <c>m_bPaintBlank</c> from
+    /// <c>(underline || overline || strikeout) &amp;&amp; !IsWordLineMode()</c>
+    /// (<c>sw/source/core/txtnode/fntcache.cxx</c>:106-109), so a strikethrough spans a tab exactly as
+    /// an underline does. This model carries no overline, so two of the three arms are drawn here and
+    /// the third has nothing to draw.
+    /// </para>
+    /// <para>
+    /// <b>The rule spans the tab's whole width, and that is not what counting the blanks would give.</b>
+    /// The count is <c>Width() / GetTextSize(' ')</c>, an integer division of two whole-twip lengths,
+    /// and <em>n</em> blanks at their own advances would stop up to one space short of the stop. They do
+    /// not, because the call passes <c>bKern = true</c>: <c>SwTextPaintInfo::DrawText_</c> turns that
+    /// into <c>aDrawInf.SetKern(rPor.Width())</c> and routes it to <c>SwSubFont::DrawStretchText_</c>
+    /// (<c>inftxt.cxx</c>:798-808, <c>swfont.cxx</c>:1289-1345), which calls
+    /// <c>OutputDevice::DrawStretchText(aPos, rInf.GetWidth(), …)</c> — so the blanks are set onto the
+    /// portion's own width and the rule reaches the stop. It is the same <c>bKern</c>, and the same
+    /// compression, that <see cref="Leader"/> already models for a dot leader.
+    /// </para>
+    /// <para>
+    /// <b>This is the arm a fix taken from one witness gets wrong, so it is measured against its
+    /// alternative rather than merely agreed with.</b> On five Liberation Mono tabs at 10 pt whose
+    /// residue modulo the 120-twip blank is 80, 20, 100, 100 and 100 twips — where the two readings are
+    /// <b>1.00 to 5.00 pt apart</b> — 26.2.4.2 draws 16.00, 19.00, 23.00, 29.00 and 35.00 pt of cover,
+    /// which is the tab's full width at <b>5 of 5</b> and the truncated reading at 0 of 5.
+    /// </para>
+    /// <para>
+    /// <b>So the count decides one thing only: whether anything is drawn at all.</b> A tab narrower than
+    /// one blank gives <c>nChar == 0</c>, an empty string, and <c>DrawText_</c> returns on
+    /// <c>!nLength</c> — no rule. Measured at 26.2.4.2 rather than inferred, and the cliff falls exactly
+    /// where a whole-twip blank puts it: in Liberation Mono at 10 pt, whose blank is 120 twips to the
+    /// twip, tabs of 30, 90 and 119 twips carry no rule and 121, 180 and 361 carry one. And the width is
+    /// <em>truncated</em> to the twip rather than rounded, which Liberation Sans at 10 pt separates —
+    /// its blank is 55.566 twips, and a tab of exactly 55 twips draws a rule, which rounding to 56 would
+    /// refuse. <c>probes/wordsdec-r126</c>.
+    /// </para>
+    /// <para>
+    /// <b>What is deliberately not modelled is the switch.</b> <c>IsWordLineMode()</c> — Word's
+    /// <c>w:u w:val="words"</c>, RTF's <c>\ulw</c>, <c>sprmCKul</c> operand 2 and ODF's
+    /// <c>style:text-{underline,overline,line-through}-mode="skip-white-space"</c> — turns the whole of
+    /// this off, and no corpus document states it in any of the four spellings. See the round's
+    /// write-up for the census and the twelve authored rows that measure the cost of declining it.
+    /// </para>
+    /// </remarks>
+    private static void TabRule(
+        PageParagraph paragraph,
+        TabbedSegment segment,
+        Length lineLeft,
+        Length baseline,
+        List<(DocRect Area, Colour Colour)> rules,
+        Colour background = default)
+    {
+        if (segment.GapWidth <= Length.Zero) return;
+
+        // The font in effect AT the tab, which is what `rInf.GetFont()` means there — the same
+        // position `Leader` reads, and for the same reason.
+        PageRun at = RunAt(paragraph, segment.Start - 1);
+        if (!at.IsDecorated) return;
+
+        Length blank = TextShaper.Default
+            .Shape(at.Face, " ", at.EffectiveShaping)
+            .Width(at.EmSize);
+        if (blank <= Length.Zero) return;
+
+        Length unit = Length.FromTwips(blank.Emu / Length.EmuPerTwip);
+        if (unit <= Length.Zero || segment.GapWidth.Emu < unit.Emu) return;
+
+        Rules(at, lineLeft + segment.GapLeft, segment.GapWidth, baseline, rules, background);
     }
 
     /// <summary>
@@ -1894,6 +2122,14 @@ public static class PageDrawing
                             paragraph.Colour,
                             paragraph.Shaping,
                             Tracking: paragraph.Tracking,
+
+                            // And the paragraph's own character width, which is tracking's twin
+                            // here as everywhere else: this is the SECOND fallback a uniform
+                            // paragraph goes through — `PageParagraph.Measure` builds the other —
+                            // and carrying the scale in one of the two is worse than carrying it
+                            // in neither, because the line would then break at the squeezed width
+                            // and be drawn at the unsqueezed one.
+                            WidthPerCent: paragraph.WidthPerCent,
                             Item: paragraph.Item),
                     ])));
         }

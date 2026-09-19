@@ -163,6 +163,14 @@ public sealed record PptTextRuler(
 /// shape, and the reference numbers its outline <c>I. II. III. IV. V. VI.</c>
 /// </para>
 /// </remarks>
+/// <param name="Mask">
+/// The paragraph mask the entry opens with, <c>mnExtParagraphMask</c>. It is kept because it is
+/// what decides the <em>merge</em> with the master's level: <c>ImplGetExtNumberFormat</c> takes a
+/// field from the master only where the paragraph's own mask does not name it, and skips the merge
+/// entirely when the mask names all three (<c>svdfppt.cxx:3407-3446</c>). Without it, "the entry
+/// states no picture bullet" and "the entry says nothing about picture bullets" are the same
+/// value and the level's own blip can never be inherited.
+/// </param>
 /// <param name="BulletBlip">
 /// The picture-bullet index into the document's BLIP store, or <c>0xFFFF</c> for none.
 /// </param>
@@ -172,6 +180,7 @@ public sealed record PptTextRuler(
 /// <c>ImplGetExtNumberFormat</c> reads them (<c>svdfppt.cxx:3466-3630</c>).
 /// </param>
 public readonly record struct PptExtendedParagraph(
+    uint Mask,
     ushort BulletBlip,
     bool HasAutoNumber,
     uint Scheme)
@@ -470,8 +479,34 @@ public static class PptTextReader
 
         if (markers is not null) text = Substitute(text, markers, paragraphs, characters, links);
 
-        return new PptTextRun(kind, text, paragraphs, characters, ruler, extended, links);
+        return new PptTextRun(kind, Broken(kind, text), paragraphs, characters, ruler, extended, links);
     }
+
+    /// <summary>
+    /// A slide title's returns, which are line breaks and not paragraph ends.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>PageTitle</c> text object has exactly one paragraph however many returns it
+    /// holds.</strong> <c>PPTStyleTextPropReader::Init</c> rewrites every <c>0x0d</c> to
+    /// <c>0x0b</c> — a vertical tab, EditEngine's soft break — when the text header names
+    /// instance 0, and records a <c>PPT_SPEC_NEWLINE</c> marker for every other instance
+    /// (<c>filter/source/msfilter/svdfppt.cxx</c>:5241-5246 for the Unicode record and
+    /// :5261-5266 for the byte one). Only the markers split paragraphs, so a two-line title
+    /// arrives as one paragraph with a break in it rather than as two paragraphs — which is a
+    /// paragraph space, a second bullet and a second first-line indent's worth of difference.
+    /// </para>
+    /// <para>
+    /// <c>TSS_Type::PageTitle</c> is 0 and <c>TSS_Type::Title</c> — the title of a title slide,
+    /// <see cref="PptTextKind.CentreTitle"/> — is 6 (<c>include/filter/msfilter/svdfppt.hxx</c>
+    /// :157-169); the rewrite is on the first only, and following the name rather than the number
+    /// would apply it to the wrong one.
+    /// </para>
+    /// </remarks>
+    private static string Broken(PptTextKind kind, string text)
+        => kind == PptTextKind.Title && text.Contains(ParagraphSeparator, StringComparison.Ordinal)
+            ? text.Replace(ParagraphSeparator, LineBreak)
+            : text;
 
     /// <summary>
     /// Which hyperlink an <c>InteractiveInfo</c> names, or null when it names none.
@@ -489,6 +524,48 @@ public static class PptTextReader
 
             ReadOnlySpan<byte> content = stream.Content(child);
             return content.Length >= 8 ? DffRecordBuffer.ReadUInt32(content[4..]) : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The <c>TextRulerAtom</c> of a shape's own client textbox, for the text it only refers to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A shape whose text is an <c>OutlineTextRefAtom</c> keeps its <em>ruler</em> in its own
+    /// client textbox while the characters live in the document's slide list, and the reference
+    /// reads the two from those two places: <c>PPTTextObj</c>'s constructor locates
+    /// <c>PPT_PST_TextRulerAtom</c> inside <c>aClientTextBoxHd</c> and remembers its file offset
+    /// <strong>before</strong> patching that header to point at the referenced text
+    /// (<c>filter/source/msfilter/svdfppt.cxx</c>, the <c>nTextRulerAtomOfs</c> block), then builds
+    /// its <c>PPTTextRulerInterpreter</c> from that offset once the patch has happened.
+    /// </para>
+    /// <para>
+    /// <strong>Every ruler in the two decks this matters to is in exactly that position.</strong>
+    /// Counted over the record tree of both: <c>ws_prod-…-M.017-(French)-France.ppt</c> holds
+    /// <b>54</b> <c>TextRulerAtom</c> records and
+    /// <c>ws_prod-g-doc-Events-Part-M-presentation.ppt</c> <b>3</b>, and in both files
+    /// <em>every one of them</em> sits in a client textbox that also holds an
+    /// <c>OutlineTextRefAtom</c> — 54 of 54 and 3 of 3. Read through
+    /// <see cref="Read(DffRecordBuffer,int,int,PptFieldValues,IReadOnlyList{PptExtendedParagraph},IReadOnlySet{uint})"/>
+    /// alone, which returns before it reaches the ruler on that branch, not one of the 57 was ever
+    /// applied.
+    /// </para>
+    /// </remarks>
+    /// <param name="stream">The document stream.</param>
+    /// <param name="start">Where the shape's client textbox content begins.</param>
+    /// <param name="end">Where it ends.</param>
+    internal static PptTextRuler? RulerIn(DffRecordBuffer stream, int start, int end)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        foreach (DffRecordHeader record in stream.Range(start, end))
+        {
+            if (record.Type != PptRecordTypes.TextRulerAtom) continue;
+
+            return ReadRuler(stream.Content(record));
         }
 
         return null;
@@ -538,9 +615,6 @@ public static class PptTextReader
         return states ? new PptTextRuler(defaultTab, textOffsets, bulletOffsets) : null;
     }
 
-    /// <summary>The name PowerPoint 97+ gives its own tagged block.</summary>
-    private const string ProgTagName = "___PPT9";
-
     /// <summary>
     /// A shape's <c>ExtendedParagraphAtom</c> entries, from its <c>ClientData</c>.
     /// </summary>
@@ -561,44 +635,14 @@ public static class PptTextReader
 
         if (clientData is not { } data) return null;
 
-        foreach (DffRecordHeader tags in stream.Children(data))
+        foreach (DffRecordHeader record in PptProgTags.Content(stream, data))
         {
-            if (tags.Type != PptRecordTypes.ProgTags) continue;
+            if (record.Type != PptRecordTypes.ExtendedParagraphAtom) continue;
 
-            foreach (DffRecordHeader tag in stream.Children(tags))
-            {
-                if (tag.Type != PptRecordTypes.ProgBinaryTag) continue;
-                if (!IsProgTag(stream, tag)) continue;
-
-                foreach (DffRecordHeader payload in stream.Children(tag))
-                {
-                    if (payload.Type != PptRecordTypes.BinaryTagData) continue;
-
-                    foreach (DffRecordHeader record in stream.Children(payload))
-                    {
-                        if (record.Type != PptRecordTypes.ExtendedParagraphAtom) continue;
-
-                        return ReadExtendedParagraphAtom(stream.Content(record));
-                    }
-                }
-            }
+            return ReadExtendedParagraphAtom(stream.Content(record));
         }
 
         return null;
-    }
-
-    /// <summary>Whether a <c>ProgBinaryTag</c> is the one PowerPoint 97+ writes.</summary>
-    private static bool IsProgTag(DffRecordBuffer stream, DffRecordHeader tag)
-    {
-        foreach (DffRecordHeader child in stream.Children(tag))
-        {
-            if (child.Type != PptRecordTypes.CString) continue;
-
-            return string.Equals(
-                DecodeUtf16(stream.Content(child)), ProgTagName, StringComparison.Ordinal);
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -637,7 +681,7 @@ public static class PptTextReader
 
             if (position > content.Length) break;
 
-            entries.Add(new PptExtendedParagraph(blip, numbered, scheme));
+            entries.Add(new PptExtendedParagraph(paragraph, blip, numbered, scheme));
         }
 
         return entries;

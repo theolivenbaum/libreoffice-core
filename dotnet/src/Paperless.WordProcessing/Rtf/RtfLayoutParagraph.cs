@@ -1,6 +1,7 @@
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Text.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Rtf;
 
@@ -27,10 +28,21 @@ namespace Paperless.WordProcessing.Rtf;
 /// </param>
 /// <param name="CaseMap">The case <c>\caps</c> or <c>\scaps</c> draws the run in.</param>
 /// <param name="Highlight">The band <c>\highlight</c> draws behind the run, or null when it has none.</param>
-/// <param name="IsUnderlined">True when one of the <c>\ul…</c> words draws a rule under the run.</param>
+/// <param name="Underline">How the <c>\ul…</c> words in force rule the run — <c>\uldb</c> and
+/// <c>\ululdbwave</c> with two lines and the other fifteen with one.</param>
 /// <param name="IsStruckThrough">True when <c>\strike</c> or <c>\striked</c> draws one through it.</param>
 /// <param name="AutoKerning">
 /// True when a nonzero <c>\kerning</c> asks for the run's pairs to be kerned. Off unless it does.
+/// </param>
+/// <param name="WidthPerCent">
+/// The character width <c>\charscalex</c> states, as a percentage.
+/// <para>
+/// It multiplies every advance in the run rather than adding to it, so it has to survive
+/// <see cref="RtfLayoutRun.MatchesFormatting"/> as well as the uniform-paragraph shortcut: a producer
+/// restates <c>\f0\fs22</c> before every run whether or not anything changed, and the merge is what
+/// keeps those restatements from breaking the shaping context — but a property missing from the
+/// comparison lets a scaled stretch be absorbed into the unscaled run beside it and take its width.
+/// </para>
 /// </param>
 public readonly record struct RtfLayoutRun(
     int Start,
@@ -44,9 +56,10 @@ public readonly record struct RtfLayoutRun(
     Layout.Escapement Escapement = default,
     Layout.PageCaseMap CaseMap = Layout.PageCaseMap.None,
     Colour? Highlight = null,
-    bool IsUnderlined = false,
+    TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
-    bool AutoKerning = false)
+    bool AutoKerning = false,
+    int WidthPerCent = 100)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
@@ -69,9 +82,10 @@ public readonly record struct RtfLayoutRun(
            && Escapement == other.Escapement
            && CaseMap == other.CaseMap
            && Highlight == other.Highlight
-           && IsUnderlined == other.IsUnderlined
+           && Underline == other.Underline
            && IsStruckThrough == other.IsStruckThrough
-           && AutoKerning == other.AutoKerning;
+           && AutoKerning == other.AutoKerning
+           && WidthPerCent == other.WidthPerCent;
 }
 
 /// <summary>
@@ -132,6 +146,11 @@ public readonly record struct RtfLayoutRun(
 /// True when a nonzero <c>\kerning</c> is in force at the paragraph's mark, which is what a paragraph
 /// with no runs of its own is set in and what its label is drawn in.
 /// </param>
+/// <param name="WidthPerCent">
+/// The character width <c>\charscalex</c> states at the paragraph's mark, as a percentage. The mark's,
+/// for the same reason as <paramref name="AutoKerning"/>: a paragraph set end to end in one scaled
+/// style carries no runs at all and is uniform by every test the layout reader makes.
+/// </param>
 public readonly record struct RtfLayoutParagraph(
     string Text,
     ParagraphFormat Format,
@@ -147,7 +166,8 @@ public readonly record struct RtfLayoutParagraph(
     IReadOnlyList<RtfLayoutFrame>? Frames = null,
     IReadOnlyList<Layout.PageFieldSpan>? PageFields = null,
     string? ListMarker = null,
-    bool AutoKerning = false);
+    bool AutoKerning = false,
+    int WidthPerCent = 100);
 
 /// <summary>
 /// A floating frame as RTF states it: a shape's rectangle, its wrap, and the text inside it.
@@ -351,12 +371,22 @@ public sealed record RtfLayoutTable(
 /// False when <c>\trkeep</c> forbade breaking the row across a page — see
 /// <see cref="Layout.PageTableRow.CanSplit"/>.
 /// </param>
+/// <param name="CoveredTopRule">
+/// The widest top rule stated by the cells this row drops because they continue a vertical merge —
+/// charged to the row's height and drawn nowhere. See <see cref="Layout.PageTableRow.CoveredTopRule"/>.
+/// </param>
+/// <param name="CoveredBottomRule">
+/// Their widest bottom rule, which is charged to the band below the row and <em>is</em> drawn, because it
+/// is the merge's own outer edge. See <see cref="Layout.PageTableRow.CoveredBottomRule"/>.
+/// </param>
 public sealed record RtfLayoutRow(
     IReadOnlyList<RtfLayoutCell> Cells,
     Core.Units.Length MinHeight,
     bool IsHeader,
     bool HasExactHeight = false,
-    bool CanSplit = true);
+    bool CanSplit = true,
+    Core.Units.Length CoveredTopRule = default,
+    Core.Units.Length CoveredBottomRule = default);
 
 /// <summary>One cell of an RTF table.</summary>
 /// <param name="Column">The grid column it starts at.</param>

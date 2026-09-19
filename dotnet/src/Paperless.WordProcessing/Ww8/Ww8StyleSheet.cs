@@ -21,15 +21,42 @@ namespace Paperless.WordProcessing.Ww8;
 /// grpprl — that is how a heading style makes its text bold without any run saying so — so reading
 /// only the first half of a paragraph style's definition loses every character property it sets.
 /// </param>
+/// <param name="Sti">
+/// Which of Word's built-in styles this one is, or <see cref="UserStyle"/> for a style Word does not
+/// know. The name cannot answer that question — a document may rename a built-in style or give a
+/// style of its own a built-in name — which is why LibreOffice keys on this number and not on the
+/// name wherever a rule is about a particular built-in style (<c>SwWW8StyInf::GetWWStyleId</c>,
+/// <c>sw/source/filter/ww8/ww8par.hxx</c>:344).
+/// </param>
 public readonly record struct Ww8Style(
     string Name,
     ushort BaseIndex,
     byte Kind,
     ReadOnlyMemory<byte> Properties,
-    ReadOnlyMemory<byte> CharacterProperties)
+    ReadOnlyMemory<byte> CharacterProperties,
+    ushort Sti = Ww8Style.UserStyle)
 {
     /// <summary>The <see cref="BaseIndex"/> value meaning "no parent style".</summary>
     public const ushort NoBaseStyle = 4095;
+
+    /// <summary>
+    /// The <see cref="Sti"/> of a style Word has no built-in identity for.
+    /// </summary>
+    /// <remarks>
+    /// <c>ww::stiUser</c>, 0x0ffe (<c>sw/source/filter/inc/wwstyles.hxx</c>:133) — *"user styles are
+    /// distinguished by name"*. 0x0fff beside it is <c>stiNil</c>, the twelve-bit maximum.
+    /// </remarks>
+    public const ushort UserStyle = 0x0FFE;
+
+    /// <summary>
+    /// The <see cref="Sti"/> of Word's built-in <c>Hyperlink</c> character style.
+    /// </summary>
+    /// <remarks>
+    /// <c>ww::stiHyperlink</c>, 85 (<c>sw/source/filter/inc/wwstyles.hxx</c>:126). Its sibling
+    /// <c>stiHyperlinkFollowed</c> is 86 and is deliberately not named here: the one rule that asks
+    /// about this style tests for the unvisited one alone.
+    /// </remarks>
+    public const ushort HyperlinkStyle = 85;
 
     /// <summary>True for a paragraph style.</summary>
     public bool IsParagraphStyle => Kind == 1;
@@ -251,6 +278,10 @@ public sealed class Ww8StyleSheet
     {
         if (definition.Length < 4) return new Ww8Style(string.Empty, Ww8Style.NoBaseStyle, 0, default, default);
 
+        // The first 16-bit field is the built-in identity in its low twelve bits, with four flags above
+        // it — `fScratch`, `fInvalHeight`, `fHasUpe` and `fMassCopy`, none of which a reader wants.
+        ushort sti = (ushort)(BinaryPrimitives.ReadUInt16LittleEndian(definition) & 0x0FFF);
+
         // The second 16-bit field packs the kind into its low nibble and the base index into the
         // rest, which is why neither can be read as a whole byte.
         ushort kindAndBase = BinaryPrimitives.ReadUInt16LittleEndian(definition[2..]);
@@ -268,8 +299,8 @@ public sealed class Ww8StyleSheet
 
         return kind == 1
             // The PAPX's leading istd is not a sprm; passing it to the walker would desynchronise it.
-            ? new Ww8Style(name, baseIndex, kind, first.Length >= 2 ? first[2..] : default, second)
-            : new Ww8Style(name, baseIndex, kind, default, first);
+            ? new Ww8Style(name, baseIndex, kind, first.Length >= 2 ? first[2..] : default, second, sti)
+            : new Ww8Style(name, baseIndex, kind, default, first, sti);
     }
 
     /// <summary>

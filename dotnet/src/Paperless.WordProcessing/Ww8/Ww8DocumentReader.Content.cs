@@ -597,6 +597,14 @@ public sealed partial class Ww8DocumentReader
                  _styles.ResolveCharacterChain(ParagraphStyleIndexAt(position)))
             format = ApplyCharacterSprms(format, inherited);
 
+        // Which style this CHPX's toggle sprms are stated relative to — the one it names, resolved on
+        // its own, and the paragraph style only when it names none. The layout path carries the reading
+        // and the source; the two resolve character formatting separately, so both have to hold it.
+        ushort? named = CharacterStyleNamedIn(direct);
+        Ww8CharacterFormat toggleBase = named is { } toggleStyle
+            ? StyleToggleFlags(toggleStyle)
+            : format;
+
         // Then the run's own character style, which has to be found before the exception is applied
         // rather than while applying it: the sprm naming the style sits inside the same grpprl as the
         // direct formatting, so a single pass would apply the style's properties over the direct ones
@@ -605,14 +613,16 @@ public sealed partial class Ww8DocumentReader
         // Index zero is skipped rather than resolved. WW8 keeps paragraph and character styles in one
         // table and istd 0 is *Normal*, so resolving it here would lay a paragraph style over the run —
         // which for emphasis is harmless and for anything with a value is not.
-        if (CharacterStyleIndexIn(direct) is var characterStyle and not 0)
+        if (named is { } characterStyle and not 0)
         {
             foreach (ReadOnlyMemory<byte> inherited in
                      _styles.ResolveCharacterChain(characterStyle))
                 format = ApplyCharacterSprms(format, inherited);
+
+            format = WithStatedToggles(format, characterStyle);
         }
 
-        format = ApplyCharacterSprms(format, direct);
+        format = ApplyCharacterSprms(format, direct, toggleBase);
 
         state.FormatCacheValid = end > start;
         state.FormatCacheStart = start;
@@ -638,27 +648,98 @@ public sealed partial class Ww8DocumentReader
         return 0;
     }
 
-    private Ww8CharacterFormat ApplyCharacterSprms(
-        Ww8CharacterFormat format, ReadOnlyMemory<byte> grpprl)
+    /// <summary>
+    /// The toggle attributes a style resolves to on its own — LibreOffice's <c>m_n81Flags</c>.
+    /// </summary>
+    /// <remarks>
+    /// The content path's half of the rule the layout path documents at
+    /// <c>Ww8DocumentReader.Layout.cs</c>'s <c>StyleToggleFormat</c>: a toggle sprm's 0x80/0x81 operand
+    /// is relative to the style the same CHPX names, resolved from nothing through its base chain.
+    /// </remarks>
+    private Ww8CharacterFormat StyleToggleFlags(ushort styleIndex) => StyleToggles(styleIndex).FromNone;
+
+    /// <summary>
+    /// A style's toggle attributes resolved twice, from all-clear and from all-set.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>FromNone</c> is <c>m_n81Flags</c> itself, which is what a run's own toggle sprm is stated
+    /// relative to. The second seed is how "the style states this toggle" is answered without a
+    /// nullable field per attribute: a chain that decides a toggle answers the same either way, and a
+    /// chain that is silent about it hands its seed straight back.
+    /// </para>
+    /// <para>
+    /// Memoised: the walk asks this once per character and a document has a handful of styles.
+    /// </para>
+    /// </remarks>
+    private (Ww8CharacterFormat FromNone, Ww8CharacterFormat FromAll) StyleToggles(ushort styleIndex)
     {
+        if (_contentStyleToggleFlags.TryGetValue(styleIndex, out var cached)) return cached;
+
+        Ww8CharacterFormat none = new();
+        Ww8CharacterFormat all = new()
+        {
+            IsBold = true,
+            IsItalic = true,
+            IsStruckThrough = true,
+            IsHidden = true,
+        };
+
+        foreach (ReadOnlyMemory<byte> inherited in _styles.ResolveCharacterChain(styleIndex))
+        {
+            none = ApplyCharacterSprms(none, inherited);
+            all = ApplyCharacterSprms(all, inherited);
+        }
+
+        _contentStyleToggleFlags[styleIndex] = (none, all);
+        return (none, all);
+    }
+
+    private readonly Dictionary<ushort, (Ww8CharacterFormat FromNone, Ww8CharacterFormat FromAll)>
+        _contentStyleToggleFlags = [];
+
+    /// <summary>Takes the toggle attributes a character style decides, leaving the rest as they were.</summary>
+    private Ww8CharacterFormat WithStatedToggles(Ww8CharacterFormat format, ushort styleIndex)
+    {
+        (Ww8CharacterFormat none, Ww8CharacterFormat all) = StyleToggles(styleIndex);
+        return format with
+        {
+            IsBold = none.IsBold == all.IsBold ? none.IsBold : format.IsBold,
+            IsItalic = none.IsItalic == all.IsItalic ? none.IsItalic : format.IsItalic,
+            IsStruckThrough = none.IsStruckThrough == all.IsStruckThrough
+                ? none.IsStruckThrough
+                : format.IsStruckThrough,
+            IsHidden = none.IsHidden == all.IsHidden ? none.IsHidden : format.IsHidden,
+        };
+    }
+
+    private Ww8CharacterFormat ApplyCharacterSprms(
+        Ww8CharacterFormat format, ReadOnlyMemory<byte> grpprl,
+        Ww8CharacterFormat? toggleBase = null)
+    {
+        // See `StyleToggleFlags`: a toggle's base is one style's resolved value, not the value being
+        // layered onto. With none given the accumulated value stands in, which is what a style chain's
+        // own sprms resolve against.
+        Ww8CharacterFormat toggles = toggleBase ?? format;
+
         foreach (Ww8Sprm sprm in Ww8SprmReader.Read(grpprl))
         {
             switch (sprm.Identifier)
             {
                 case Ww8SprmReader.Ids.Bold:
-                    format = format with { IsBold = sprm.ResolveToggle(format.IsBold) };
+                    format = format with { IsBold = sprm.ResolveToggle(toggles.IsBold) };
                     break;
                 case Ww8SprmReader.Ids.Italic:
-                    format = format with { IsItalic = sprm.ResolveToggle(format.IsItalic) };
+                    format = format with { IsItalic = sprm.ResolveToggle(toggles.IsItalic) };
                     break;
                 case Ww8SprmReader.Ids.Strike:
-                    format = format with { IsStruckThrough = sprm.ResolveToggle(format.IsStruckThrough) };
+                    format = format with { IsStruckThrough = sprm.ResolveToggle(toggles.IsStruckThrough) };
                     break;
                 case Ww8SprmReader.Ids.DoubleStrike:
-                    format = format with { IsStruckThrough = sprm.ResolveToggle(format.IsStruckThrough) };
+                    format = format with { IsStruckThrough = sprm.ResolveToggle(toggles.IsStruckThrough) };
                     break;
                 case Ww8SprmReader.Ids.Vanish:
-                    format = format with { IsHidden = sprm.ResolveToggle(format.IsHidden) };
+                    format = format with { IsHidden = sprm.ResolveToggle(toggles.IsHidden) };
                     break;
                 case Ww8SprmReader.Ids.IsDeleted:
                     format = format with { IsDeleted = sprm.ResolveToggle(format.IsDeleted) };

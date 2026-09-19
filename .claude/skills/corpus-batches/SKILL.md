@@ -1295,3 +1295,170 @@ done
 And do not let a single unreproduced failure pass silently as "flaky". Say it happened, say it
 did not reproduce, and say you could not name it — a project this dependent on measured counts
 cannot afford a habit of explaining away the ones that disagree.
+
+## A waiter that greps for the job it is waiting on will never exit
+
+`until ! pgrep -f 'confine.sh' >/dev/null; do sleep 20; done` looks obviously correct and
+cannot terminate. `pgrep -f` matches against the **full command line of every process**,
+including the waiting shell's own — and that command line contains the string `confine.sh`.
+So the waiter matches itself, forever, whether or not the sweep is running.
+
+Ten of these accumulated in one session before anyone noticed, because the failure is silent:
+the waiter simply never reports, which looks exactly like a sweep that is still going. They
+were found only when something else asked why background work had been pending for an hour.
+
+Two ways out, either is fine:
+
+```sh
+# 1. Wait on a marker the job itself writes, not on the job's name.
+until [ -f "$OUT/DONE" ]; do sleep 20; done
+
+# 2. If you must match a name, exclude your own process.
+until ! pgrep -f 'confine[.]sh' | grep -qv "^$$\$"; do sleep 20; done
+```
+
+The bracket trick — `confine[.]sh` — is the habitual `ps | grep` dodge and it does **not**
+help here, because the waiter's command line contains the bracketed pattern too. Only the
+marker file or an explicit self-exclusion works.
+
+The general form is the one this skill keeps meeting: **before believing a measurement, check
+it is not a fact about the instrument.** A waiter that never fires and a sweep that never
+finishes look identical from outside.
+
+## A truncated test run announces itself as a pass
+
+Worse than the lost-detail problem above, and seen twice in one session: `dotnet test` printed
+
+```
+Passed!  - Failed: 0, Passed:  870, … - Paperless.WordProcessing.Tests.dll
+```
+
+and later, from the same tree, `Passed! - Failed: 0, Passed: 1885`. `--list-tests` says 1885. The
+870 run did not fail — **it stopped early and reported the tests it had got through as a clean
+pass.** Nothing in the output says so. A round that runs the suite once, sees `Failed: 0`, and
+moves on has verified nothing.
+
+The same fault has a second face: a suite that never ran at all. One round's `tests.log` stopped
+at its `== Fidelity` line on an `NU1900` restore error, and its write-up reported
+"542 passed / 10 failed — the briefed baseline exactly". The number was correct. It had been
+*asserted*, because the expected value was known in advance. A baseline you already know is a
+baseline you can accidentally write down without measuring.
+
+So:
+
+- **Check the total, not just the failure count.** Know what N should be for each project and
+  compare; `Failed: 0` out of the wrong N is not a pass.
+- **Check the run reached the last project.** A suite that ends before Fidelity has told you
+  nothing about Fidelity.
+- **Never write down an expected number you did not read out of this run's output.** If the log
+  does not contain it, say the run did not complete.
+
+The general form, again: *before believing a measurement, check it is not a fact about the
+instrument.* Here the instrument reports success for work it never did.
+
+**It happens under contention, which is exactly when you are least likely to check.** The
+instance that produced this note came back `Passed! Failed: 0, Passed: 860` for a project whose
+real total is 1938, in a whole-solution run taken while two other rounds were building and
+rendering on the same machine — the same run showed fidelity at 18m42s and presentations at
+15m49s against their usual 3-5 minutes. Re-run alone, the project passed 1938 of 1938 in 45
+seconds. So when a run is slow because the machine is busy, **check every total**, and prefer
+re-running the one project that looks short over re-running the solution.
+
+**Contention corrupts a measurement in both directions, and the other one looks worse.** The
+same conditions that truncate a run also produce *false failures*: a whole-solution run under a
+concurrent round reported fidelity at **540 / 12**, the two extras being
+`LineBreakPositionTests` and `SheetDecorationComparisonTests(sheet-decor-xls.xls)` — neither
+related to the merge under test, and both invoking `soffice`, which the other round was also
+driving. Re-run in isolation: 26 of 26. Re-run as a whole project alone: **542 / 10 with exactly
+the ten known names.**
+
+A false failure is more dangerous than a false pass here, because the tempting response is to
+go and "fix" a defect that does not exist, or to revert a good merge. The discipline is the
+same either way and it is *not* to shrug and call it flaky:
+
+- **Name the failures.** "Two extra failures" is not a report; the two test names are.
+- **Reproduce alone before believing either outcome** — the failure or the pass.
+- **Ask whether the failing tests have anything to do with the change.** Two words-and-sheets
+  tests failing on a slides-only merge is the tell.
+- Only then say what happened, including that it happened.
+
+**And a third mode: the run is killed and reports nothing at all.** Under memory pressure a
+whole-solution run came back with `Test Run Aborted` for one project and **exit code 137** for
+another — killed at 1063 of 1938 — and **zero reported failures** for either. Re-run alone, both
+were green at full count. So the three modes are: a short run reporting a clean pass, a loaded
+run inventing failures, and a killed run reporting neither. All three are invisible if you read
+only `Failed:`.
+
+The single check that catches all three is the same one: **know what N should be for every
+project and compare it.** A project that is missing from the output entirely is the loudest
+signal of the three and the easiest to scroll past.
+
+## A killed round leaves a published binary that may contain the change you are measuring
+
+When a container restart kills a round mid-flight, its scratch directory survives — including
+any `cli-base` it had published to score against. **That directory is not necessarily the base.**
+A round resumed after a restart found its inherited `cli-base` already contained the pivot code
+it was about to measure; every before/after figure taken against it would have been
+base-against-base, and would have shown a clean nil reach for a change that in fact moves
+225.44 of ink to 0.07.
+
+It reads as the most reassuring possible result — *no regressions anywhere* — which is what
+makes it dangerous.
+
+So after any restart, **rebuild both binaries before scoring anything**, and prefer a base you
+published yourself in this run over one you found on disk. If you must reuse one, check it: run
+a document you know the change moves and confirm the base binary does *not* move it.
+
+## The reference is not reproducible on a few documents, and the few are not a fixed list
+
+Three full-corpus gates at different commits, same binary (26.2.4.2), same corpus, same
+`RENDER_TIMEOUT`, three workers, all within one UTC day. The **reference** leg should be identical
+between them, because nothing about it changed.
+
+Two consecutive pairs were censused, and this is the whole of the result:
+
+| | pair 1 (r109→r111) | pair 2 (r111→r112) |
+|---|---|---|
+| reference renders compared | 947 | 947 |
+| textually different | **4** | **4** |
+| different in the character count (column 9) | 2 | 2 |
+| largest such difference | 3 | **74** |
+
+**The four are not the same four.** Union over both pairs is **five**:
+
+- `SIL_TDB648` — both pairs, oscillating between exactly two counts, 30896 ↔ 30899.
+- `PBN Matrix NAAs (V01)` — both pairs, text layer differs, character count unchanged.
+- `ans_mappings_of_eccairs_terms` — both pairs, same shape.
+- `alle einzeln` — **pair 1 only**, +2: it wrote `Janßen,` in one run and `Janssen,` in the other,
+  twice. A font resolving differently between runs, the same class as the tarball confounds.
+- `047_Date_tracker_Gantt_chart` — **pair 2 only**, +74, with the PDF itself 105167 against 105422
+  bytes and `pdftotext` emitting `addadd`/`thisthis` in one run and clean text in the other.
+
+`probes/gate-r111/ref-reproducibility.tsv` and `…-pair2.tsv`.
+
+### A verdict can be at risk, and the first write-up of this said it could not
+
+`047`'s **74 exceeds its own gate band.** The band is `d > ref*0.02 && d > 15`, so on a reference
+of 3367–3441 characters it is 67.3–68.8, and the reference moved further than that on its own.
+Nothing actually changed verdict, because that document already fails on pages (5/8) — which is
+luck, not a property of the gate. The earlier claim here that "no verdict was ever at risk" held
+only for the two documents pair 1 happened to catch.
+
+It carries 27 `TODAY()`, but both runs were the same UTC day, so the volatile-date confound is not
+the explanation.
+
+### What this licenses, and what it still does not
+
+The tempting overreaction is to declare a corpus-wide noise floor and stop trusting small deltas.
+That remains wrong and remains the more expensive error: **at least 942 of 947 reproduce their
+character count exactly in any given pair**, so a one-character improvement on an ordinary
+document is real, and discarding small deltas everywhere would throw away findings.
+
+The narrower and correct rule is about *procedure* rather than about a list:
+
+- **A per-document delta is trustworthy only once the reference has been rendered twice for that
+  document.** The five above are a lower bound from three runs, not a checklist to consult.
+- A round crediting itself for a change on one document should render the reference twice before
+  believing the number. A confinement over a whole track is much safer, because a handful of
+  unstable documents cannot move a track total far — but a single-document claim is exposed.
+

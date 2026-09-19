@@ -29,6 +29,8 @@ public sealed class SheetCellFormats
     private readonly Dictionary<int, int> _rows;
     private readonly Dictionary<int, int> _columns;
     private readonly int _sheet;
+    private readonly Dictionary<(int Row, int Column), SheetConditionalText> _conditional;
+    private readonly Dictionary<(int Row, int Column), SheetPivotStyle> _pivot;
 
     private SheetCellFormats(
         List<SheetCellFormat> pool,
@@ -37,7 +39,9 @@ public sealed class SheetCellFormats
         Dictionary<int, int> rows,
         Dictionary<int, int> columns,
         int sheet,
-        int lastAllocatedColumn)
+        int lastAllocatedColumn,
+        Dictionary<(int, int), SheetConditionalText>? conditional = null,
+        Dictionary<(int, int), SheetPivotStyle>? pivot = null)
     {
         _pool = pool;
         _cells = cells;
@@ -46,11 +50,66 @@ public sealed class SheetCellFormats
         _columns = columns;
         _sheet = sheet;
         LastAllocatedColumn = lastAllocatedColumn;
+        _conditional = conditional ?? [];
+        _pivot = pivot ?? [];
     }
 
     /// <summary>A sheet whose every cell is in the default format.</summary>
     public static SheetCellFormats Empty { get; } =
         new([SheetCellFormat.Default], [], new SheetBlockIndex(), [], [], 0, -1);
+
+    /// <summary>
+    /// The same formats with a conditional-format overlay laid over them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A new instance sharing the pool rather than a setter, for one hard reason and one soft
+    /// one. <see cref="Empty"/> is a shared singleton that a reader returns whenever a sheet
+    /// states no formats at all, and a sheet whose only text formatting is a conditional rule is
+    /// exactly that sheet — mutating it would put one workbook's rules on every other document
+    /// in the process. And the store is otherwise immutable once built, which is what lets a
+    /// layout be shared between the pages that draw it.
+    /// </para>
+    /// <para>
+    /// The overlay is asked for on every <see cref="At"/>, so it is guarded by a count rather
+    /// than by a lookup: a plain workbook pays one integer comparison per cell per page.
+    /// </para>
+    /// </remarks>
+    /// <param name="conditional">What each cell's matching rule changes about its text.</param>
+    public SheetCellFormats WithConditionalText(
+        Dictionary<(int Row, int Column), SheetConditionalText> conditional)
+    {
+        ArgumentNullException.ThrowIfNull(conditional);
+
+        return conditional.Count == 0
+            ? this
+            : new SheetCellFormats(
+                _pool, _cells, _blocks, _rows, _columns, _sheet, LastAllocatedColumn, conditional,
+                _pivot);
+    }
+
+    /// <summary>
+    /// The same formats with a pivot table's generated cell styles laid over them.
+    /// </summary>
+    /// <remarks>
+    /// A second overlay rather than a wider <see cref="SheetConditionalText"/>, because the two
+    /// are different layers of the same cell and can both apply: a conditional format is
+    /// evaluated over whatever the cell resolves to, which on a pivot's output is the generated
+    /// style. A new instance for the reason <see cref="WithConditionalText"/> gives — a pivot
+    /// sheet very often states no text formatting at all and is therefore holding the shared
+    /// <see cref="Empty"/>.
+    /// </remarks>
+    /// <param name="pivot">What each cell's generated pivot style changes about its text.</param>
+    public SheetCellFormats WithPivotStyles(Dictionary<(int Row, int Column), SheetPivotStyle> pivot)
+    {
+        ArgumentNullException.ThrowIfNull(pivot);
+
+        return pivot.Count == 0
+            ? this
+            : new SheetCellFormats(
+                _pool, _cells, _blocks, _rows, _columns, _sheet, LastAllocatedColumn, _conditional,
+                pivot);
+    }
 
     /// <summary>
     /// The last column the sheet <em>materialises</em>, or -1 when it materialises none.
@@ -129,6 +188,22 @@ public sealed class SheetCellFormats
     /// <param name="row">The zero-based row.</param>
     /// <param name="column">The zero-based column.</param>
     public SheetCellFormat At(int row, int column)
+    {
+        SheetCellFormat stated = Stated(row, column);
+
+        // The generated style first: a pivot's output is what the cell resolves to before any
+        // rule is evaluated over it, and a conditional format wins over both.
+        if (_pivot.Count > 0 && _pivot.TryGetValue((row, column), out SheetPivotStyle generated))
+            stated = generated.Over(stated);
+
+        return _conditional.Count > 0
+               && _conditional.TryGetValue((row, column), out SheetConditionalText rule)
+            ? rule.Over(stated)
+            : stated;
+    }
+
+    /// <summary>What a cell states, before any conditional format is applied over it.</summary>
+    private SheetCellFormat Stated(int row, int column)
     {
         if (_cells.TryGetValue((row, column), out int index)) return _pool[index];
 
@@ -306,9 +381,18 @@ public sealed class SheetCellFormats
         }
 
         /// <summary>Records the format everything else falls back to.</summary>
+        /// <remarks>
+        /// Pool index 0 — <see cref="SheetCellFormat.Default"/> — is a legitimate answer here and
+        /// not "no answer", which is why this does not carry the <c>index &lt;= 0</c> guard the
+        /// cell, row and column setters do. SpreadsheetML states the sheet default twice: once as
+        /// the workbook's <c>Normal</c> cell style and again, on a sheet that has one, as a
+        /// <c>&lt;col&gt;</c> spanning to the last column, and the second must be able to take the
+        /// plain default back off the first.
+        /// </remarks>
+        /// <param name="index">The pool index, from <see cref="Intern"/>.</param>
         public void SetSheetDefault(int index)
         {
-            if (index > 0) _sheet = index;
+            if (index >= 0) _sheet = index;
         }
 
         /// <summary>True when nothing but the default has been recorded.</summary>

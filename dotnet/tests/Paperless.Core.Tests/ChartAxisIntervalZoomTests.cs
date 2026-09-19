@@ -33,6 +33,15 @@ namespace Paperless.Core.Tests;
 /// secondary value axis 26.2.4.2 labels <c>60 65 70 75 80</c> and which this tree labelled
 /// <c>62 64 … 80</c> — a cap of 10 where the reference's is 8, from that rounding alone.
 /// </para>
+/// <para>
+/// <strong>Round 110 removed the reason the sheet path needs this, and kept the property and
+/// these tests.</strong> <c>SheetChart</c> no longer scales the type: it lays the chart out on
+/// the chart's own page — the anchor before the sheet's zoom, which is what
+/// <c>&lt;chart:chart svg:width&gt;</c> says the reference does — and scales the finished
+/// drawing, so the zoom reaches no measurement at all and <see cref="ChartPlot.TypeScale"/> is
+/// 1 everywhere. What is asserted below is still exactly true of the property, and it is the
+/// statement of the hazard for any caller that does scale a chart's type.
+/// </para>
 /// </remarks>
 public class ChartAxisIntervalZoomTests
 {

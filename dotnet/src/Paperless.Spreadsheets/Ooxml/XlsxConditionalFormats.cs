@@ -43,10 +43,26 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// The binary is the ground truth and the tree is reference material.
 /// </para>
 /// <para>
-/// Only <c>colorScale</c> is read. <c>expression</c>, <c>cellIs</c>, <c>dataBar</c>,
-/// <c>iconSet</c> and the six text predicates reach 60 further documents between them and need a
-/// formula evaluator, a comparison, or a bar and icon geometry; the census is in
-/// <c>probes/sheets-r58/prediction.md</c>.
+/// <c>colorScale</c> is read here and <c>dataBar</c> beside it, in
+/// <see cref="XlsxDataBars"/>, which this calls with the same walk of the sheet's numbers.
+/// Every rule naming a <c>dxfId</c> — <c>expression</c>, <c>cellIs</c>, <c>containsText</c>,
+/// <c>endsWith</c>, <c>containsBlanks</c>, <c>notContainsBlanks</c> and
+/// <c>duplicateValues</c> — is <see cref="XlsxConditionalStyles"/>'s. The division is the
+/// reference's: these two are <c>ScColorScaleFormat</c> and <c>ScDataBarFormat</c> in
+/// <c>sc/source/core/data/colorscale.cxx</c>, they state no format, and they compute their
+/// answer from the numbers in their own range.
+/// </para>
+/// <para>
+/// <c>iconSet</c> is read beside them, in <see cref="XlsxIconSets"/>, and it is the one of the
+/// three whose glyph is not in the file: <c>drawIconSets</c>
+/// (<c>sc/source/ui/view/output.cxx</c>:960-989) paints an icon-theme asset into the cell's
+/// bottom-left corner at <strong>the cell's own font height</strong>. Which asset is entirely
+/// decided by the file, and this tree draws the seven the corpus reaches as vector paths
+/// (<see cref="SheetIconArtwork"/>). Censused 2026-09-11 over every corpus document that opens as
+/// an OPC spreadsheet: <strong>20 rules in 10 documents</strong> — 2 in the main namespace and 18
+/// stated only in the <c>x14</c> extension list, in two disjoint sets of documents — and
+/// 26.2.4.2's own renderings of those ten draw <strong>60 icons over 1549 pt²</strong> in seven of
+/// them.
 /// </para>
 /// </remarks>
 internal static class XlsxConditionalFormats
@@ -72,10 +88,19 @@ internal static class XlsxConditionalFormats
         if (worksheet is null) return;
 
         List<Rule> rules = ReadRules(worksheet, styles, theme);
-        if (rules.Count == 0) return;
+        bool bars = XlsxDataBars.AnyStated(worksheet);
+        bool icons = XlsxIconSets.AnyStated(worksheet);
+        if (rules.Count == 0 && !bars && !icons) return;
 
+        // One walk of the sheet's numbers for all three families: a scale, a bar and an icon set
+        // each resolve their stops over the same numbers in their own range, and the walk is the
+        // expensive half.
         Dictionary<(int Row, int Column), double> numbers = ReadNumbers(worksheet);
         if (numbers.Count == 0) return;
+
+        if (bars) XlsxDataBars.Apply(formatting, worksheet, styles, theme, numbers);
+        if (icons) XlsxIconSets.Apply(formatting, worksheet, numbers);
+        if (rules.Count == 0) return;
 
         // Highest priority first, and a lower `priority` attribute is the higher priority. It is
         // priority rather than document order that decides, measured with a discriminating pair:
@@ -209,7 +234,7 @@ internal static class XlsxConditionalFormats
     /// even count is the mean of the middle pair. Twelve values 93…170 give 131.5, which is what
     /// puts <c>003_advanced_excel_pie</c>'s seventh cell just past the yellow stop.
     /// </remarks>
-    private static double Percentile(List<double> sorted, double fraction)
+    internal static double Percentile(List<double> sorted, double fraction)
     {
         fraction = Math.Min(1.0, fraction);
         if (fraction < 0) return sorted[0];
@@ -312,7 +337,7 @@ internal static class XlsxConditionalFormats
     /// A single cell is a range of one, and a reference may be absolute — <c>$C$5</c> — which
     /// means nothing here because nothing is being copied.
     /// </remarks>
-    private static List<SheetRange> ParseSqref(string? sqref)
+    internal static List<SheetRange> ParseSqref(string? sqref)
     {
         List<SheetRange> ranges = [];
         if (string.IsNullOrWhiteSpace(sqref)) return ranges;
@@ -341,7 +366,7 @@ internal static class XlsxConditionalFormats
         return ranges;
     }
 
-    private static double ParseValue(string? value)
+    internal static double ParseValue(string? value)
         => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
             ? parsed
             : 0;

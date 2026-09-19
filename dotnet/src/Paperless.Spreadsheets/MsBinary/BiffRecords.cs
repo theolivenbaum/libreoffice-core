@@ -77,6 +77,19 @@ public static class BiffRecords
     /// <summary>A hyperlink over a range of cells, BIFF8 only.</summary>
     public const ushort HLink = 0x01B8;
 
+    /// <summary>
+    /// A <c>CONDFMT</c> record: the ranges one conditional format covers, and how many
+    /// <see cref="Cf"/> records follow it.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_ID_CONDFMT</c>, <c>sc/source/filter/inc/xlcontent.hxx</c>:54. BIFF8 only.
+    /// </remarks>
+    public const ushort CondFmt = 0x01B0;
+
+    /// <summary>A <c>CF</c> record: one rule of the conditional format the last <c>CONDFMT</c> opened.</summary>
+    /// <remarks><c>EXC_ID_CF</c>, the same header, <c>:55</c>.</remarks>
+    public const ushort Cf = 0x01B1;
+
     /// <summary>The workbooks a 3D reference can name; <c>0x0401</c> means this one.</summary>
     public const ushort SupBook = 0x01AE;
 

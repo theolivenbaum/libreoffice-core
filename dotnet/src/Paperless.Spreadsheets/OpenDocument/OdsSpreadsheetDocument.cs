@@ -88,6 +88,8 @@ public sealed class OdsSpreadsheetDocument : IPaginatedDocument
         {
             (SheetPrintSetup setup, SheetGrid grid) = OdsPrintSetup.Read(document.File, table);
             (SheetCellFormats formats, SheetRichText rich) = OdsCellFormats.Read(document.File, table);
+            formats = formats.WithConditionalText(
+                OdsConditionalText.Read(document.File.Styles, table));
             ContentSection? section = sections.FirstOrDefault(s => s.Index == index);
 
             sheets.Add(new SheetLayout
@@ -100,6 +102,8 @@ public sealed class OdsSpreadsheetDocument : IPaginatedDocument
                 Cells = section?.Children.OfType<ContentTable>().FirstOrDefault(),
                 StatedMerges = OdsMerges.Read(table),
                 HyperlinkRanges = OdsMerges.ReadHyperlinks(table),
+                ConditionalRanges = OdsConditionalFormats.ReadRanges(table),
+                Notes = setup.PrintsNotes ? OdsNotes.Read(table) : SheetNotes.Empty,
                 Formatting = OdsCellDecoration.Read(document.File.Styles, table),
                 Formats = formats,
                 RichText = rich,

@@ -1,0 +1,178 @@
+  Determining projects to restore...
+  Restored /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/Paperless.Fidelity.Tests.csproj (in 680 ms).
+  14 of 15 projects are up-to-date for restore.
+  Paperless.Core -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Core/bin/Release/net10.0/Paperless.Core.dll
+  Paperless.Containers -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Containers/bin/Release/net10.0/Paperless.Containers.dll
+  Paperless.Markup -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Markup/bin/Release/net10.0/Paperless.Markup.dll
+  Paperless.Text -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Text/bin/Release/net10.0/Paperless.Text.dll
+  Paperless.Vector -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Vector/bin/Release/net10.0/Paperless.Vector.dll
+  Paperless.Rendering -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Rendering/bin/Release/net10.0/Paperless.Rendering.dll
+  Paperless.OpenDocument -> /home/user/wt-sheetpivot/dotnet/src/Paperless.OpenDocument/bin/Release/net10.0/Paperless.OpenDocument.dll
+  Paperless.MsBinary -> /home/user/wt-sheetpivot/dotnet/src/Paperless.MsBinary/bin/Release/net10.0/Paperless.MsBinary.dll
+  Paperless.Ooxml -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Ooxml/bin/Release/net10.0/Paperless.Ooxml.dll
+  Paperless.WordProcessing -> /home/user/wt-sheetpivot/dotnet/src/Paperless.WordProcessing/bin/Release/net10.0/Paperless.WordProcessing.dll
+  Paperless.Presentations -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Presentations/bin/Release/net10.0/Paperless.Presentations.dll
+  Paperless.Spreadsheets -> /home/user/wt-sheetpivot/dotnet/src/Paperless.Spreadsheets/bin/Release/net10.0/Paperless.Spreadsheets.dll
+  Paperless -> /home/user/wt-sheetpivot/dotnet/src/Paperless/bin/Release/net10.0/Paperless.dll
+  Paperless.TestKit -> /home/user/wt-sheetpivot/dotnet/tests/Paperless.TestKit/bin/Release/net10.0/Paperless.TestKit.dll
+  Paperless.Fidelity.Tests -> /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/bin/Release/net10.0/linux-x64/Paperless.Fidelity.Tests.dll
+Test run for /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/bin/Release/net10.0/linux-x64/Paperless.Fidelity.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:14:44.29]     Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.fodt") [FAIL]
+  Failed Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.fodt") [4 s]
+  Error Message:
+   Shouldly.ShouldAssertException : Math.Abs(drawn[i].Left - (rendered[i].Left - PdfPenOffsetPoints))
+    should be less than or equal to
+0.1d
+    but was
+0.1287086614173205d
+
+Additional Info:
+    list-label-overrun.fodt: word 4 ("than") starts at 117.571 pt drawn, 117.442 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs:line 167
+   at System.RuntimeMethodHandle.InvokeMethod(ObjectHandleOnStack target, Void** arguments, ObjectHandleOnStack sig, BOOL isConstructor, ObjectHandleOnStack result)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+[xUnit.net 00:14:47.91]     Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.odt") [FAIL]
+  Failed Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.odt") [3 s]
+  Error Message:
+   Shouldly.ShouldAssertException : Math.Abs(drawn[i].Left - (rendered[i].Left - PdfPenOffsetPoints))
+    should be less than or equal to
+0.1d
+    but was
+0.1287086614173205d
+
+Additional Info:
+    list-label-overrun.odt: word 4 ("than") starts at 117.571 pt drawn, 117.442 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs:line 167
+   at InvokeStub_TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:14:52.17]     Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.docx") [FAIL]
+  Failed Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.docx") [4 s]
+  Error Message:
+   Shouldly.ShouldAssertException : Math.Abs(drawn[i].Left - (rendered[i].Left - PdfPenOffsetPoints))
+    should be less than or equal to
+0.1d
+    but was
+0.1287086614173205d
+
+Additional Info:
+    list-label-overrun.docx: word 4 ("than") starts at 117.571 pt drawn, 117.442 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs:line 167
+   at InvokeStub_TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:14:54.79]     Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.doc") [FAIL]
+  Failed Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(fileName: "list-label-overrun.doc") [2 s]
+  Error Message:
+   Shouldly.ShouldAssertException : Math.Abs(drawn[i].Left - (rendered[i].Left - PdfPenOffsetPoints))
+    should be less than or equal to
+0.1d
+    but was
+0.1287086614173205d
+
+Additional Info:
+    list-label-overrun.doc: word 4 ("than") starts at 117.571 pt drawn, 117.442 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs:line 167
+   at InvokeStub_TabStopComparisonTests.AListLabelsTabAdvancesToLibreOfficesStop(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:16:02.71]     Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.fodt") [FAIL]
+  Failed Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.fodt") [4 s]
+  Error Message:
+   Shouldly.ShouldAssertException : => Math.Abs(actual.Points - expectedPoints)
+    should be less than or equal to
+0.5d
+    but was
+0.519755905511829d
+
+Additional Info:
+    paginated.fodt: page 1, line 1 ("Section 1. kerning advance rasteriser layout ligature layout common advance add pay because separate"): right: 530.423 pt drawn, 529.903 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.PageDrawingComparisonTests.Close(Length actual, Double expectedPoints, String what) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 244
+   at Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 127
+   at System.RuntimeMethodHandle.InvokeMethod(ObjectHandleOnStack target, Void** arguments, ObjectHandleOnStack sig, BOOL isConstructor, ObjectHandleOnStack result)
+   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
+[xUnit.net 00:16:09.24]     Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.docx") [FAIL]
+  Failed Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.docx") [6 s]
+  Error Message:
+   Shouldly.ShouldAssertException : => Math.Abs(actual.Points - expectedPoints)
+    should be less than or equal to
+0.5d
+    but was
+0.519755905511829d
+
+Additional Info:
+    paginated.docx: page 1, line 1 ("Section 1. kerning advance rasteriser layout ligature layout common advance add pay because separate"): right: 530.423 pt drawn, 529.903 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.PageDrawingComparisonTests.Close(Length actual, Double expectedPoints, String what) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 244
+   at Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 127
+   at InvokeStub_PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:16:13.34]     Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.doc") [FAIL]
+  Failed Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.doc") [4 s]
+  Error Message:
+   Shouldly.ShouldAssertException : => Math.Abs(actual.Points - expectedPoints)
+    should be less than or equal to
+0.5d
+    but was
+0.519755905511829d
+
+Additional Info:
+    paginated.doc: page 1, line 1 ("Section 1. kerning advance rasteriser layout ligature layout common advance add pay because separate"): right: 530.423 pt drawn, 529.903 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.PageDrawingComparisonTests.Close(Length actual, Double expectedPoints, String what) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 244
+   at Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 127
+   at InvokeStub_PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:16:17.65]     Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.rtf") [FAIL]
+  Failed Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(fileName: "paginated.rtf") [4 s]
+  Error Message:
+   Shouldly.ShouldAssertException : => Math.Abs(actual.Points - expectedPoints)
+    should be less than or equal to
+0.5d
+    but was
+0.519755905511829d
+
+Additional Info:
+    paginated.rtf: page 1, line 1 ("Section 1. kerning advance rasteriser layout ligature layout common advance add pay because separate"): right: 530.423 pt drawn, 529.903 pt rendered
+  Stack Trace:
+     at Paperless.Fidelity.Tests.PageDrawingComparisonTests.Close(Length actual, Double expectedPoints, String what) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 244
+   at Paperless.Fidelity.Tests.PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(String fileName) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs:line 127
+   at InvokeStub_PageDrawingComparisonTests.EveryLineIsDrawnWhereLibreOfficeDrawsIt(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:23:31.21]     Paperless.Fidelity.Tests.SheetDrawingComparisonTests.APictureIsDrawnWhereLibreOfficeDrawsIt(name: "sheet-rich-text.xlsx") [FAIL]
+  Failed Paperless.Fidelity.Tests.SheetDrawingComparisonTests.APictureIsDrawnWhereLibreOfficeDrawsIt(name: "sheet-rich-text.xlsx") [2 s]
+  Error Message:
+   Shouldly.ShouldAssertException : mine.Box.Width
+    should be within
+0.1d
+    of
+94.904d
+    but was
+95.074d
+
+Additional Info:
+    sheet-rich-text.xlsx: picture 1 on page 3: width
+  Stack Trace:
+     at Paperless.Fidelity.Tests.SheetDrawingComparisonTests.APictureIsDrawnWhereLibreOfficeDrawsIt(String name) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/SheetDrawingComparisonTests.cs:line 108
+   at InvokeStub_SheetDrawingComparisonTests.APictureIsDrawnWhereLibreOfficeDrawsIt(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+[xUnit.net 00:23:37.26]     Paperless.Fidelity.Tests.JustificationShrinkComparisonTests.TheParagraphBreaksWhereLibreOfficeBreaksIt(document: "justify-shrink-2013.docx") [FAIL]
+  Failed Paperless.Fidelity.Tests.JustificationShrinkComparisonTests.TheParagraphBreaksWhereLibreOfficeBreaksIt(document: "justify-shrink-2013.docx") [2 s]
+  Error Message:
+   Shouldly.ShouldAssertException : Math.Abs(ours[i] - reference[i])
+    should be less than or equal to
+1.5d
+    but was
+30.50205511811025d
+
+Additional Info:
+    justify-shrink-2013.docx line 5 ends at 83.20 pt against LibreOffice's 113.70 pt
+  Stack Trace:
+     at Paperless.Fidelity.Tests.JustificationShrinkComparisonTests.TheParagraphBreaksWhereLibreOfficeBreaksIt(String document) in /home/user/wt-sheetpivot/dotnet/tests/Paperless.Fidelity.Tests/JustificationShrinkComparisonTests.cs:line 99
+   at InvokeStub_JustificationShrinkComparisonTests.TheParagraphBreaksWhereLibreOfficeBreaksIt(Object, Span`1)
+   at System.Reflection.RuntimeMethodInfo.Invoke(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
+
+Failed!  - Failed:    10, Passed:   542, Skipped:     0, Total:   552, Duration: 24 m 14 s - Paperless.Fidelity.Tests.dll (net10.0)

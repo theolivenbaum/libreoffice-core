@@ -73,47 +73,123 @@ public sealed record PaginationOptions
     public bool CapturesAnchoredObjectsOnPage { get; init; } = true;
 
     /// <summary>
-    /// Whether a frame stated against a <em>margin band</em>, and wrapped around by the text, is
-    /// pulled back inside the page's body.
+    /// Whether an anchored object that <c>DoNotCaptureDrawObjsOnPage</c> does <em>not</em> exempt is
+    /// pulled back inside its page anyway.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Two C++ facts meet here and neither is the flag above.
-    /// <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
-    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801) is
-    /// <c>bDisablePositioning &amp;&amp; bIsWrapThrough</c> — a conjunction — so
-    /// <c>DisableOffPagePositioning</c> exempts a <em>wrap-through</em> object and nothing else, and a
-    /// DOCX frame stating <c>wp:wrapSquare</c> is captured although
-    /// <see cref="CapturesAnchoredObjectsOnPage"/> is off for that format. And the area it is captured
-    /// in is not the sheet: <c>ImplAdjustVertRelPos</c>
-    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:562-573) narrows it to the
-    /// page body frame under its own comment — <em>"Instead of using the top of the page as the
-    /// vertical limit, DOCX compatibilityMode 15 started to use the text body as the vertical limit for
-    /// most paragraph or line-oriented anchored non-wrapthrough objects"</em> — for every vertical
-    /// relation except <c>PAGE_FRAME</c> and <c>PAGE_PRINT_AREA</c> (:564-565).
+    /// The flag above is only one term of the C++ condition.
+    /// <c>SwAnchoredObjectPosition</c>'s constructor
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:125-144) sets
+    /// </para>
+    /// <code>
+    /// mbDoNotCaptureAnchoredObj = bConsidered &amp;&amp; !mbFollowTextFlow &amp;&amp; DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE
+    /// </code>
+    /// <para>
+    /// and <c>bConsidered</c> is <c>bWrapThrough &amp;&amp; !bTextBox</c> for a fly and
+    /// <c>bWrapThrough || !bTextBox</c> for a draw object — see <see cref="FrameObjectKind"/>, which
+    /// carries the asymmetry and its census. So a DOCX picture and a DOCX shape carrying a text box are
+    /// captured unless they wrap through, and only a shape with <em>no</em> text box escapes whatever
+    /// its wrap. A frame stating <c>wp:wrapSquare</c> is captured although
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> is off for its format.
     /// </para>
     /// <para>
-    /// <b>This is deliberately narrower than that rule, and the narrowing is measured rather than
-    /// cautious.</b> The C++ captures every non-wrap-through content-anchored frame, whatever its
-    /// origin. Applied that widely to this tree it moves <b>10 of the 338</b> words renderings and is
-    /// net worse against 26.2.4.2: the three documents this exists for improve (mean page ink
-    /// 1.347 → 0.588, 2.302 → 0.868, 3.065 → 2.441), and <c>b053-19</c> goes 11.254 → 19.508 and
-    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524. The likely missing half is
-    /// <c>bCheckBottom = !DoesObjFollowsTextFlow()</c>
-    /// (<c>tocntntanchoredobjectposition.cxx</c>:457): a frame that follows the text flow has its
-    /// <em>bottom</em> correction skipped, and <c>PROP_FOLLOW_TEXT_FLOW</c> is written only for an
-    /// anchor inside a table (<c>GraphicImport.cxx</c>:1316-1318, :1859-1861), so the pool default
-    /// decides everywhere else. Establishing that is its own round; until then the capture is applied
-    /// where this round measured it — the two margin bands — and nowhere else, which regresses nothing
-    /// because those two origins reach nothing that was placed before.
+    /// <b>The wide rule was measured as net worse once and the area was why.</b>
+    /// <c>probes/frame-area-r85</c> applied the capture to every non-wrap-through content anchor and
+    /// held it inside the page <em>body</em> at every origin: three genograms improved and
+    /// <c>b053-19</c> went 11.254 → 19.508 of mean page ink and
+    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524, so it was narrowed to the two
+    /// margin bands and the rest left. Those two documents are <em>header</em>-anchored, and a header
+    /// anchor has no body frame — which is exactly the condition
+    /// <see cref="NarrowsCaptureToBody"/> now carries. <c>probes/words-close-r95</c>.
     /// </para>
     /// <para>
-    /// Set for a DOCX stating <c>compatibilityMode</c> 15 or more. Below 15 the C++ area is the sheet
-    /// rather than the body, which for a top-margin band changes nothing at the top and only clamps a
-    /// frame hanging off the bottom; no corpus document exercises it, so it is left.
+    /// <c>mbFollowTextFlow</c> is deliberately not modelled: its pool default is <em>false</em>
+    /// (<c>sw/source/core/bastyp/init.cxx</c>:437) and each of the three writerfilter seats that write
+    /// <c>PROP_FOLLOW_TEXT_FLOW</c> is gated on the anchor being inside a table
+    /// (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
+    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883), so outside a table the term drops out. Inside one
+    /// it would make the object captured — in its <em>cell</em> rather than in the page
+    /// (<c>anchoredobjectposition.cxx</c>:576-591), which is an area this does not model. 552 of the
+    /// corpus's 6055 positioned objects, in 40 of 272 documents;
+    /// <c>probes/words-seat-r94/anchor-census.txt</c>.
+    /// </para>
+    /// <para>
+    /// Set for every DOCX, since <c>WriterFilter.cxx</c>:332 sets the flag for every writerfilter
+    /// import. The RTF reader captures unconditionally instead and does not reach this — see
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> and <c>probes/rtf-shape-r73</c>.
     /// </para>
     /// </remarks>
-    public bool CapturesMarginBandObjects { get; init; }
+    public bool CapturesWrappedObjects { get; init; }
+
+    /// <summary>
+    /// Whether the area a captured object is held inside is the page's <em>body</em> rather than the
+    /// sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImplAdjustVertRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:552-573) narrows
+    /// <c>aPgAlignArea</c> from the page frame to the page body frame under its own comment —
+    /// <em>"Instead of using the top of the page as the vertical limit, DOCX compatibilityMode 15
+    /// started to use the text body as the vertical limit for most paragraph or line-oriented anchored
+    /// non-wrapthrough objects"</em>. Its guard is <c>bCompat15</c>
+    /// (<c>!TAB_OVER_MARGIN &amp;&amp; TAB_OVER_SPACING</c>), and four conditions beside it:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>the object does not wrap through — already true of anything captured
+    ///     here;</description></item>
+    ///   <item><description>the vertical relation is neither <c>PAGE_FRAME</c> nor
+    ///     <c>PAGE_PRINT_AREA</c> (:564-565), which are <see cref="FrameVerticalOrigin.Page"/> and
+    ///     <see cref="FrameVerticalOrigin.PageMargin"/> here. The two margin <em>bands</em> are
+    ///     <c>PAGE_PRINT_AREA_TOP</c> and <c>_BOTTOM</c>, separate enumerators, and are
+    ///     narrowed;</description></item>
+    ///   <item><description>it is not a split floating table (<c>GetFlySplit()</c>) and not a
+    ///     <c>w:framePr</c> text box (<c>SwTextBoxHelper::TextBoxIsFramePr</c>) — neither of which this
+    ///     tree builds a <see cref="PageFrame"/> for; and</description></item>
+    ///   <item><description><b>there is a body frame to narrow to</b>:
+    ///     <c>mpAnchorFrame-&gt;FindBodyFrame()</c> walked up to a page body frame whose upper is this
+    ///     page (:568-573). A header, a footer and a footnote anchor have none, so their objects stay
+    ///     bounded by the sheet.</description></item>
+    /// </list>
+    /// <para>
+    /// The last of those is what the previous two rounds were missing, and it is worth two documents on
+    /// its own: <c>b053-19</c> and <c>Case-Study-Heathrow-Airport</c> each carry one <c>wrapTight</c>
+    /// picture in <c>word/header1.xml</c> at a negative offset, which the reference draws where the
+    /// file states it and a body clamp drags down by the whole header.
+    /// </para>
+    /// <para>
+    /// Set for a DOCX stating <c>compatibilityMode</c> 15 or more. Below 15 the area is the sheet and
+    /// <see cref="CapturesWrappedObjects"/> alone applies.
+    /// </para>
+    /// </remarks>
+    public bool NarrowsCaptureToBody { get; init; }
+
+    /// <summary>
+    /// Whether a wrap-through object is exempt from being cut down to its page.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>DisableOffPagePositioning</c>. <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
+    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801) is that setting <em>and</em> a
+    /// wrap-through object, and <c>SwFlyFreeFrame::CheckClip</c>
+    /// (<c>sw/source/core/layout/flylay.cxx</c>:493) returns at once when it holds — so under it a
+    /// wrap-through frame may hang off the sheet at whatever size it states. See
+    /// <see cref="FrameLayout.Place"/>'s squeeze for what the setting exempts an object from.
+    /// </para>
+    /// <para>
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 is its <strong>only</strong> setter
+    /// in the whole of <c>sw/</c>, one line below the <c>DoNotCaptureDrawObjsOnPage</c> that
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> carries — and that file is the <em>OOXML</em>
+    /// filter. <strong>RTF does not share it</strong>, although it shares the writerfilter tokeniser:
+    /// <c>Rich_Text_Format.xcu</c> names <c>com.sun.star.comp.Writer.RtfFilter</c> as its service and
+    /// <c>RtfFilter::setTargetDocument</c> (<c>sw/source/writerfilter/filter/RtfFilter.cxx</c>:191-195)
+    /// sets no document property whatsoever. The WW8 binary filter and the ODF one do not set it
+    /// either, so it is off in <see cref="Default"/> and in <see cref="Word"/> and true only for
+    /// DOCX.
+    /// </para>
+    /// </remarks>
+    public bool DisablesOffPagePositioning { get; init; }
 
     /// <summary>
     /// Whether a page-anchored fly may hang below the body into the bottom margin and the footer area
@@ -703,7 +779,8 @@ public sealed class Paginator
         // the blocks instead returned early on exactly those documents and left their frames unplaced.
         FrameResolution resolution = FrameResolution.Of(
             blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
-            _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
+            _options.CapturesAnchoredObjectsOnPage, _options.CapturesWrappedObjects,
+            _options.NarrowsCaptureToBody, _options.DisablesOffPagePositioning);
         if (resolution.IsEmpty) return Numbered(pages, blocks);
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
@@ -723,7 +800,8 @@ public sealed class Paginator
 
             FrameResolution settled = FrameResolution.Of(
                 blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
-                _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
+                _options.CapturesAnchoredObjectsOnPage, _options.CapturesWrappedObjects,
+                _options.NarrowsCaptureToBody, _options.DisablesOffPagePositioning);
             pages = next;
 
             bool converged = settled.SameAs(resolution);
@@ -896,6 +974,10 @@ public sealed class Paginator
             LaidOutParagraph laidOut =
                 paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine
                 || paragraph.NeedsGlyphFallback || paragraph.HasScriptSpace
+                // And a character width, which is the one property of the shortcut's own
+                // arguments that cannot express it: the text overload measures from a face, a
+                // size and the shaping, and a scale is none of those.
+                || paragraph.IsHorizontallyScaled
                 ? layouter.Layout(
                     paragraph.Measure(),
                     paragraph.Format,
@@ -934,6 +1016,12 @@ public sealed class Paginator
         bool firstPageIsOdd = pageNumber % 2 == 1;
         int sectionFirstPage = 0;
         int column = 0;
+
+        // How far down the deepest column of this page has reached, over the columns already left behind.
+        // A page's columns are filled one after another and `used` is only ever the current one's, so this
+        // is what a section that must begin *below* the columned stretch above it starts from — see the
+        // section switch, where a text section's columns are left. Reset with the page.
+        Length columnReach = Length.Zero;
 
         // A continuous section's page-number restart, waiting for the first hard page break inside the
         // section to hang itself on. Null where there is nothing waiting, which is every other section —
@@ -1239,6 +1327,38 @@ public sealed class Paginator
                 sectionIndex = blockSection;
                 geometry = resolved[sectionIndex].Section;
                 furnitureSet = resolved[sectionIndex].Furniture;
+
+                // A text section is a frame, so the next one begins *below* the whole of it rather than
+                // beside its last column. Writer inserts a nested section's frame behind its parent, into
+                // the parent's own upper (`pFrame->InsertBehind(pTmp->GetUpper(), pTmp)`,
+                // `sw/source/core/layout/frmtool.cxx`:1795-1803), and splits the parent at the nested
+                // section's end so that the rest of it is a second frame (`SplitSect`, `:1954-1960`) — so
+                // a page can read: two columns, a full-measure index, two columns again. The flow
+                // therefore leaves the column it is in, drops past the deepest of the columns already
+                // filled, and starts again at the first column of the new section.
+                //
+                // Only where the columns actually change, so that a section following another with the
+                // same columns keeps filling them — which is what `columnTop = used` below is for, and
+                // what a paragraph naming its own master page inside a text section needs, since that
+                // allocates a section of the same geometry — and only for a text section, because a page
+                // style's columns belong to the sheet and this tree defers those. Measured on
+                // `absrc-pac-01-info-note-en.odt`, whose two-column section holds a table of contents:
+                // 26.2.4.2 draws the index across the whole measure below both columns and resumes the
+                // columns underneath it.
+                bool leavesColumns =
+                    kind == SectionBreak.Continuous
+                    && !pageIsEmpty
+                    && geometry.IsTextSection
+                    && (geometry.Page.Columns != page.Columns
+                        || geometry.Page.ColumnGap != page.ColumnGap);
+
+                if (leavesColumns)
+                {
+                    if (used > columnReach) columnReach = used;
+                    used = columnReach;
+                    lineUsed = columnReach;
+                    column = 0;
+                }
 
                 // A continuous break shares a sheet with the section above it, and a sheet has one paper
                 // size and one set of margins — so the new section's take effect on the *next* page, not
@@ -1705,7 +1825,14 @@ public sealed class Paginator
                     // an anchored frame takes back off again. See `PlacedLine.FlyDisplacement`.
                     lineIndex + i == 0 && paragraphIndex == displacedBlock
                         ? displacedBy
-                        : Length.Zero));
+                        : Length.Zero,
+
+                    // And the text area in force *here*, for the same reason the columns are: a text
+                    // section is inset from the body's sides, and the page is written with whichever
+                    // section's area is current when it is emitted. Horizontal only — see
+                    // `PageContent.BodyAreaOf`.
+                    page.TextArea.X,
+                    page.TextWidth));
 
                 // A stretch that shares its line with the next one leaves the pen where it is: the box
                 // after it is more of the same line, at the same top.
@@ -1943,6 +2070,8 @@ public sealed class Paginator
                     if (lineUsed > balanceLineReach) balanceLineReach = lineUsed;
                 }
 
+                if (used > columnReach) columnReach = used;
+
                 column++;
                 used = columnTop;
                 lineUsed = columnTop;
@@ -1996,6 +2125,7 @@ public sealed class Paginator
             AdoptSection();
             pageNumber++;
             column = 0;
+            columnReach = Length.Zero;
             placed = [];
             tables = [];
 
@@ -2065,6 +2195,11 @@ public sealed class Paginator
         {
             balance = null;
 
+            // The section starting here has left no column behind yet, so the deepest one is its own top
+            // — and whatever the section above it reached on this page is spent. Set here rather than at
+            // the switch because this runs at every section start, the first one on a page included.
+            columnReach = used;
+
             // Every column of a section that begins part way down a page begins there too — balanced or
             // not, and this is the half that is not about balancing at all. Writer gives a continuous
             // multi-column section a `SwSectionFrame` of its own whose top is where the section starts,
@@ -2113,6 +2248,11 @@ public sealed class Paginator
             lineUsed = state.Top;
             columnTop = state.Top;
             columnBottom = state.Top + state.Candidate;
+
+            // The trial's own columns are gone with it, so the deepest one starts again at the section's
+            // top: a tall first trial must not leave a following section believing the columns reached
+            // the bottom of the page.
+            columnReach = state.Top;
         }
 
         // The section fitted at the candidate height. Accept it when the search has narrowed to less than
@@ -3743,10 +3883,12 @@ public sealed class Paginator
             TableLayouter.RowSlice? tail =
                 TableLayouter.SliceRow(
                     table.Rows[from], rowCells, drawn, room - placed, acrossSpans,
-                    _options.KeepsSpacingAtTopOfPage)
+                    _options.KeepsSpacingAtTopOfPage,
+                    TableLayouter.BoundaryBand(table, from))
                 ?? TableLayouter.SliceRow(
                     table.Rows[from], rowCells, drawn, Length.FromEmu(long.MaxValue), acrossSpans,
-                    _options.KeepsSpacingAtTopOfPage);
+                    _options.KeepsSpacingAtTopOfPage,
+                    TableLayouter.BoundaryBand(table, from));
 
             // A remainder with nothing in it, which the cut said there was: the row is finished rather
             // than unfinished. Asking again is what would not terminate.
@@ -3814,7 +3956,8 @@ public sealed class Paginator
                     Length.Zero,
                     room - placed,
                     SpansMayBeCut(heights[end], body.Height),
-                    _options.KeepsSpacingAtTopOfPage)
+                    _options.KeepsSpacingAtTopOfPage,
+                    TableLayouter.BoundaryBand(table, end))
                 is { } head)
             {
                 cells.AddRange(TableLayouter.Offset(head.Cells, body.X, body.Y + top + placed));

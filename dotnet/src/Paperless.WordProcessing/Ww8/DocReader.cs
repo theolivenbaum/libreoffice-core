@@ -627,6 +627,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             rows.Add(new PageTableRow
             {
                 Cells = cells,
+                CoveredTopRule = row.CoveredTopRule,
+                CoveredBottomRule = row.CoveredBottomRule,
                 IsHeader = row.IsHeader,
                 MinHeight = row.MinHeight,
                 HasExactHeight = row.HasExactHeight,
@@ -693,6 +695,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Shaping = new Text.Shaping.ShapingOptions(
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
                 Tracking = paragraph.Tracking,
+                WidthPerCent = paragraph.WidthPerCent,
                 Metrics = fonts.Metrics,
                 Fallback = fonts.Fallback,
                 AddsScriptSpace = true,
@@ -1234,7 +1237,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 || run.Highlight is not null
                 // And so do the two rules, for the same reason: neither changes a width, so a paragraph
                 // underlined end to end is uniform by every measurement test and would be drawn plain.
-                || run.IsUnderlined
+                || run.Underline != TextUnderline.None
                 || run.IsStruckThrough
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
@@ -1243,6 +1246,11 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 // And tracking for the same reason again, read the other way: a run condensed inside a
                 // paragraph that is not would otherwise be measured at the paragraph's own spacing.
                 || run.Tracking != paragraph.Tracking
+                // And a character width, which multiplies the advance rather than adding to it, so a
+                // scaled run folded into an unscaled paragraph is measured and broken at the
+                // paragraph's own width. See `Ww8LayoutRun.WidthPerCent` for the merge that has to
+                // survive first.
+                || run.WidthPerCent != paragraph.WidthPerCent
                 // A symbol's face is its own even when it happens to equal the paragraph's: losing the
                 // runs here would draw its slot out of whatever the paragraph is set in.
                 || run.SymbolSlot is not null
@@ -1267,9 +1275,10 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 rise,
                 run.CaseMap,
                 Highlight: run.Highlight ?? default,
-                IsUnderlined: run.IsUnderlined,
+                Underline: run.Underline,
                 IsStruckThrough: run.IsStruckThrough,
-                Tracking: run.Tracking));
+                Tracking: run.Tracking,
+                WidthPerCent: run.WidthPerCent));
         }
 
         return varies ? runs : [];

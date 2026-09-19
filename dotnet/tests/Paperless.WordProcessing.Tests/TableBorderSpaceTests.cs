@@ -81,30 +81,48 @@ public sealed class TableBorderSpaceTests
     }
 
     /// <summary>
-    /// The grid lines stay where they were: the band grows around the stroke, not under it.
+    /// A grid line sits ON the row boundary and its band hangs downwards into the row below it.
     /// </summary>
     /// <remarks>
-    /// The stroke is drawn along the cell rectangle's edge, and the rectangle's top is half a band below
-    /// the table's. Pinning it here is what stops the inset above from being paid for by moving every rule
-    /// in every table half a border down the page.
+    /// <para>
+    /// <strong>This asserted the opposite until round 149, and the opposite is what O83, O84 and O85 all
+    /// were.</strong> The old model put the grid line half a band below the boundary and drew the band
+    /// centred on it, which is <em>algebraically identical</em> — the ink lands in the same place — for as
+    /// long as every horizontal rule in the table has one width and the table does not split. It comes
+    /// apart at a boundary whose columns differ, at a boundary whose two facing statements differ, and at
+    /// a page cut, which is why one rule seated as three defects.
+    /// </para>
+    /// <para>
+    /// [src] <c>SwTabFramePainter::Insert</c> (<c>paintfrm.cxx</c>:3061-3064) sets <c>RefMode::Begin</c> on
+    /// a cell's horizontal borders — <em>"drawn below the reference points"</em> — and <c>Centered</c> on
+    /// its vertical ones. [bin] <c>probes/tablerow-r146/results.md</c> §3.1: three columns stating 0.5,
+    /// 3.0 and 1.5 pt across one boundary draw <c>95.001..95.501</c>, <c>95.001..98.001</c> and
+    /// <c>95.001..96.501</c> — one shared top edge, three different bottoms — and the table's own outer
+    /// top rule is a band <c>82.401..83.401</c> on a frame whose top is 82.401, so there is no separate
+    /// rule for an outer line.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void TheGridLinesThemselvesDoNotMove()
+    public void AGridLineSitsOnTheBoundaryAndItsBandHangsBelow()
     {
         Length border = Length.FromPoints(1);
 
         (List<PlacedTableCell> cells, List<Length> heights) =
             TableLayouter.LayOut(Table(3, border), new DocPoint(Length.Zero, Length.Zero));
 
-        // Row one's rectangle starts half a border down, and each later one a whole row pitch after it.
-        cells[0].Area.Y.ShouldBe(border / 2);
-        cells[1].Area.Y.ShouldBe(cells[0].Area.Y + (cells[1].Area.Y - cells[0].Area.Y));
+        // The table's own top edge IS the first boundary, so the first rectangle starts at nought and the
+        // band it pays for is inside it rather than above it.
+        cells[0].Area.Y.ShouldBe(Length.Zero);
 
-        // The last row is charged for the two half bands the rectangles do not cover, so the row heights
-        // add up to the table while the rectangles stay put.
+        // Each later rectangle begins exactly one row pitch on, and that pitch carries one whole band.
+        Length pitch = cells[1].Area.Y - cells[0].Area.Y;
+        cells[2].Area.Y.ShouldBe(cells[0].Area.Y + (pitch * 2));
+
+        // The one band no rectangle covers is the outer bottom rule, which hangs below the last row
+        // because nothing beneath it can pay for it.
         Length rectangles = cells[2].Area.Bottom - cells[0].Area.Y;
         heights.Aggregate(Length.Zero, (a, b) => a + b)
-            .ShouldBe(rectangles + border, "half a band above the first row and half below the last");
+            .ShouldBe(rectangles + border, "the outer bottom band hangs below the last row");
     }
 
     /// <summary>Where a row's text sits, measured from the table's origin.</summary>

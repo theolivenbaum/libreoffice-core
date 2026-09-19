@@ -70,6 +70,7 @@ internal sealed class PptSlideLayout
     private readonly SlideFonts _fonts;
     private readonly EscherDrawingReader _escher;
     private readonly byte[] _pictures;
+    private readonly byte[] _summary;
 
     private readonly Dictionary<uint, PptStyleSheet> _stylesByMaster = [];
     private readonly Dictionary<uint, PptColourScheme> _schemesByMaster = [];
@@ -89,6 +90,9 @@ internal sealed class PptSlideLayout
     /// </summary>
     private IReadOnlySet<uint> _hyperlinks = new HashSet<uint>();
     private Dictionary<int, EscherBlip>? _blips;
+
+    /// <summary>The document's picture-bullet store, read once for the deck.</summary>
+    private PptBulletPictures _bulletPictures = PptBulletPictures.None;
     private PptHeadersFooters _deckHeadersFooters = PptHeadersFooters.None;
     private bool _titlePlaceholdersOmitted;
 
@@ -102,13 +106,20 @@ internal sealed class PptSlideLayout
     /// Empty for a deck with no pictures, and for a caller that has none to give: the deck then
     /// draws every frame empty, which is what it did before this stream was passed at all.
     /// </param>
+    /// <param name="summary">
+    /// The compound file's <c>\u0005DocumentSummaryInformation</c> stream, whose
+    /// <c>_PID_HLINKS</c> blob caps how many of the deck's hyperlink identifiers resolve — see
+    /// <see cref="PptHyperlinkBlob"/>. Empty for a caller that has none to give.
+    /// </param>
     public PptSlideLayout(
         DffRecordBuffer stream,
         PptPersistDirectory persist,
         SlideFonts fonts,
         List<Diagnostic> diagnostics,
-        byte[]? pictures = null)
+        byte[]? pictures = null,
+        byte[]? summary = null)
     {
+        _summary = summary ?? [];
         _stream = stream;
         _persist = persist;
         _fonts = fonts;
@@ -129,8 +140,9 @@ internal sealed class PptSlideLayout
 
         DocSize size = SlideSize(pages);
         _fontTable = PptFontTable.Read(_stream, pages.Environment);
-        _hyperlinks = PptHyperlinks.Read(_stream, pages.Document);
+        _hyperlinks = PptHyperlinks.Read(_stream, pages.Document, _summary);
         _blips = ReadBlips(pages);
+        _bulletPictures = PptBulletPictures.Read(_stream, pages.Document);
         _deckHeadersFooters = DeckHeadersFooters(pages);
         _titlePlaceholdersOmitted = TitlePlaceholdersOmitted(pages);
         ReadMasters(pages);
@@ -689,7 +701,20 @@ internal sealed class PptSlideLayout
         PptPageEntry Entry,
         PptColourScheme Scheme,
         PptStyleSheet? Styles,
-        PptFieldValues Fields);
+        PptFieldValues Fields)
+    {
+        /// <summary>
+        /// Whether the shape being placed is a member of a group the reference turns into a
+        /// table. See <see cref="IsTableGroup"/>: a cell's text never autofits.
+        /// </summary>
+        public bool InTable { get; init; }
+
+        /// <summary>
+        /// The rows the reference re-derives for the table group the shape sits in, or null when
+        /// it sits in none or nothing moves. See <see cref="PptTableRows"/>.
+        /// </summary>
+        public PptTableRows? Rows { get; init; }
+    }
 
     /// <summary>
     /// What the running fields resolve to on a page.
@@ -814,9 +839,16 @@ internal sealed class PptSlideLayout
             if (depth >= MaxGroupDepth) return;
 
             AffineTransform inner = GroupSpace(shape, space);
+
+            // A group the reference replaces by a table hands its members' text to cells, and a
+            // cell keeps none of the item set that would have autofitted it. The rows are then
+            // re-derived from what those cells need, which the members' own anchors only bound.
+            Context inside = context.InTable || !IsTableGroup(shape)
+                ? context
+                : context with { InTable = true, Rows = TableRows(shape, context, inner) };
             foreach (EscherShape child in shape.Children)
             {
-                Add(child, context, inner, shapes, depth + 1);
+                Add(child, inside, inner, shapes, depth + 1);
             }
 
             return;
@@ -922,10 +954,33 @@ internal sealed class PptSlideLayout
         DocRect local = new(
             Units(anchor.Left), Units(anchor.Top), Units(anchor.Width), Units(anchor.Height));
 
+        // A table member is drawn where the table's own layout puts it, not where the group's
+        // rectangle sat: the reference discards the group and lays the cells out again.
+        if (context.Rows is { } rows) local = rows.Remap(local);
+
         if (local.Width <= Length.Zero && local.Height <= Length.Zero) return null;
 
         double rotation = Rotation(shape);
         local = Uprighted(local, rotation);
+
+        string? preset = PptShapeGeometry.PresetOf(shape.ShapeType);
+
+        // The stated value is kept rather than the converted one because the conversion is not
+        // always a constant: a trapezoid's inset is a fraction of the shape's *width* here and a
+        // fraction of its shortest side there, so the answer moves when the shape is refitted.
+        int? stated = shape.Properties.Has(PptShapeGeometry.AdjustValue)
+            ? shape.Properties.SignedValue(PptShapeGeometry.AdjustValue)
+            : null;
+        double? adjustment = Adjustment(shape.ShapeType, stated, local.Size);
+
+        // The shape resizes itself around its own text before anything else is measured against
+        // it: the fill, the outline, the picture and the text all sit in the *fitted* rectangle.
+        PptShapeText? text = TextIn(shape, context);
+        if (text is not null)
+        {
+            local = Fitted(shape, text, local, preset, adjustment);
+            adjustment = Adjustment(shape.ShapeType, stated, local.Size);
+        }
 
         AffineTransform placement = Placement(
             local,
@@ -934,11 +989,21 @@ internal sealed class PptSlideLayout
             (shape.Flags & EscherShapeAttributes.FlipVertical) != 0,
             space);
 
-        string? preset = PptShapeGeometry.PresetOf(shape.ShapeType);
-        int? adjustment = shape.Properties.Has(PptShapeGeometry.AdjustValue)
-            ? PptShapeGeometry.Adjustment(
-                shape.ShapeType, shape.Properties.SignedValue(PptShapeGeometry.AdjustValue))
-            : null;
+        // An Escher WordArt is not a shape with text on it: `EnhancedCustomShapeEngine::render2`
+        // replaces the whole custom shape with the curves `EnhancedCustomShapeFontWork::CreateFontWork`
+        // builds, so the box, its geometry and its shadow are not drawn at all. The fill survives
+        // because `CreateSdrObjectFromParagraphOutlines` copies the shape's own item set onto the
+        // path object -- see `PptFontwork`.
+        if (PptFontwork.Outline(shape, local.Size, _fonts) is { } warped)
+        {
+            return new PlacedShape
+            {
+                Name = shape.Name,
+                Outline = ShapeTransform.Apply(placement, warped),
+                Bounds = ShapeTransform.PlacedBounds(placement, local.Size),
+                Fill = Fill(shape, context.Scheme, local, placement),
+            };
+        }
 
         // A shape's own vertex array outranks its type, because LibreOffice's exporter writes one
         // on nearly every shape and names no preset at all; falling through to the type would draw
@@ -948,7 +1013,7 @@ internal sealed class PptSlideLayout
             : null;
 
         CustomShapeGeometry.Geometry resolved = own is null
-            ? SlidePresetGeometry.Of(preset, local.Size, Guides(adjustment))
+            ? Mirrored(SlidePresetGeometry.Of(preset, local.Size, Guides(adjustment)), shape, local.Size)
             : new CustomShapeGeometry.Geometry(
                 own, new DocRect(Length.Zero, Length.Zero, local.Size.Width, local.Size.Height));
 
@@ -970,9 +1035,9 @@ internal sealed class PptSlideLayout
             ShadedParts = painted.ShadedParts,
             Bounds = bounds,
             Fill = Fill(shape, context.Scheme, local, placement),
-            Line = Line(shape, context.Scheme),
+            Line = Line(shape, context.Scheme, context.InTable),
             Picture = Picture(shape, bounds),
-            Text = Text(shape, context, local, preset, adjustment, placement),
+            Text = Text(text, local, shape, preset, adjustment, placement),
             Shadow = Shadow(shape, context.Scheme),
         };
     }
@@ -1216,7 +1281,7 @@ internal sealed class PptSlideLayout
     /// The width defaults to 9525 EMUs — three quarters of a point — which is what the drawing
     /// layer draws for a shape that states a line and no thickness (<c>msdffimp.cxx:916</c>).
     /// </remarks>
-    private static Stroke? Line(EscherShape shape, PptColourScheme scheme)
+    private static Stroke? Line(EscherShape shape, PptColourScheme scheme, bool inTable = false)
     {
         bool lined = shape.Properties.StatesBoolean(EscherPropertyIds.Lined)
             ? shape.Properties.Boolean(EscherPropertyIds.Lined)
@@ -1231,11 +1296,84 @@ internal sealed class PptSlideLayout
             return null;
         }
 
+        uint stated = shape.Properties.Value(EscherPropertyIds.LineWidth, 9525);
+
         return new Stroke(
             Paint.Solid(colour),
-            Length.FromEmu(shape.Properties.Value(EscherPropertyIds.LineWidth, 9525)),
+            inTable && IsTableRule(shape)
+                ? TableBorderWidth(stated)
+                : Length.FromEmu(stated),
             Cap(shape.Properties.Value(PptShapeGeometry.LineEndCap, 0)),
             Join(shape.Properties.Value(PptShapeGeometry.LineJoin, PptShapeGeometry.MiterJoin)));
+    }
+
+    /// <summary>
+    /// Whether a member of a table group is one of the group's rules rather than one of its
+    /// cells — the reference's <c>IsLine</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>IsLine</c> (<c>svdfppt.cxx</c>:7183) asks for an <c>SdrPathObj</c> that is a line with
+    /// two points, and the only shape <c>SvxMSDffManager::ImportShape</c> builds one of is an
+    /// unextruded <c>mso_sptLine</c> (<c>msdffimp.cxx</c>:4403-4412). Measured over the corpus's
+    /// 51 <c>.ppt</c>, every one of the 1089 members of the 34 table groups is either that or a
+    /// rectangle-kind cell.
+    /// </remarks>
+    private static bool IsTableRule(EscherShape shape)
+        => shape.ShapeType == PptShapeGeometry.LineShape
+           && (shape.Properties.Value(PptShapeGeometry.ThreeDimensionalFlags, 0)
+               & PptShapeGeometry.Extruded) == 0;
+
+    /// <summary>
+    /// The width the reference finally strokes a <c>.ppt</c> table's rule at, from the EMUs the
+    /// file states.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Not the stated width, and on the corpus's own numbers it is well under half of
+    /// it.</strong> A rule inside a table group never reaches the page as a line: the reference
+    /// turns it into the neighbouring cells' <c>BorderLine2</c> and draws it from there, and the
+    /// value is mangled twice on the way.
+    /// </para>
+    /// <list type="number">
+    /// <item><description>
+    /// <c>SvxMSDffManager::ScaleEmu</c> (<c>msdffimp.cxx</c>:3193, applied at :1048) divides the
+    /// EMUs by 360 into hundredths of a millimetre, <em>truncating</em>: one point, 12700 EMU, is
+    /// 35 and not 35.28.
+    /// </description></item>
+    /// <item><description>
+    /// <c>ApplyCellLineAttributes</c> (<c>svdfppt.cxx</c>:7513-7531) sets
+    /// <c>LineWidth = max(1, XATTR_LINEWIDTH / 4)</c> — integer again, so 35 becomes 8 and the 79
+    /// of a 2.25 pt rule becomes 19.
+    /// </description></item>
+    /// <item><description>
+    /// <c>impGetLineStyle</c> (<c>svx/source/table/viewcontactoftableobj.cxx</c>:183-184) hands
+    /// that number to <c>svx::frame::Style</c> scaled by
+    /// <c>o3tl::convert(1.0, twip, mm100)</c> — it reads the hundredths of a millimetre as
+    /// <b>twips</b>. One unit is therefore drawn as 1/20 pt.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// The whole chain is <c>max(1, floor(emu / 360) / 4) / 20</c> points, and it is measured at
+    /// both ends: <c>Thailand17.ppt</c> page 11's group states 12700 and 28575 EMU, 26.2.4.2's own
+    /// flat ODP of the deck states the cells' borders as <c>0.23pt</c> and <c>0.54pt</c> — 8 and
+    /// 19 hundredths of a millimetre — and its PDF strokes them at <b>0.40 pt and 0.9499 pt</b>,
+    /// which is 8/20 and 19/20 exactly. Reproduced rather than corrected, because the reference is
+    /// what a comparison is against; the truncation at two of the three steps is why a 1 pt rule
+    /// loses 60 % and a 2.25 pt rule 58 %.
+    /// </para>
+    /// <para>
+    /// The <c>.pptx</c> path has its own version of the same ending —
+    /// <c>DrawingTableGeometry.BorderWidth</c> — which rounds where this truncates and halves
+    /// where this quarters, because <c>oox</c> and <c>msfilter</c> write the
+    /// <c>BorderLine2</c> differently. They are deliberately not one function.
+    /// </para>
+    /// </remarks>
+    internal static Length TableBorderWidth(uint emu)
+    {
+        long hundredthsOfMillimetre = emu / 360;
+        long quarter = Math.Max(1, hundredthsOfMillimetre / 4);
+
+        return Length.FromEmu(quarter * Length.EmuPerTwip);
     }
 
     private static LineCap Cap(uint cap) => cap switch
@@ -1252,20 +1390,160 @@ internal sealed class PptSlideLayout
         _ => LineJoin.Round,
     };
 
-    private PlacedText? Text(
-        EscherShape shape,
-        Context context,
-        DocRect local,
-        string? preset,
-        int? adjustment,
-        AffineTransform placement)
+    /// <summary>
+    /// The rectangle a shape occupies once it has resized itself around its own text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong><c>fFitShapeToText</c> is the shape growing, not the text shrinking</strong>, and
+    /// it is the one of the two that this reader had no answer for at all. Escher states it as
+    /// bit 1 of <c>DFF_Prop_FitTextToShape</c> (191); <c>svdfppt.cxx</c>:1049-1110 turns it into
+    /// <c>SdrTextAutoGrowHeightItem</c> on every horizontal text object it builds — the
+    /// <c>SdrObjCustomShape</c> branch at <c>:1053-1055</c> and the <c>SdrRectObj</c> branch at
+    /// <c>:1090</c> both — and into auto-grow-<em>width</em> instead when the text is vertical
+    /// (<c>:1077-1080</c>), which is why a turned body is left alone here.
+    /// </para>
+    /// <para>
+    /// The arithmetic is <c>SdrTextObj::AdjustTextFrameWidthAndHeight</c>
+    /// (<c>svx/source/svdraw/svdotxat.cxx</c>:44-236) and its custom-shape twin
+    /// (<c>svx/source/svdraw/svdoashp.cxx</c>:2249-2421), which agree line for line on the height:
+    /// the text is broken to the frame's <em>open</em> width less the two horizontal distances and
+    /// floored at two units, the height is the outliner's plus <b>one unit of tolerance</b>, that
+    /// is clamped to the minimum frame height, and only then are the two vertical distances added.
+    /// The growth then moves the edge the vertical anchor does not hold: the bottom for a
+    /// top-anchored body, the top for a bottom-anchored one, and half of it each way for a
+    /// centred one.
+    /// </para>
+    /// <para>
+    /// <strong>The minimum is where the two branches differ, and it decides whether a shape may
+    /// shrink.</strong> <c>makeSdrTextMinFrameHeightItem</c> is set only on the
+    /// <c>SdrRectObj</c> branch (<c>svdfppt.cxx</c>:1116-1119), to the stated rectangle's height
+    /// less the two vertical distances (<c>:982</c>) — so a real placeholder can only grow. A
+    /// custom shape gets no such item, its minimum falls through to 1, and a box with less text
+    /// than it has room for shrinks to fit. The branch is taken on exactly one condition
+    /// (<c>:1041-1055</c>): the text object's kind is rewritten to Rectangle, and therefore the
+    /// custom shape keeps its own text, unless the shape names a placeholder <em>and</em> its
+    /// text kind is not <c>Other</c>.
+    /// </para>
+    /// <para>
+    /// Measured on <c>pres_ioc_phuket.ppt</c> page 26, whose dark blue banner states 519 master
+    /// units — 64.88 pt — and holds two empty 40 pt paragraphs: 26.2.4.2 resolves it to 3.647 cm,
+    /// <b>103.38 pt</b>, and drew a bar 38.5 pt short of the reference's before this. Over the
+    /// corpus's 51 <c>.ppt</c>, <b>1691 live slide shapes in 38 documents state the bit</b> and
+    /// 1348 of those hold text; the reference's own flat-ODP export disagrees with the stated
+    /// anchor by more than a millimetre on <b>101 shapes in 22 documents</b> — 83 taller and 18
+    /// shorter (<c>probes/slides-r97/growth.py</c>).
+    /// </para>
+    /// <para>
+    /// Not modelled: the rotation compensation at <c>svdotxat.cxx</c>:229-236, which moves the
+    /// grown rectangle so that a rotated shape's own top-left stays where it was — a rotated
+    /// shape grows about its centre here instead. <strong>That is unmeasured rather than measured
+    /// as nil</strong>: the census above matches on <c>svg:x</c>/<c>svg:y</c>, which a rotated
+    /// shape's export does not state at all, so it can say nothing about one.
+    /// </para>
+    /// </remarks>
+    private DocRect Fitted(
+        EscherShape shape, PptShapeText text, DocRect local, string? preset, double? adjustment)
+    {
+        // A turned body grows the shape's width instead, which this does not model.
+        if (text.Flow != VerticalText.None) return local;
+
+        if ((shape.Properties.Value(PptShapeGeometry.FitTextToShape, 0)
+             & PptShapeGeometry.FitShapeToText) == 0)
+        {
+            return local;
+        }
+
+        DocRect frame = TextRectangle(shape, preset, local.Size, adjustment);
+        if (frame.Height <= Length.Zero || local.Height <= Length.Zero) return local;
+
+        Margins insets = Insets(shape);
+        long across = insets.Left.Mm100 + insets.Right.Mm100;
+        long down = insets.Top.Mm100 + insets.Bottom.Mm100;
+
+        // `Size aSiz(rR.GetSize()); aSiz.AdjustWidth(-1);` is the open width, and the floor of two
+        // is the reference's own (`svdotxat.cxx`:113-116).
+        Length width = Length.FromMm100(Math.Max(frame.Width.Mm100 - across, 2));
+
+        long height = SlideTextLayout.Height(text.Body, width, _fonts).Mm100 + 1;
+        height = Math.Clamp(height, MinimumFrameHeight(shape, text, frame, down), MaximumFrameHeight);
+        height += down;
+        if (height < 1) height = 1;
+
+        long growth = height - frame.Height.Mm100;
+        if (growth == 0) return local;
+
+        // `ImpCalculateTextFrame` (`svdoashp.cxx`:2424-2450) scales the text frame's movement back
+        // onto the shape's own rectangle, which is the identity whenever the preset's text area is
+        // the whole shape and a proportion whenever it is not.
+        double scale = (double)local.Height.Mm100 / frame.Height.Mm100;
+        long half = growth / 2;
+        (long top, long bottom) = Anchor(shape) switch
+        {
+            TextAnchor.Bottom => (-growth, 0L),
+            TextAnchor.Middle => (-half, growth - half),
+            _ => (0L, growth),
+        };
+
+        Length newTop = local.Y + Length.FromMm100((long)(top * scale));
+        Length newBottom = local.Bottom + Length.FromMm100((long)(bottom * scale));
+        return new DocRect(local.X, newTop, local.Width, newBottom - newTop);
+    }
+
+    /// <summary>
+    /// The ceiling a grown frame's text height is clamped to, in hundredths of a millimetre.
+    /// </summary>
+    /// <remarks>
+    /// <c>Size aMaxSiz(100000, 100000)</c> — a metre — which the model's own
+    /// <c>GetMaxObjSize()</c> may narrow and never widens (<c>svdotxat.cxx</c>:76-84,
+    /// :98-108). No corpus shape reaches it; it is here because the reference has it and a
+    /// runaway measurement would otherwise draw a shape off the deck.
+    /// </remarks>
+    private const long MaximumFrameHeight = 100000;
+
+    /// <summary>
+    /// The floor the reference puts under a grown frame's text height, in hundredths of a
+    /// millimetre.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="Fitted"/>: a shape whose text object was built as an <c>SdrRectObj</c> —
+    /// a real placeholder — carries <c>makeSdrTextMinFrameHeightItem(rTextRect.GetHeight() -
+    /// (nTextTop + nTextBottom))</c> and can therefore only grow; everything else falls through
+    /// to the item default of zero, which the fit raises to one.
+    /// </remarks>
+    private long MinimumFrameHeight(
+        EscherShape shape, PptShapeText text, DocRect frame, long down)
+    {
+        bool placeholder = text.Kind != PptTextKind.Other
+                           && PlaceholderOf(shape) != PptPlaceholders.None;
+
+        if (!placeholder) return 1;
+
+        return Math.Max(frame.Height.Mm100 - down, 1);
+    }
+
+    /// <summary>A shape's text body, with the two things the fit and the layout both need.</summary>
+    /// <param name="Body">The body, already turned if the shape's flow turns it.</param>
+    /// <param name="Flow">Which way the shape's own text runs.</param>
+    /// <param name="Kind">The text kind its <c>TextHeaderAtom</c> names.</param>
+    private sealed record PptShapeText(SlideTextBody Body, VerticalText Flow, PptTextKind Kind);
+
+    /// <summary>
+    /// The text a shape holds, built once and used both by the fit and by the layout.
+    /// </summary>
+    /// <remarks>
+    /// Built before the shape is placed because <see cref="Fitted"/> resizes the shape around it:
+    /// the fill, the outline and the picture all have to be measured in the rectangle the text
+    /// leaves behind, not in the one the anchor states.
+    /// </remarks>
+    private PptShapeText? TextIn(EscherShape shape, Context context)
     {
         if (TextOf(shape, context) is not { } run) return null;
 
         VerticalText flow = Flow(shape);
         if (PptTextBody.Build(run, context.Styles, context.Scheme, _fontTable,
                               Insets(shape), Anchor(shape), Wraps(shape),
-                              Autofits(shape, run)) is not { } body)
+                              Autofits(shape, run, context.InTable), _bulletPictures) is not { } body)
         {
             return null;
         }
@@ -1275,7 +1553,23 @@ internal sealed class PptSlideLayout
             body = body with { Rotation = Quarter(flow) };
         }
 
-        DocRect rectangle = SlidePresetGeometry.TextRectangle(preset, local.Size, Guides(adjustment));
+        return new PptShapeText(body, flow, run.Kind);
+    }
+
+    private PlacedText? Text(
+        PptShapeText? text,
+        DocRect local,
+        EscherShape shape,
+        string? preset,
+        double? adjustment,
+        AffineTransform placement)
+    {
+        if (text is null) return null;
+
+        SlideTextBody body = text.Body;
+        VerticalText flow = text.Flow;
+
+        DocRect rectangle = TextRectangle(shape, preset, local.Size, adjustment);
 
         // A body that turns its own text can never be laid out in the shape's own upright
         // rectangle: the lines run down the shape and break at its height, and the runs have to
@@ -1313,8 +1607,14 @@ internal sealed class PptSlideLayout
                     Length.FromEmu((long)Math.Round(rectangle.Height.Emu * placement.D))))
             : rectangle;
 
-        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts);
-        return runs.Count == 0 ? null : new PlacedText(runs, upright ? AffineTransform.Identity : placement);
+        List<PlacedPicture> markers = [];
+        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts, markers);
+        return runs.Count == 0 && markers.Count == 0
+            ? null
+            : new PlacedText(runs, upright ? AffineTransform.Identity : placement)
+            {
+                MarkerPictures = markers.Count == 0 ? null : markers,
+            };
     }
 
     /// <summary>
@@ -1352,8 +1652,9 @@ internal sealed class PptSlideLayout
                 rectangle.Width)
             : rectangle;
 
-        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts);
-        if (runs.Count == 0) return null;
+        List<PlacedPicture> markers = [];
+        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts, markers);
+        if (runs.Count == 0 && markers.Count == 0) return null;
 
         double halfWidth = rectangle.Width.Emu / 2.0;
         double halfHeight = rectangle.Height.Emu / 2.0;
@@ -1363,7 +1664,10 @@ internal sealed class PptSlideLayout
                 AffineTransform.Rotation(body.Rotation)),
             AffineTransform.Translation(rectangle.X.Emu + halfWidth, rectangle.Y.Emu + halfHeight));
 
-        return new PlacedText(runs, AffineTransform.Concat(about, placement));
+        return new PlacedText(runs, AffineTransform.Concat(about, placement))
+        {
+            MarkerPictures = markers.Count == 0 ? null : markers,
+        };
     }
 
     /// <summary>Which quarter turn <c>txflTextFlow</c> asks for, if any.</summary>
@@ -1533,11 +1837,37 @@ internal sealed class PptSlideLayout
     /// the text overflows the shape, runs off the bottom of the slide and is clipped away by the
     /// page, losing 39 of 1395 words with the page count still exactly right.
     /// </para>
+    /// <para>
+    /// <strong>And a table cell never autofits, whatever kind of text it holds</strong> —
+    /// <paramref name="inTable"/>. A <c>.ppt</c> writes a table as a plain <em>group</em> of
+    /// rectangles, each of which is an ordinary Body-kind text shape and each of which this rule
+    /// would otherwise shrink on its own; the reference throws the group away and builds one
+    /// <c>SdrTableObj</c> from it (<c>svdfppt.cxx</c>:2913, <c>CreateTable</c> at :7569), copying
+    /// each rectangle's <c>OutlinerParaObject</c> into a cell and <em>nothing else of its item
+    /// set</em>. <c>ApplyCellAttributes</c> (:7412) carries the four text distances, the two
+    /// adjusts, the writing mode and the fill; <c>SDRATTR_TEXT_FITTOSIZE</c> is not among them,
+    /// and <c>svx/source/table</c> mentions autofit nowhere at all. So the fit the group's members
+    /// were given at :1099 is discarded on the way into the table.
+    /// </para>
+    /// <para>
+    /// <strong>Confirmed twice.</strong> In 26.2.4.2's own flat ODP of
+    /// <c>slides/ceiling-001/ppt/Thailand17.ppt</c> the deck's autofitted bodies export
+    /// <c>style:shrink-to-fit="true"</c> and every one of page 11's 54
+    /// <c>table:table-cell</c> styles states none, all 42 of its spans stating a flat
+    /// <c>fo:font-size="12pt"</c>; in its own PDF of the same file every one of the page's 77
+    /// body spans is drawn at 11.99 pt, where this tree drew the 35 spans whose cell wraps to two
+    /// lines at 11.00 — <c>round(12 × 0.925)</c>, <c>constScaleLevels</c>' second row.
+    /// </para>
     /// </remarks>
-    internal static bool Autofits(EscherShape shape, PptTextRun run)
+    /// <param name="shape">The shape carrying the text.</param>
+    /// <param name="run">Its text, whose <c>TextHeaderAtom</c> kind decides the rule.</param>
+    /// <param name="inTable">Whether the shape is a member of a group the reference tables.</param>
+    internal static bool Autofits(EscherShape shape, PptTextRun run, bool inTable = false)
     {
         ArgumentNullException.ThrowIfNull(shape);
         ArgumentNullException.ThrowIfNull(run);
+
+        if (inTable) return false;
 
         if (run.Kind is not (PptTextKind.Body or PptTextKind.HalfBody or PptTextKind.QuarterBody))
         {
@@ -1548,6 +1878,167 @@ internal sealed class PptSlideLayout
             (shape.Properties.Value(PptShapeGeometry.FitTextToShape, 0) & PptShapeGeometry.FitShapeToText) != 0;
 
         return !growsToText && Wraps(shape);
+    }
+
+    /// <summary>
+    /// Whether a group shape is really a table.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two properties are in the group descriptor's <em>tertiary</em> table,
+    /// <c>msofbtUDefProp</c>, and the reference reads them only from a shape holding no text of
+    /// its own (<c>svdfppt.cxx</c>:1202-1240): <c>DFF_Prop_tableProperties</c> with either low bit
+    /// set, and <c>DFF_Prop_tableRowProperties</c> present and non-empty. A group answering both
+    /// is replaced wholesale by an <c>SdrTableObj</c> at <c>:2913</c>.
+    /// </para>
+    /// <para>
+    /// This tree still draws the group as the rectangles it literally is — which is what the
+    /// reference's table decomposes back into — and takes three consequences of the substitution:
+    /// a cell's text is not autofitted, its row heights come from <see cref="PptTableRows"/>
+    /// rather than from the members' own anchors, and a rule is drawn at
+    /// <see cref="TableBorderWidth"/> rather than at the width the file states. See
+    /// <c>probes/slides-bullet2-r112/results.md</c> and <c>probes/slide-table-r113/results.md</c>.
+    /// </para>
+    /// <para>
+    /// Censused over the 51 <c>.ppt</c> of the corpus
+    /// (<c>probes/slides-bullet2-r112/tablecensus.py</c>): <strong>34 table groups in 10
+    /// documents, 1089 members, of which 391 in 5 documents hold Body-kind text</strong> and are
+    /// therefore the reach of the arm above.
+    /// </para>
+    /// </remarks>
+    internal static bool IsTableGroup(EscherShape group)
+        => (group.TertiaryProperties.Value(PptShapeGeometry.TableProperties, 0) & 3) != 0
+           && !group.TertiaryProperties.Data(PptShapeGeometry.TableRowProperties).IsEmpty;
+
+    /// <summary>
+    /// The rows a table group's members are re-laid onto, or null when nothing moves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CreateTable</c> (<c>svdfppt.cxx</c>:7569) seeds the table's rows from the non-line
+    /// members' snap-rect tops and measures the last one to the group's own bottom
+    /// (<c>CreateTableRows</c>, :7339), and <c>TableLayouter::LayoutTableHeight</c>
+    /// (<c>svx/source/table/tablelayouter.cxx</c>:724) then raises each to
+    /// <c>max(stated, minimum)</c> before <see cref="PptTableRows"/>'s own remark takes over. The
+    /// minimum is the tallest single-row cell's <c>Cell::getMinimumHeight</c>
+    /// (<c>svx/source/table/cell.cxx</c>:686): its text laid out at the cell's width less the two
+    /// horizontal distances, plus one hundredth of a millimetre, plus the two vertical distances.
+    /// A cell spanning rows is deferred to its last row.
+    /// </para>
+    /// <para>
+    /// <strong>A row none of whose cells can be measured keeps what the file states.</strong> The
+    /// reference measures an empty cell as one empty paragraph of the draw outliner's own font,
+    /// which is not in the file and cannot be recovered from it; a zero would be worse than the
+    /// stated height in both directions, because the second layout can shrink a row as well as
+    /// grow it and would collapse such a row outright. Measured: it is the last row of
+    /// <c>joint_user_outcomes_michael_fullerton_29.06.12.ppt</c> page 15, where the guard leaves
+    /// 19.25 pt against the reference's 19.42 and dropping it leaves nothing at all.
+    /// </para>
+    /// <para>
+    /// The arithmetic is done in the group's own child space, which is what a member's anchor is
+    /// stated in; a minimum is measured on the page and divided back by the group's own scale,
+    /// because the text is laid out at the size it is drawn at.
+    /// </para>
+    /// </remarks>
+    private PptTableRows? TableRows(EscherShape group, Context context, AffineTransform inner)
+    {
+        if (inner.A <= 0 || inner.D <= 0) return null;
+
+        Context cells = context with { InTable = true };
+        List<(EscherShape Shape, long Top, long Bottom, long Width)> members = [];
+        long groupTop = long.MaxValue;
+        long groupBottom = long.MinValue;
+        SortedSet<long> tops = [];
+
+        foreach (EscherShape child in group.Children)
+        {
+            if (AnchorOf(child) is not { } a) continue;
+
+            long top = Units(a.Top).Emu;
+            long bottom = top + Units(a.Height).Emu;
+            groupTop = Math.Min(groupTop, top);
+            groupBottom = Math.Max(groupBottom, bottom);
+
+            if (IsTableRule(child)) continue;
+
+            // A member narrower or shorter than one unit is not a cell (`GetCellPosition`,
+            // `svdfppt.cxx`:7193) but it does seed a row, exactly as it does there.
+            tops.Add(top);
+            if (a.Width > 1 && a.Height > 1)
+            {
+                members.Add((child, top, bottom, Units(a.Width).Emu));
+            }
+        }
+
+        if (tops.Count == 0 || groupBottom <= tops.Min) return null;
+
+        long[] edges = [.. tops, groupBottom];
+        long[] minimums = new long[edges.Length - 1];
+        bool[] measured = new bool[minimums.Length];
+        List<(int Last, int First, long Minimum)> spanning = [];
+
+        foreach ((EscherShape shape, long top, long bottom, long width) in members)
+        {
+            int first = Array.BinarySearch(edges, top);
+            if (first < 0 || first >= minimums.Length) continue;
+
+            int last = first;
+            while (last + 1 < minimums.Length && edges[last + 1] < bottom) last++;
+
+            if (Minimum(shape, width) is not { } minimum) continue;
+
+            if (last > first)
+            {
+                spanning.Add((last, first, minimum));
+            }
+            else
+            {
+                minimums[first] = Math.Max(minimums[first], minimum);
+                measured[first] = true;
+            }
+        }
+
+        // A row none of whose cells could be measured keeps what the file states, and is
+        // therefore neither grown nor shrunk. See the remark above: the reference measures an
+        // empty cell as one empty paragraph of the draw outliner's own font, which is not in the
+        // file, and a zero here would let `distribute` collapse the row outright.
+        for (int row = 0; row < minimums.Length; row++)
+        {
+            if (!measured[row]) minimums[row] = edges[row + 1] - edges[row];
+        }
+
+        // A row-spanning cell only ever grows its last row, and the rows it covers are subtracted
+        // from what it needs -- except when the span starts at row zero, where the reference's own
+        // loop guard skips the subtraction outright (`tablelayouter.cxx`:830).
+        foreach ((int last, int first, long minimum) in spanning)
+        {
+            long remaining = minimum;
+            for (int row = Math.Max(first, 1); row < last; row++)
+            {
+                remaining -= Math.Max(edges[row + 1] - edges[row], minimums[row]);
+            }
+
+            minimums[last] = Math.Max(minimums[last], remaining);
+        }
+
+        return PptTableRows.Of(edges, groupTop, groupBottom, minimums);
+
+        long? Minimum(EscherShape shape, long width)
+        {
+            if (TextIn(shape, cells) is not { } text) return null;
+            if (text.Flow != VerticalText.None) return null;
+
+            Margins insets = Insets(shape);
+            Length textWidth = Length.FromEmu(
+                (long)(width * inner.A) - insets.Left.Emu - insets.Right.Emu);
+
+            if (textWidth <= Length.Zero) return null;
+
+            Length height = SlideTextLayout.Height(text.Body, textWidth, _fonts);
+            long onPage = height.Emu + Length.EmuPerMm100 + insets.Top.Emu + insets.Bottom.Emu;
+
+            return (long)(onPage / inner.D);
+        }
     }
 
     /// <summary>
@@ -1572,10 +2063,19 @@ internal sealed class PptSlideLayout
 
             uint reference = DffRecordBuffer.ReadUInt32(_stream.Content(record));
 
-            // A shape that refers to the slide list still carries its own extensions, and they
-            // still apply to the text it points at.
+            // A shape that refers to the slide list still carries its own extensions and its own
+            // ruler, and both still apply to the text it points at. See `PptTextReader.RulerIn`:
+            // the reference remembers the ruler's offset before it patches the client textbox
+            // header over to the referenced text, and every ruler in the two decks this decides
+            // is in a textbox that refers out.
+            PptTextRuler? ruler = PptTextReader.RulerIn(_stream, start, end);
+
             return OutlineText(context.Entry, reference, context.Fields) is { } outline
-                ? outline with { Extended = extended ?? outline.Extended }
+                ? outline with
+                  {
+                      Extended = extended ?? outline.Extended,
+                      Ruler = ruler ?? outline.Ruler,
+                  }
                 : null;
         }
 
@@ -1622,7 +2122,7 @@ internal sealed class PptSlideLayout
     /// first of several, and no preset declares both, so offering the value under each name
     /// hands it to whichever one the definition happens to use rather than guessing.
     /// </remarks>
-    private static Dictionary<string, double>? Guides(int? adjustment)
+    private static Dictionary<string, double>? Guides(double? adjustment)
         => adjustment is not { } value
             ? null
             : new Dictionary<string, double>(StringComparer.Ordinal)
@@ -1631,4 +2131,66 @@ internal sealed class PptSlideLayout
                 ["adj1"] = value,
             };
 
+    /// <summary>
+    /// The stated <c>adjustValue</c> in the units this shape's preset expects, at the size the
+    /// shape is finally drawn at.
+    /// </summary>
+    /// <remarks>
+    /// Taken at the size rather than once per shape because the conversion is not always a pure
+    /// scale — see <see cref="PptShapeGeometry.Adjustment"/> — and a shape that grows around its
+    /// own text changes its aspect ratio while it does so.
+    /// </remarks>
+    private static double? Adjustment(ushort shapeType, int? stated, DocSize size)
+        => stated is { } value ? PptShapeGeometry.Adjustment(shapeType, value, size) : null;
+
+    /// <summary>
+    /// The rectangle the shape's text is laid out in, turned over for the presets whose two
+    /// definitions are reflections of each other.
+    /// </summary>
+    private static DocRect TextRectangle(
+        EscherShape shape, string? preset, DocSize size, double? adjustment)
+    {
+        DocRect rectangle = SlidePresetGeometry.TextRectangle(preset, size, Guides(adjustment));
+
+        return PptShapeGeometry.MirrorsVertically(shape.ShapeType)
+            ? rectangle with { Y = size.Height - rectangle.Bottom }
+            : rectangle;
+    }
+
+    /// <summary>
+    /// The expanded preset, turned over when the binary vocabulary's definition of this shape type
+    /// is a vertical reflection of the DrawingML preset it is mapped to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reflection is applied to the geometry alone, in the shape's own coordinates, and
+    /// <em>before</em> the placement matrix — which is where <c>fFlipV</c> lives. That order is the
+    /// whole point: the flag is read correctly and always was, and applying it to a base that is
+    /// already upside down inverts the shape whether the flag is set or not.
+    /// </para>
+    /// <para>
+    /// The outline, its subpaths and the text rectangle turn over together, because the
+    /// <c>a:rect</c> a preset states is attached to its own geometry — <c>trapezoid</c>'s is
+    /// <c>r il it ir b</c>, which reaches the wide edge — and leaving it behind would put the text
+    /// against the edge the shape no longer has there. The shape's picture, fill and placement are
+    /// untouched: this mirror is a property of the <em>preset table</em>, not of the shape, and the
+    /// shape's own <c>fFlipV</c> is applied afterwards by <see cref="Placement"/>.
+    /// </para>
+    /// </remarks>
+    private static CustomShapeGeometry.Geometry Mirrored(
+        CustomShapeGeometry.Geometry geometry, EscherShape shape, DocSize size)
+    {
+        if (!PptShapeGeometry.MirrorsVertically(shape.ShapeType)) return geometry;
+
+        AffineTransform flip = new(1, 0, 0, -1, 0, size.Height.Emu);
+
+        IReadOnlyList<PresetSubpath>? subpaths = geometry.Subpaths is { Count: > 0 } parts
+            ? [.. parts.Select(part => part with { Outline = ShapeTransform.Apply(flip, part.Outline) })]
+            : geometry.Subpaths;
+
+        return new CustomShapeGeometry.Geometry(
+            ShapeTransform.Apply(flip, geometry.Outline),
+            geometry.TextRectangle with { Y = size.Height - geometry.TextRectangle.Bottom },
+            subpaths);
+    }
 }

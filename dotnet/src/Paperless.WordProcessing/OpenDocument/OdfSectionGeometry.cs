@@ -108,6 +108,66 @@ internal readonly record struct OdfSectionGeometry
     }
 
     /// <summary>
+    /// The geometry of a section nested inside <paramref name="parent"/>, which is never null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A section inside a section is not laid out inside its parent's columns. Writer inserts the child's
+    /// frame <em>behind</em> the parent, into the parent's own upper —
+    /// <c>pFrame-&gt;InsertBehind(pTmp-&gt;GetUpper(), pTmp)</c>,
+    /// <c>sw/source/core/layout/frmtool.cxx</c>:1795-1803 — and splits the parent at the child's end node
+    /// so that what follows is a second frame of the parent's format (<c>SwSectionFrame::SplitSect</c>,
+    /// <c>:1954-1960</c>). The parent's <c>SwColumnFrame</c>s are inside the parent's own frame, so a
+    /// sibling never sees them.
+    /// </para>
+    /// <para>
+    /// What the child <em>does</em> take from the parent is the indents, and the asymmetry has a seat of
+    /// its own. A nested section's format is derived from the enclosing section's
+    /// (<c>pFormat-&gt;SetDerivedFrom(pSectNd ? pSectNd-&gt;GetSection().GetFormat() : …)</c>,
+    /// <c>sw/source/core/docnode/ndsect.cxx</c>:1345), so <c>GetLRSpace()</c> finds the parent's item
+    /// where the child states none — while <c>GetCol()</c> never does, because
+    /// <c>SwSectionFormat</c>'s constructor puts the pool's default one-column item on every section
+    /// format outright (<c>SetFormatAttr(*GetDfltAttr(RES_COL))</c>,
+    /// <c>sw/source/core/docnode/section.cxx</c>:608-614). <c>SwSectionFrame::Init</c> then takes its
+    /// width from <c>GetUpper()-&gt;getFramePrintArea()</c> and insets it by that <c>GetLRSpace()</c>
+    /// (<c>sectfrm.cxx</c>:129-166).
+    /// </para>
+    /// <para>
+    /// The indents are one <c>SvxLRSpaceItem</c> and not two properties, so a child stating either
+    /// <c>fo:margin-left</c> or <c>fo:margin-right</c> replaces the pair and the side it left out is
+    /// nought. Measured on 26.2.4.2, one variant per arm: a child stating only a 1.5 in left indent
+    /// inside a parent indented 0.5 in and 0.75 in is drawn from 180.1 pt to the page's own right edge,
+    /// not to the parent's. <c>probes/odt-sectable-r92/nested.py</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="styles">The document's resolved styles.</param>
+    /// <param name="styleName">The nested section's <c>text:style-name</c>, which may be absent.</param>
+    /// <param name="parent">The geometry of the section it is nested in.</param>
+    internal static OdfSectionGeometry Nested(
+        OdfStyles styles, string? styleName, OdfSectionGeometry parent)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+
+        OdfPropertySet? properties = styleName is null ? null : Resolve(styles, styleName);
+
+        bool statesIndent =
+            properties is not null
+            && (properties.Get(OdfNamespaces.FoCompatible, "margin-left") is not null
+                || properties.Get(OdfNamespaces.FoCompatible, "margin-right") is not null);
+
+        return new OdfSectionGeometry
+        {
+            Columns = properties is null ? 1 : OdfPageGeometry.ColumnCount(properties),
+            ColumnGap = properties is null ? Length.Zero : OdfPageGeometry.ColumnGap(properties),
+            Properties = properties,
+            IndentLeft = statesIndent ? Indent(properties!, "margin-left") : parent.IndentLeft,
+            IndentRight = statesIndent ? Indent(properties!, "margin-right") : parent.IndentRight,
+            BalancesColumns =
+                properties?.Get(OdfNamespaces.Text, "dont-balance-text-columns") != "true",
+        };
+    }
+
+    /// <summary>
     /// The section properties a style name resolves to, following the parent chain.
     /// </summary>
     /// <remarks>

@@ -2037,6 +2037,28 @@ internal sealed class EmfReader
         return true;
     }
 
+    /// <summary>
+    /// Draws a lone blit that is its own transparency mask, or answers false when its bitmap
+    /// cannot be read as pixels.
+    /// </summary>
+    /// <remarks>
+    /// The merge is the paired one with the same bitmap on both sides — see
+    /// <see cref="RasterOperations.IsSelfMasked"/>.
+    /// </remarks>
+    private bool SelfMask(PendingBlit blit)
+    {
+        if (DeviceIndependentBitmap.ReadPixels(blit.Data.Span) is not { } pixels) return false;
+
+        Place(
+            RasterOperations.Merge(pixels, pixels, invertMask: false),
+            pixels.Width,
+            pixels.Height,
+            blit.Destination,
+            blit.Source);
+
+        return true;
+    }
+
     private void FlushBlit()
     {
         if (_pending is not { } blit) return;
@@ -2050,6 +2072,8 @@ internal sealed class EmfReader
         }
 
         if (blit.Operation is RasterOperations.DestinationCopy) return;
+
+        if (RasterOperations.IsSelfMasked(blit.Operation) && SelfMask(blit)) return;
 
         if (blit.Operation != RasterOperations.SourceCopy)
         {

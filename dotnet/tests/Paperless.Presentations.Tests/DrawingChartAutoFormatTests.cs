@@ -196,7 +196,12 @@ public class DrawingChartAutoFormatTests
         // 9525 EMU at 300% is 28575 EMU, which is 2.25 pt. Against the hairline this otherwise
         // gets, that is the difference between a chart and a wireframe.
         ChartPlot plot = Read($"<c:lineChart>{Series(0)}</c:lineChart>");
-        plot.Series[0].LineWidth.Emu.ShouldBe(28575);
+        // `convertEmuToHmm` rounds a DrawingML width to a whole hundredth of a millimetre, so the
+        // reference never holds the EMU the file states. `DrawingChartAutoFormat.LineWidth` has
+        // the two legs; `probes/stroke-resid-r117/results.md` §3 has the measurements.
+        // 28575 EMU is 79.375 of them and 26.2.4.2 draws 79 — measured on
+        // `words-chart-auto-line.docx`, whose line series states exactly this width.
+        plot.Series[0].LineWidth.ShouldBe(Core.Units.Length.FromMm100(79));
     }
 
     [Fact]
@@ -267,7 +272,10 @@ public class DrawingChartAutoFormatTests
             space: "<c:spPr><a:ln w=\"25400\"><a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill></a:ln></c:spPr>");
 
         plot.Border.ShouldBe(new Colour(0, 0, 0));
-        plot.BorderWidth.Emu.ShouldBe(25400);
+        // `convertEmuToHmm` rounds a DrawingML width to a whole hundredth of a millimetre, so the
+        // reference never holds the EMU the file states. `DrawingChartAutoFormat.LineWidth` has
+        // the two legs; `probes/stroke-resid-r117/results.md` §3 has the measurements.
+        plot.BorderWidth.ShouldBe(Core.Units.Length.FromMm100(71));
     }
 
     [Fact]

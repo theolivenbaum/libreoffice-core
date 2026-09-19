@@ -55,9 +55,26 @@ Usage
 
     python3 dotnet/probes/provenance-index.py            # write PROVENANCE.tsv
     python3 dotnet/probes/provenance-index.py --check    # exit 1 if out of date
+    python3 dotnet/probes/provenance-index.py --force    # write even if rows are lost
 
 Re-run it after adding probe output, or the index is itself an instance of the
 problem it documents.
+
+Two safety rules, both added after this script destroyed data
+-------------------------------------------------------------
+
+**Any unrecognised argument used to trigger a full rewrite.** `main` tested
+`"--check" in sys.argv` and otherwise wrote, so `--help`, `-h` and every typo
+silently regenerated the file. One round ran it by accident that way. Arguments
+are now parsed explicitly and anything unknown writes nothing.
+
+**And a rewrite loses rows, in the main checkout, today.** `build()` reproduces
+1232 rows against the 2155 the file holds — rounds have appended rows by hand
+that the walk does not regenerate, so the "just re-run it" contract has been
+broken for some time and regenerating silently discards 923 figures. A write
+that would drop any path now refuses and names the count; `--force` overrides it
+for whoever genuinely means to prune. Fixing `build()` to reproduce the whole
+file is a separate job and is not attempted here.
 """
 
 import os
@@ -181,13 +198,36 @@ def main() -> int:
     text = "\t".join(header) + "\n" + body + "\n"
 
     target = os.path.join(root, OUT)
-    if "--check" in sys.argv:
+
+    args = [a for a in sys.argv[1:]]
+    unknown = [a for a in args if a not in ("--check", "--force")]
+    if unknown:
+        # Anything unrecognised - `--help` and every typo included - must write
+        # nothing. This branch did not exist, and `main` wrote unconditionally
+        # unless `--check` was present, so asking the script for help rewrote the
+        # index instead.
+        print(__doc__.split("Usage")[1].split("Two safety rules")[0].strip(), file=sys.stderr)
+        return 0 if unknown[0] in ("-h", "--help") else 2
+
+    if "--check" in args:
         existing = open(target).read() if os.path.isfile(target) else ""
         if existing != text:
             print(f"{OUT} is out of date; re-run provenance-index.py", file=sys.stderr)
             return 1
         print(f"{OUT} is up to date ({len(rows)} figures)")
         return 0
+
+    # A rewrite currently *loses* rows: rounds have appended entries by hand that
+    # the walk does not regenerate. Refuse rather than discard them silently.
+    lost = 0
+    if os.path.isfile(target):
+        have = {ln.split("\t", 1)[0] for ln in open(target).read().splitlines()[1:] if ln}
+        lost = len(have - {r[0] for r in rows})
+    if lost and "--force" not in args:
+        print(f"{OUT}: refusing to write - {lost} of {len(have)} rows would be lost "
+              f"({len(rows)} regenerated). Re-run with --force if that is intended.",
+              file=sys.stderr)
+        return 1
 
     open(target, "w").write(text)
     stale = sum(1 for r in rows if r[5] == "CITED-STALE")

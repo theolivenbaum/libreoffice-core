@@ -202,6 +202,57 @@ public sealed record PageParagraph : PageBlock
     public Length Tracking { get; init; }
 
     /// <summary>
+    /// The character width scaling applied where the paragraph's runs say nothing else, as a
+    /// percentage.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Tracking"/>'s twin, and it was missing for exactly the reason the remark above
+    /// gives for tracking: a paragraph set end to end in one scaled style is <strong>uniform by
+    /// every test <see cref="Runs"/> makes</strong>, so it arrives at <see cref="Measure"/> with
+    /// no runs at all and was measured — and drawn — at 100 per cent. The property was resolved
+    /// correctly through the style chain the whole time; it had nowhere to go.
+    /// </para>
+    /// <para>
+    /// That is also why a run stating the <em>same</em> percentage as its style came out
+    /// unscaled, which is a trap for anyone probing this: setting the run to its style's own
+    /// value makes the paragraph uniform and so reproduces the defect rather than controlling for
+    /// it. A seat was nearly filed as "<c>w:w</c> is not applied at all" on that reading.
+    /// </para>
+    /// <para>
+    /// Measured on <c>Regulations Governing the Status…docx</c>, whose title style <c>SL</c>
+    /// states <c>&lt;w:w w:val="96"/&gt;</c> and whose title runs state no <c>w:rPr</c> at all:
+    /// its <c>Experts on Mission</c> was drawn <b>227.56 pt</b> against 26.2.4.2's <b>218.06</b>,
+    /// same face and same start, and the title then wrapped a word later on every line.
+    /// </para>
+    /// </remarks>
+    public int WidthPerCent { get; init; } = 100;
+
+    /// <summary>
+    /// Whether the paragraph's own character width is anything but natural, which is what puts it
+    /// on the measured path rather than the shortcut.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both layouters take a shortcut for a paragraph with no runs: they hand the line breaker the
+    /// <em>text</em>, a face, a size and <see cref="EffectiveShaping"/>, and that overload measures
+    /// from those alone. Tracking survives it because <see cref="EffectiveShaping"/> carries it;
+    /// a character width has nowhere to ride, so the lines were broken at the <b>unscaled</b>
+    /// widths and then drawn at the scaled ones.
+    /// </para>
+    /// <para>
+    /// That is why the defect was invisible to a one-line probe and to a width measurement: the
+    /// drawn line is exactly <c>scale ×</c> the unscaled one, so it looks right until the text is
+    /// long enough to wrap and then it breaks in the unscaled places. Measured on
+    /// <c>features/words-style-char-scale.docx</c>, whose fourth paragraph is a scaled style over
+    /// eighteen words: 26.2.4.2 breaks it into <b>two</b> lines and this tree broke it into
+    /// <b>three</b>, each exactly 0.6 of the unscaled control's — the same three the control
+    /// breaks into.
+    /// </para>
+    /// </remarks>
+    public bool IsHorizontallyScaled => WidthPerCent != TextWidthScale.Natural;
+
+    /// <summary>
     /// How the paragraph's text is shaped where its runs say nothing else, once
     /// <see cref="Tracking"/> has had its say.
     /// </summary>
@@ -640,7 +691,9 @@ public sealed record PageParagraph : PageBlock
 
         if (runs.Count == 0)
         {
-            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping, Tracking: Tracking, Item: Item));
+            runs.Add(new FormattedRun(
+                0, Text.Length, Face, EmSize, Shaping,
+                Tracking: Tracking, WidthPerCent: WidthPerCent, Item: Item));
         }
 
         return MeasuredParagraph.Measure(
@@ -918,10 +971,15 @@ public sealed record PageNote
 /// when it has none. It changes no measurement: the band takes the room the glyphs already had, so a
 /// document gains and loses highlighting without a line moving.
 /// </param>
-/// <param name="IsUnderlined">
-/// True when a rule is drawn under the run — <c>w:u</c>, <c>sprmCKul</c>, <c>\ul</c> and
+/// <param name="Underline">
+/// How the run is underlined — <c>w:u</c>, <c>sprmCKul</c>, <c>\ul</c> and
 /// <c>style:text-underline-style</c>. Like <paramref name="Highlight"/> it changes no measurement: the
 /// rule is drawn across the advance the glyphs already had, so nothing reflows when it appears.
+/// <para>
+/// A tri-state and not a flag, because <c>w:u w:val="double"</c>, <c>\uldb</c>, ODF's
+/// <c>style:text-underline-type="double"</c> and <c>sprmCKul</c> operand 3 all ask for
+/// <em>two thinner lines at their own offsets</em> rather than one. See <see cref="TextUnderline"/>.
+/// </para>
 /// </param>
 /// <param name="IsStruckThrough">
 /// True when a rule is drawn through the run — <c>w:strike</c> and <c>w:dstrike</c>,
@@ -960,7 +1018,7 @@ public readonly record struct PageRun(
     PageCaseMap CaseMap = PageCaseMap.None,
     Length MetricEmSize = default,
     Colour Highlight = default,
-    bool IsUnderlined = false,
+    TextUnderline Underline = TextUnderline.None,
     bool IsStruckThrough = false,
     Length Tracking = default,
     int WidthPerCent = 100,
@@ -982,6 +1040,9 @@ public readonly record struct PageRun(
     /// answer: the measurement decided where the line broke on the strength of it.
     /// </remarks>
     public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
+
+    /// <summary>True when a rule of any kind is drawn under the run.</summary>
+    public bool IsUnderlined => Underline != TextUnderline.None;
 
     /// <summary>True when the run carries a rule under it, through it, or both.</summary>
     public bool IsDecorated => IsUnderlined || IsStruckThrough;
@@ -1096,6 +1157,16 @@ public readonly record struct PageRun(
 /// Zero on every line of every paragraph but the first one a fly displaced — see
 /// <see cref="ParagraphTop"/> for why it has to come back off again.
 /// </param>
+/// <param name="BodyLeft">
+/// The left edge of the text area this line was laid out in, when that is not the page's own — see
+/// <see cref="BodyWidth"/>, which is what says whether either is stated.
+/// </param>
+/// <param name="BodyWidth">
+/// The width of that text area, or zero when the line takes the page's. Zero rather than a nullable
+/// pair because a text area of no width is not a thing a section can state, so the degenerate value is
+/// free to mean <em>unstated</em> — and because every line of every document that has no text section in
+/// it then leaves the two at their default.
+/// </param>
 /// <remarks>
 /// <see cref="UpperSpace"/> is carried because a frame anchored to the paragraph is positioned from a
 /// point above the line: Writer's <c>SwAnchoredObjectPosition::GetTopForObjPos</c>
@@ -1112,6 +1183,15 @@ public readonly record struct PageRun(
 /// again below — and the page as a whole then has no single answer. Reading the count off the page put
 /// the *last* section's answer on every line of it, which drew a full-width paragraph into half a column.
 /// </para>
+/// <para>
+/// <see cref="BodyWidth"/> is carried for the other half of the same argument. A page carries one text
+/// area and it is whichever section's was current when the page was emitted, but an ODF
+/// <c>text:section</c> is a frame inside the body and takes its own indents
+/// (<c>SwSectionFrame::Init</c>, <c>sw/source/core/layout/sectfrm.cxx</c>:129-166), so a page can hold a
+/// stretch measured from one left edge above a stretch measured from another. Line breaking already used
+/// the indented measure; the drawing used the page's, which put an indented two-column section's first
+/// column at 72 pt where 26.2.4.2 draws it at 108.
+/// </para>
 /// </remarks>
 public readonly record struct PlacedLine(
     int ParagraphIndex,
@@ -1123,8 +1203,16 @@ public readonly record struct PlacedLine(
     int Columns = 1,
     Length ColumnGap = default,
     ColumnRuler? ColumnRuler = null,
-    Length FlyDisplacement = default)
+    Length FlyDisplacement = default,
+    Length BodyLeft = default,
+    Length BodyWidth = default)
 {
+    /// <summary>True when the line was laid out in a text area of its own rather than the page's.</summary>
+    /// <remarks>
+    /// <see cref="BodyWidth"/> is the discriminator and <see cref="BodyLeft"/> is meaningless without it.
+    /// </remarks>
+    public bool HasOwnBody => BodyWidth > Length.Zero;
+
     /// <summary>Where a frame anchored to this line's paragraph measures its offset from.</summary>
     /// <remarks>
     /// The paragraph's top for object positioning — see <see cref="UpperSpace"/>. Equal to
@@ -1335,35 +1423,60 @@ public sealed record LaidOutPage
     /// </remarks>
     /// <param name="column">The column, counted from zero at the leading edge.</param>
     public DocRect ColumnArea(int column)
-        => Area(ColumnCount, ColumnGap, ColumnRuler, column);
+        => Area(BodyArea, ColumnCount, ColumnGap, ColumnRuler, column);
 
     /// <summary>
     /// The rectangle one line's own coordinates are relative to.
     /// </summary>
     /// <remarks>
     /// A line's own column count rather than the page's, because a page can hold sections that disagree
-    /// about it — see <see cref="PlacedLine.Columns"/>. Falls back to the page's for a line that states
-    /// nothing, which is every line laid out before the field existed and every line of a flow.
+    /// about it — see <see cref="PlacedLine.Columns"/>.
+    /// <para>
+    /// A line that states one column takes the whole body, <em>whatever the page states</em>. It used to
+    /// take the page's column at the line's own index instead, on the reading that a line stating one
+    /// column had stated nothing — and that put a full-measure index inside a two-column page's second
+    /// column on `absrc-pac-01-info-note-en.odt`, because the page is written with whichever section is
+    /// current when it is emitted. Every line the paginator places records the count in force where it
+    /// was laid out, so there is no such thing as a body line that states nothing.
+    /// </para>
     /// </remarks>
     /// <param name="line">The line whose rectangle is wanted.</param>
     public DocRect ColumnArea(PlacedLine line)
     {
-        if (line.Columns <= 1 && ColumnCount > 1) return ColumnArea(line.Column);
-        if (line.Columns <= 1) return BodyArea;
+        DocRect body = BodyAreaOf(line);
 
-        return Area(line.Columns, line.ColumnGap, line.ColumnRuler, line.Column);
+        if (line.Columns <= 1) return body;
+
+        return Area(body, line.Columns, line.ColumnGap, line.ColumnRuler, line.Column);
     }
 
+    /// <summary>The text area one line was laid out in, which is the page's unless it states its own.</summary>
+    /// <remarks>
+    /// Horizontal only: a text section is inset from the body's sides and begins wherever the flow had
+    /// reached, so its top and its height are the page's — <see cref="PlacedLine.Top"/> is measured from
+    /// the page's body area and stays so. See <see cref="PlacedLine.BodyWidth"/>.
+    /// </remarks>
+    /// <param name="line">The line whose text area is wanted.</param>
+    public DocRect BodyAreaOf(PlacedLine line)
+        => line.HasOwnBody
+            ? new DocRect(line.BodyLeft, BodyArea.Y, line.BodyWidth, BodyArea.Height)
+            : BodyArea;
+
     /// <summary>
-    /// One column's rectangle inside <see cref="BodyArea"/>, from either description of the columns.
+    /// One column's rectangle inside a text area, from either description of the columns.
     /// </summary>
     /// <remarks>
-    /// The page and a line each state their own count, gap and ruler — a page can hold sections that
-    /// disagree about all three — and the arithmetic below is the same for both, so it lives here rather
-    /// than twice. A ruler whose count does not match is ignored, which is the lenient reading a section
-    /// that states widths for columns it does not have needs.
+    /// The page and a line each state their own count, gap and ruler, and a line its own text area — a
+    /// page can hold sections that disagree about all four — and the arithmetic below is the same for
+    /// both, so it lives here rather than twice. A ruler whose count does not match is ignored, which is
+    /// the lenient reading a section that states widths for columns it does not have needs.
     /// </remarks>
-    private DocRect Area(int count, Length gap, ColumnRuler? ruler, int column)
+    /// <param name="body">The text area being divided: the page's, or the line's own.</param>
+    /// <param name="count">How many columns it is divided into.</param>
+    /// <param name="gap">The gap between two of them.</param>
+    /// <param name="ruler">Their stated widths, or null when they are even.</param>
+    /// <param name="column">The column wanted, counted from zero at the leading edge.</param>
+    private DocRect Area(DocRect body, int count, Length gap, ColumnRuler? ruler, int column)
     {
         int columns = Math.Max(1, count);
         int at = Math.Clamp(column, 0, columns - 1);
@@ -1375,14 +1488,14 @@ public sealed record LaidOutPage
         if (ruler is { } stated && stated.Count == columns)
         {
             return new DocRect(
-                BodyArea.X + stated.OffsetOf(at), BodyArea.Y, stated.WidthAt(at), BodyArea.Height);
+                body.X + stated.OffsetOf(at), body.Y, stated.WidthAt(at), body.Height);
         }
 
         Length gaps = gap * (columns - 1);
-        Length width = BodyArea.Width - gaps;
-        width = width > Length.Zero ? width / columns : BodyArea.Width;
+        Length width = body.Width - gaps;
+        width = width > Length.Zero ? width / columns : body.Width;
 
-        return new DocRect(BodyArea.X + ((width + gap) * at), BodyArea.Y, width, BodyArea.Height);
+        return new DocRect(body.X + ((width + gap) * at), body.Y, width, body.Height);
     }
 
     /// <summary>The lines on the page, in order.</summary>

@@ -3,6 +3,7 @@ using Paperless.Core.Extraction;
 using Paperless.Core.Globalization;
 using Paperless.Core.Graphics;
 using Paperless.Text.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Rtf;
 
@@ -152,7 +153,13 @@ public sealed partial class RtfDocumentReader
         /// not the colour table's first entry.
         /// </remarks>
         public int? HighlightColourIndex { get; set; }
-        public bool Underline { get; set; }
+        /// <summary>How the <c>\ul…</c> words in force underline the run.</summary>
+        /// <remarks>
+        /// Two of the seventeen draw two lines — <c>\uldb</c> and <c>\ululdbwave</c>, which
+        /// <c>writerfilter</c> maps to <c>LINESTYLE_DOUBLE</c> and <c>LINESTYLE_DOUBLEWAVE</c> — and
+        /// the rest one. See <see cref="TextUnderline"/>.
+        /// </remarks>
+        public TextUnderline Underline { get; set; }
         public bool Strike { get; set; }
         public bool Hidden { get; set; }
 
@@ -168,6 +175,26 @@ public sealed partial class RtfDocumentReader
         /// stated, which is what <c>\kerning0</c> also says.
         /// </remarks>
         public bool AutoKerning { get; set; }
+
+        /// <summary>
+        /// <c>\charscalexN</c>: the character width, as a percentage, 100 when nothing states one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// [src] The tokeniser's row is
+        /// <c>{ "charscalex", { RTFControlType::VALUE, RTFKeyword::CHARSCALEX, <b>100</b> } }</c>
+        /// (<c>sw/source/writerfilter/rtftok/rtftokenizer.cxx</c>:253), and the dispatch is
+        /// <c>nSprm = NS_ooxml::LN_EG_RPrBase_w</c> (<c>rtfdispatchvalue.cxx</c>:193) — the very sprm
+        /// <c>w:w</c> uses, so out of range resets to 100 exactly as the DOCX filter does.
+        /// </para>
+        /// <para>
+        /// <strong>A bare <c>\charscalex</c> is 100, not 0</strong>, because that <c>defValue</c> is
+        /// 100 — the opposite of <see cref="AutoKerning"/> beside it, whose bare <c>\kerning</c> is
+        /// zero by RTF's own default-of-zero rule. It is the one place the two differ and the easy
+        /// thing to copy wrongly; measured at 26.2.4.2, a bare <c>\charscalex</c> draws at 1.00000.
+        /// </para>
+        /// </remarks>
+        public int WidthPerCent { get; set; } = 100;
 
         /// <summary>True inside <c>\caps</c>: drawn in capitals whatever the text says.</summary>
         public bool Capitals { get; set; }
@@ -306,6 +333,7 @@ public sealed partial class RtfDocumentReader
             Capitals = Capitals,
             SmallCapitals = SmallCapitals,
             AutoKerning = AutoKerning,
+            WidthPerCent = WidthPerCent,
             Revised = Revised,
             RevisionAuthor = RevisionAuthor,
             RevisionDate = RevisionDate,
@@ -356,12 +384,13 @@ public sealed partial class RtfDocumentReader
             TabStops = [];
             PendingTabAlignment = TabAlignment.Left;
             PendingTabLeader = '\0';
-            Underline = false;
+            Underline = TextUnderline.None;
             Strike = false;
             Hidden = false;
             Capitals = false;
             SmallCapitals = false;
             AutoKerning = false;
+            WidthPerCent = 100;
             Revised = false;
             VerticalPosition = 0;
             CharacterStyleId = 0;
@@ -819,12 +848,25 @@ public sealed partial class RtfDocumentReader
                 // Hidden text is not displayed by any reader, so extracting it would inject text
                 // the document does not show.
                 if (state.Hidden) return;
+
+                // A REF field's result is recomputed from its bookmark rather than taken from the
+                // file, on the read that knows what the bookmarks say.
+                if (_fieldResultDepth >= 0) text = SubstitutedFieldText(text);
+                if (text.Length == 0) return;
+
                 NoteBodyContent();
                 AppendToParagraph(state, text);
                 return;
 
             case RtfDestination.ListText:
                 CurrentFlow.ListMarker.Append(text);
+                return;
+
+            // The one destination whose text is the reader's rather than the group's: a group nested
+            // inside a bookmark's name shares its buffer, so `{\*\bkmkend {x}A}` names `xA`.
+            case RtfDestination.BookmarkStart:
+            case RtfDestination.BookmarkEnd:
+                AppendBookmarkName(text);
                 return;
 
             case RtfDestination.ColourTable:
@@ -848,8 +890,6 @@ public sealed partial class RtfDocumentReader
             case RtfDestination.AnnotationAuthor:
             case RtfDestination.FieldInstruction:
             case RtfDestination.RevisionTable:
-            case RtfDestination.BookmarkStart:
-            case RtfDestination.BookmarkEnd:
             case RtfDestination.Deletion:
 
             // The two halves of an Escher property, whose text is the whole of what they say: a
@@ -920,7 +960,7 @@ public sealed partial class RtfDocumentReader
         RunEmphasis emphasis = RunEmphasis.None;
         if (state.Bold) emphasis |= RunEmphasis.Bold;
         if (state.Italic) emphasis |= RunEmphasis.Italic;
-        if (state.Underline) emphasis |= RunEmphasis.Underline;
+        if (state.Underline != TextUnderline.None) emphasis |= RunEmphasis.Underline;
         if (state.Strike) emphasis |= RunEmphasis.Strikethrough;
         if (state.VerticalPosition > 0) emphasis |= RunEmphasis.Superscript;
         if (state.VerticalPosition < 0) emphasis |= RunEmphasis.Subscript;
@@ -1204,7 +1244,8 @@ public sealed partial class RtfDocumentReader
             ColourAt(state.HighlightColourIndex),
             state.Underline,
             state.Strike,
-            state.AutoKerning);
+            state.AutoKerning,
+            state.WidthPerCent);
 
         flow.LayoutLength += length;
 
@@ -1347,7 +1388,8 @@ public sealed partial class RtfDocumentReader
             // and an outline level that shows no number writes the group with nothing but that tab,
             // which trims to nothing rather than to a label made of whitespace.
             flow.ListMarker.ToString().Trim() is { Length: > 0 } marker ? marker : null,
-            state.AutoKerning);
+            state.AutoKerning,
+            state.WidthPerCent);
 
         if (cell is not null) cell.Add(new RtfLayoutBlock(recorded));
         else into!.Add(recorded);
@@ -1398,7 +1440,8 @@ public sealed partial class RtfDocumentReader
             ColourAt(state.HighlightColourIndex),
             state.Underline,
             state.Strike,
-            state.AutoKerning);
+            state.AutoKerning,
+            state.WidthPerCent);
 
     /// <summary>The escapement <c>\super</c> or <c>\sub</c> put in force, if either did.</summary>
     /// <remarks>
@@ -1836,11 +1879,11 @@ public sealed partial class RtfDocumentReader
                 break;
 
             case RtfDestination.BookmarkStart:
-                RecordBookmark(state, start: true);
+                RecordBookmark(start: true);
                 break;
 
             case RtfDestination.BookmarkEnd:
-                RecordBookmark(state, start: false);
+                RecordBookmark(start: false);
                 break;
 
             case RtfDestination.Deletion:
@@ -1864,7 +1907,7 @@ public sealed partial class RtfDocumentReader
         }
 
         // The cached result ends with the group that held it.
-        if (_fieldResultDepth >= 0 && _groupDepth <= _fieldResultDepth) EndFieldResult();
+        if (_fieldResultDepth >= 0 && _groupDepth <= _fieldResultDepth) EndFieldResult(state);
 
         // A field's hyperlink applies only within that field.
         if (_fieldDepth >= 0 && _groupDepth <= _fieldDepth)
@@ -1979,6 +2022,7 @@ public sealed partial class RtfDocumentReader
             SmallCapitals = Said("scaps") ? state.SmallCapitals : null,
             ForegroundColourIndex = Said("cf") ? state.ForegroundColourIndex : null,
             LanguageId = Said("lang", "langnp") ? state.LanguageId : null,
+            WidthPerCent = Said("charscalex") ? state.WidthPerCent : null,
 
             // The paragraph half. Three properties, not the whole of `\pard`'s vocabulary, and
             // which three is measured against 26.2.4.2 rather than chosen — see
@@ -2084,6 +2128,7 @@ public sealed partial class RtfDocumentReader
         if (f.SmallCapitals is { } smallCapitals) state.SmallCapitals = smallCapitals;
         if (f.ForegroundColourIndex is { } colour) state.ForegroundColourIndex = colour;
         if (f.LanguageId is { } language) state.LanguageId = language;
+        if (f.WidthPerCent is { } width) state.WidthPerCent = width;
     }
 
     /// <summary>
@@ -2097,12 +2142,13 @@ public sealed partial class RtfDocumentReader
         if (f.FontSizeHalfPoints is not null) state.FontSizeHalfPoints = null;
         if (f.Bold is not null) state.Bold = false;
         if (f.Italic is not null) state.Italic = false;
-        if (f.Underline is not null) state.Underline = false;
+        if (f.Underline is not null) state.Underline = TextUnderline.None;
         if (f.Strike is not null) state.Strike = false;
         if (f.Capitals is not null) state.Capitals = false;
         if (f.SmallCapitals is not null) state.SmallCapitals = false;
         if (f.ForegroundColourIndex is not null) state.ForegroundColourIndex = null;
         if (f.LanguageId is not null) state.LanguageId = 0;
+        if (f.WidthPerCent is not null) state.WidthPerCent = TextWidthScale.Natural;
     }
 
 }

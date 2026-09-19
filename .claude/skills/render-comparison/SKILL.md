@@ -67,6 +67,18 @@ reading that quietly promotes itself into a diagnosis is worse than no reading.
   track can be 163 of 163 page-exact while three passing pages opened at random yield a missing
   custom bullet, a hanging indent we invent, and glyphs a few percent narrow. Rank the *passing*
   documents by `|ink|%` and open the worst.
+  **Measured, and it pays on the first document:** ranking 48 passing slides and sheets that way
+  put `TICAPCapability_Final.xls` on top at 16.87 % summed unsigned ink — a document matching on
+  both pages and characters — and its worst page turned out to be missing a white panel and its
+  black outline, two `draw:custom-shape` text boxes whose text we already draw.
+- **Rank on ink, never on path counts.** Path count describes how a renderer structures its
+  output, not what lands on the page, and the two diverge wildly. On that same document we draw
+  **901** grey fills where the reference draws **one**, over the identical 42.4 % of the page.
+  Counting stroked and white-filled paths across the sample duly reported that *44 of 48 passing
+  documents draw fewer than the reference somewhere*, led by one at 3452 "missing" strokes — which
+  costs it under 0.31 % ink and is not a defect at all. Use path counts only to explain a
+  difference ink has already found; the order that worked was ink → drawing dump → the reference's
+  own flat ODF naming the object and quoting its style.
 - **Describe before you check the record.** Reading blind and only then looking up what is known
   is a control on the reading. A gradient description produced that way matched a diagnosis made
   a week earlier from source, with no chance of having been led to it.
@@ -675,10 +687,104 @@ The same export settles rounding questions that no amount of source-reading will
 workbooks came back 111.50 → 111 and 121.64 → 121 but 139.97 → 140 and 152.70 → 153, which
 says a device's quantisation decides them rather than a rounding rule.
 
+### It is a *second* leg, not the truth, and it has at least one blind spot
+
+The flat export is LibreOffice answering with its own importer and its own layout — but through
+its **ODF exporter**, which is a third piece of code and can drop what the other two computed.
+
+Measured: `ScXMLExport` calls `ScEditUtil::GetCellFieldValue(*pField, &rDoc, nullptr, nullptr)`
+(`sc/source/filter/xml/xmlexprt.cxx`:3062) with **both out-parameters null** — and that function
+is where a hyperlink cell's colour *and* its underline are decided
+(`sc/source/core/tool/editutil.cxx`:209-244). So on a Calc cell whose text is a hyperlink field,
+the `.fods` prints `underline=none` and `#000000` on the very cells the same binary's **PDF**
+draws navy and underlined. Two instruments over 307 documents agreed on hyperlinks 243 of 243 and
+disagreed on underlines on 17.
+
+So when the flat export and the rendered PDF disagree, **the PDF is the reference and the export is
+a witness that may have lost the attribute**. Use the export to find out what was computed; confirm
+anything it says is *absent* against the rendering before believing it. That disagreement is
+sometimes the finding — it was here.
+
+## What is drawn may not be the renderer's drawing at all
+
+An OLE object arrives with a **replacement picture** the authoring application stored beside
+it, and LibreOffice will happily draw that instead of rendering the object itself. So a page
+can be full of ink that LibreOffice's own layout code never produced, and every conclusion
+you draw about "how the reference draws this" is then a conclusion about Excel or PowerPoint.
+
+This is not a rare corner. A census of the corpus's six 3-D charts recorded five as rasters
+and one as **362 and 309 vector path items** — and built a scope decision on that one being
+the single document a 3-D implementation could be measured against. It was a `.ppt` OLE
+`Excel.Sheet.8`, and the vectors were PowerPoint's stored preview. LibreOffice had drawn a
+picture.
+
+**The test is a round trip, and it is a proper single-variable experiment.** Convert the
+document to flat ODF with the same binary and re-render it. Flat ODF carries the object's
+*model*, and drops a preview it has no reason to keep, so the second render is forced to
+draw the object live:
+
+```sh
+soffice --headless --convert-to fodp --outdir rt deck.ppt
+soffice --headless --convert-to pdf:impress_pdf_Export --outdir rt2 rt/deck.fodp
+```
+
+The same binary, the same slide, the same chart model — 362 and 309 paths one way, a
+635 x 155 raster and no paths the other. That difference *is* the preview.
+
+Two habits follow:
+
+- Before attributing drawn geometry to LibreOffice, check whether the frame holding it is an
+  OLE object. `--convert-to` will tell you: an object left as `<draw:object-ole>` with a raw
+  OLE2 payload was never converted, and one resolved to a real `<chart:chart>` or
+  `<office:document>` was.
+- A resolved model in the flat ODF does **not** prove the model was what got drawn. This
+  document's chart resolved to a genuine `chart:circle` with `chart:three-dimensional="true"`
+  and a `dr3d:transform`, and was still drawn from the preview.
+
+Note the round trip cuts both ways: it removes the preview, which is what makes it a clean
+experiment, and it also removes anything else the flat format cannot carry. Use it to answer
+*"is this the renderer's own drawing"*, not to establish what the renderer's drawing looks
+like in the original document.
+
+## A box a tool hands you may not be the box that was drawn
+
+`pdf-ops.py` reports what the operators say. Higher-level libraries often report something
+else — a *declared* extent — and the two diverge exactly where the interesting defects live.
+
+Measured, and it cost a round its headline. PyMuPDF's `page.get_image_info()` returns an image
+XObject's **placement box**, which is where the full bitmap would land if nothing clipped it.
+For a cropped picture that box is *deliberately* much larger than the visible frame: a picture
+showing the middle tenth of its source is placed ten times the frame's width and then clipped
+back. Read as drawn geometry, that looks exactly like a renderer scaling an image wildly and
+hanging it off the paper.
+
+A round reported two documents drawing a nested group's members **"~8.85x too wide and mostly
+off the paper"** on that basis. The next round found 8.85 was `1/(1 - l - r)` of each picture's
+own `a:srcRect` — four crops predicting 8.8176 / 8.7928 / 8.7291 / 8.9190 against measured
+boxes of 8.820 / 8.795 / 8.729 / 8.917. The clip rectangles agreed with the reference's own
+image placements to **0.09 pt**. Nothing was 8.85x anything; the transform had been right all
+along, and a model was nearly "fixed" by a factor derived from a number that was never a
+defect.
+
+**The general form:** *a defect whose magnitude is suspiciously close to a ratio the file
+states somewhere is probably that ratio, arriving through your instrument rather than through
+the renderer.* Before believing a gross geometric factor, try to reconstruct it from the
+document's own numbers. If you can, you have found your tool's convention, not a bug.
+
+Two habits:
+
+- When a tool reports a rectangle, know whether it is the **declared** extent or the
+  **effective** one. If the page has a clip, `re W n` in the operators is the box that matters,
+  and a raster crop tells you what actually landed.
+- The real defect was underneath the artefact and smaller: a `pic:pic` stating
+  `a:prstGeom prst="ellipse"` was clipped to its bounding box rather than to the ellipse. The
+  artefact was not hiding *nothing* — it was hiding something a tenth its apparent size, which
+  is the usual arrangement.
+
 ## The C++ in this tree is not the reference binary
 
 The checkout is a development branch; the `soffice` generating your references is a release
-(24.2.7.2 here). They disagree, and the source is the more persuasive of the two, which makes
+(26.2.4.2 here). They disagree, and the source is the more persuasive of the two, which makes
 it the more dangerous.
 
 Two diagnoses in this project were inverted by checking the installed binary instead of the

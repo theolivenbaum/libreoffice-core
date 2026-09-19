@@ -148,24 +148,35 @@ public sealed class DocShapeFieldTests
     }
 
     /// <summary>
-    /// The anchor characters of a <c>SHAPE</c> field leave nothing in the text.
+    /// An as-character frame leaves exactly one anchor character, and it costs no width.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// LibreOffice inserts a character for one of these only when the graphic fails —
-    /// <c>if (!pResult) cInsert = ' '</c>, <c>ww8par.cxx:3637</c> — and for the <c>U+0001</c> of a
-    /// <c>U+0008 U+0001</c> pair inside a <c>SHAPE</c> field it takes neither branch, so <c>cInsert</c> stays
-    /// at nought and nothing is inserted at all.
+    /// <strong>This test asserted the opposite for eight rounds and the claim it rested on is
+    /// withdrawn.</strong> It read <c>if (!pResult) cInsert = ' '</c> (<c>ww8par.cxx</c>:3637) as
+    /// "nothing is inserted", and the cost it quoted — the pair shaping to 18.67 pt of <c>.notdef</c>
+    /// between "Before the box." and "After the box." — was real when it was measured and is not
+    /// reachable now: <c>ShapingControls.IsRemovedBeforeShaping</c> drops the whole C0 range before the
+    /// shaper is given the run. Measured on this document with a binary built either way,
+    /// <em>"After the box."</em> is drawn at <b>304.06 pt on both</b>.
     /// </para>
     /// <para>
-    /// It is not cosmetic. The two characters shaped to 18.67 pt of <c>.notdef</c> between "Before the
-    /// box." and "After the box." in <c>word-features.doc</c> — invisible for as long as the box was
-    /// misplaced far to the left, and exactly the width by which the sentence overshot once the box was
-    /// put in the right place. With them gone, "After" starts at 306.40 pt against LibreOffice's 306.54.
+    /// What the character is for is the half the old reading had no use for. Writer inserts one for
+    /// <c>FLY_AS_CHAR</c> and for no other anchor (<c>SwFormatFlyCnt</c>,
+    /// <c>sw/source/core/txtnode/thints.cxx</c>:3633-3652), and an inline object's offset is a
+    /// <em>boundary</em> — so two adjacent as-character frames with no character between them collapse
+    /// onto one boundary and no measurer can put a break between them. That is the whole of
+    /// <c>RMI_Document_Repository_Public-Reprts_GettingOffOil.doc</c> page 2, whose two full-measure
+    /// pictures were drawn one over the other on a single line.
+    /// </para>
+    /// <para>
+    /// A floating frame still leaves nothing, which is the other half of the same rule and is what the
+    /// comment paragraph asserts: this document's own comment reference is a <c>U+0005</c> that makes no
+    /// frame at all and therefore keeps its placeholder.
     /// </para>
     /// </remarks>
     [Fact]
-    public void AShapeFieldsAnchorCharactersLeaveNothingInTheLine()
+    public void AnAsCharacterFramesAnchorIsOneCharacterThatCostsNoWidth()
     {
         using IDocument document = Open("word-features.doc");
         WordProcessingPages pages = (WordProcessingPages)((IPaginatedDocument)document).Layout();
@@ -173,9 +184,17 @@ public sealed class DocShapeFieldTests
         PageParagraph paragraph = pages.Paragraphs
             .First(candidate => candidate.Text.StartsWith("Before the box.", StringComparison.Ordinal));
 
-        paragraph.Text.ShouldNotContain('');
-        paragraph.Text.ShouldNotContain('');
-        paragraph.Text.ShouldBe("Before the box.  After the box.");
+        // The U+0008 of the U+0008 U+0001 pair carries the shape; the U+0001 beside it is the shape's
+        // own placeholder and still leaves nothing, so the pair yields one character and not two.
+        paragraph.Text.ShouldBe("Before the box. \u0001 After the box.");
+        paragraph.Text.Count(character => character == '\u0001').ShouldBe(1);
+
+        PageFrame box = paragraph.Frames.ShouldHaveSingleItem();
+        box.Anchor.ShouldBe(FrameAnchor.AsCharacter);
+        box.AnchorOffset.ShouldBe(paragraph.Text.IndexOf('\u0001', StringComparison.Ordinal));
+
+        // And the reason it costs nothing, which is what the withdrawn claim turned on.
+        Text.Shaping.ShapingControls.IsRemovedBeforeShaping('\u0001').ShouldBeTrue();
     }
 
     private static IDocument Open(string name)

@@ -323,10 +323,22 @@ wait
 
 {
   printf "# words = tokens carrying at least one Unicode letter or digit; rawwords = pdftotext | wc -w\n"
+  printf "# glyphs = alphanumeric CHARACTERS, and column 9 is THE COLUMN THE VERDICT IS DECIDED ON,\n"
+  printf "#          within max(2%%, 15). Columns 4 and 8 are token counts and decide nothing.\n"
   printf "# NOT comparable to any scoreboard recorded before 2026-08-13 — see dotnet/probes/gate-01/results.md\n"
-  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\n"
+  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\tglyphs\n"
   sort "$OUT/rows.tsv"
 } > "$OUT/parity.tsv"
+
+# rows.tsv is the file every round actually greps, and it carries no header at all -- which is
+# how three separate rounds this session quoted column 4 or 8 where the gate uses column 9, twice
+# reaching a write-up. A sibling legend costs nothing and cannot break an awk consumer.
+printf '%s\n' \
+  '1 path' '2 ext' '3 pages ours/ref' '4 words ours/ref (letter-or-digit TOKENS; decides nothing)' \
+  '5 fonts ours/ref' '6 unembedded' '7 verdict' \
+  '8 rawwords ours/ref (pdftotext | wc -w; decides nothing)' \
+  '9 glyphs ours/ref  <-- THE VERDICT IS DECIDED ON THIS COLUMN, within max(2%, 15)' \
+  > "$OUT/rows.columns"
 
 total=$(wc -l < "$OUT/rows.tsv")
 match=$(awk -F'\t' '$7=="match"' "$OUT/rows.tsv" | wc -l)

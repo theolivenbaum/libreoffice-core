@@ -96,6 +96,37 @@ public static class PptRecordTypes
     /// </remarks>
     public const ushort ExtendedParagraphAtom = 4012;
 
+    /// <summary>
+    /// A main master's PowerPoint 97+ paragraph extensions, one atom per text kind.
+    /// </summary>
+    /// <remarks>
+    /// <c>PPT_PST_ExtendedParagraphMasterAtom</c>, <c>svdfppt.hxx:1340</c>. It sits in the
+    /// <see cref="MainMaster"/> container's own <c>___PPT9</c> tag rather than in any shape's, and
+    /// its record <em>instance</em> is the <see cref="PptTextKind"/> whose levels it states —
+    /// <c>PPTExtParaProv</c>'s constructor, <c>svdfppt.cxx:3316-3349</c>. A picture bullet a deck
+    /// applies to a whole outline level lives here and nowhere else, so a reader that looks only
+    /// at a shape's <see cref="ExtendedParagraphAtom"/> finds nothing on such a deck.
+    /// </remarks>
+    public const ushort ExtendedParagraphMasterAtom = 4013;
+
+    /// <summary>The document's store of picture-bullet graphics.</summary>
+    /// <remarks>
+    /// <c>PPT_PST_ExtendedBuGraContainer</c>, <c>svdfppt.hxx:1322</c>. One level under the
+    /// document's <see cref="List"/> record's <c>___PPT9</c> tag, and shared by every master and
+    /// every shape: a <c>buBlip</c> anywhere in the file is an index into this container.
+    /// </remarks>
+    public const ushort ExtendedBuGraContainer = 2040;
+
+    /// <summary>One picture-bullet graphic, indexed by its record instance.</summary>
+    /// <remarks>
+    /// <c>PPT_PST_ExtendedBuGraAtom</c>, <c>svdfppt.hxx:1323</c> — "the instance of this atom
+    /// indices the current graphic". Its content is a two-byte type word and then a blip record
+    /// read directly, exactly as <c>SvxMSDffManager::GetBLIPDirect</c> reads one
+    /// (<c>svdfppt.cxx:3255-3262</c>); it is <em>not</em> a blip store entry and has no
+    /// <c>foDelay</c>.
+    /// </remarks>
+    public const ushort ExtendedBuGraAtom = 2041;
+
     /// <summary>A text run's characters, one byte each.</summary>
     public const ushort TextBytesAtom = 4008;
 

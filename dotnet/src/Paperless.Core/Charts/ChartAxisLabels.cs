@@ -1,4 +1,5 @@
 using Paperless.Core.Geometry;
+using Paperless.Core.Globalization;
 using Paperless.Core.Units;
 
 namespace Paperless.Core.Charts;
@@ -203,6 +204,20 @@ public static class ChartAxisLabels
     /// unbroken. Ignored on a horizontal axis, whose limit is <see cref="WrapFraction"/> of one
     /// tick's worth of axis.
     /// </param>
+    /// <param name="hyphenator">
+    /// What decides where a word may be broken inside itself. Null takes
+    /// <see cref="Hyphenators.For"/>'s answer for the default language, which is what a chart
+    /// gets in production; pass <see cref="Hyphenators.None"/> for the no-dictionary state.
+    /// <para>
+    /// <strong>It reaches the arrangement rather than only the drawing, and that is the whole of
+    /// this seat.</strong> <c>PropertyMapper::getTextLabelMultiPropertyLists</c> sets
+    /// <c>ParaIsHyphenation</c> true inside the same <c>if (nLimitedSpace &gt; 0)</c> that sets
+    /// <c>TextMaximumFrameWidth</c> and nowhere else, and <c>DrawModelWrapper</c> installs
+    /// <c>LinguMgr::GetHyphenator()</c> on the chart's outliner — so a label's second line may
+    /// begin inside a word that the first line took a hyphenated piece of, which is exactly what
+    /// <see cref="Wraps"/> is looking for.
+    /// </para>
+    /// </param>
     public static ChartAxisLabelLayout Resolve(
         IReadOnlyList<string?> texts,
         IReadOnlyList<Length> centres,
@@ -211,10 +226,13 @@ public static class ChartAxisLabels
         ChartText measurer,
         bool bold = false,
         ChartAxisDirection direction = ChartAxisDirection.Horizontal,
-        Length room = default)
+        Length room = default,
+        IHyphenator? hyphenator = null)
     {
         ArgumentNullException.ThrowIfNull(texts);
         ArgumentNullException.ThrowIfNull(centres);
+
+        hyphenator ??= Hyphenators.For(null);
 
         bool vertical = direction == ChartAxisDirection.Vertical;
 
@@ -248,7 +266,7 @@ public static class ChartAxisLabels
             // turns line breaking *on*: canAutoAdjustLabelPlacement refuses while it is on, so
             // the wrap is the only route from "labels collide" to "labels are turned 45°".
             if (lineBreak && !stated.OverlapAllowed && rotation == 0.0
-                && Wraps(texts, count, limit, size, measurer, bold))
+                && Wraps(texts, count, limit, size, measurer, bold, hyphenator))
             {
                 lineBreak = false;
                 continue;
@@ -281,8 +299,16 @@ public static class ChartAxisLabels
             bool canAdjust =
                 !vertical && !stated.OverlapAllowed && !lineBreak && rotation == 0.0;
 
+            // The separation two labels must keep is not the whole tick spacing: the reference
+            // keeps the same `nReduce` clear between them that it takes off the wrap limit —
+            // see the block beside WrapFraction below for the measurement.
+            Length reserve = vertical
+                ? Length.Zero
+                : spacing * (staggered ? 2.0 : 1.0) * (1.0 - WrapFraction);
+
             if (stated.OverlapAllowed
-                || !Collides(boxes, centres, count, rhythm, staggered, rotation, vertical))
+                || !Collides(
+                    boxes, centres, count, rhythm, staggered, rotation, vertical, reserve))
             {
                 return new ChartAxisLabelLayout(
                     rotation, rhythm, staggered,
@@ -439,6 +465,51 @@ public static class ChartAxisLabels
     /// </remarks>
     private const double WrapFraction = 0.95;
 
+    // ---------------------------------------------------------------------------------------
+    // The gap two labels have to keep, and why it is the same five per cent.
+    //
+    // `doesOverlap` (VCartesianAxis.cxx:186-207) intersects the two label *shapes*, and reading
+    // this tree's chart2 says a label's shape is its text: `createSingleLabel` uses the
+    // `createText` overload at ShapeFactory.cxx:2042, which sets no text distance, and
+    // `SdrTextObj::AdjustTextFrameWidthAndHeight` (svx/source/svdraw/svdotxat.cxx:44-240) grows an
+    // auto-grow frame to `Outliner::CalcTextSize().Width() + 1` of 1/100 mm. On that reading two
+    // labels collide when their mean width exceeds the tick spacing.
+    //
+    // 26.2.4.2 does not behave that way, and the discriminator is a pair of labels of DIFFERENT
+    // widths, which separates the collision from the wrap: with equal labels the two thresholds
+    // are 1.00 and 0.95 of the spacing and only the smaller is ever reached, so a one-word ladder
+    // cannot see the collision at all. Alternating a long label with a short one along one axis
+    // and sweeping the chart frame's width (`probes/chart-collide-r110`, four pitches from 54.2
+    // to 121.7 pt, runs of one letter so no ligature or kern pair can enter):
+    //
+    //   pitch 54.193        turned from mean 51.369, upright to 51.158  -> pitch x (.0521,.0560]
+    //   pitch 71.85 / 72.04 turned / upright about mean 67.972         ->         (.0539,.0564]
+    //   pitch 108.398       turned from 103.063, upright to 102.739    ->         (.0492,.0522]
+    //   pitch 121.56/121.67 turned / upright about mean 115.258        ->         (.0519,.0527]
+    //
+    // A CONSTANT reserve is refuted outright - 2.9 pt at pitch 54 against 6.4 at pitch 122 - so
+    // whatever it is goes with the spacing. A single clean FRACTION is not established either: the
+    // two rows whose labels are runs of one letter, the only two with no tail-advance question in
+    // them, are (.0539,.0564] and (.0519,.0527] and do not intersect until the advance model's own
+    // +/-0.13 % is folded in, which leaves (.0529,.0540].
+    //
+    // The five per cent `nReduce` that `createTextShapes` already takes off the wrap limit "to have
+    // a visible distance between the labels" (VCartesianAxis.cxx:753-759) is 0.0500 - below that
+    // window by 6 % of itself and by 0.3 % of a tick. It is what is implemented anyway, and
+    // deliberately: 0.053 is a number fitted to one chart with no mechanism behind it; 0.050 is the
+    // source's own and is already this file's WrapFraction; the measurements with no free parameter
+    // at all - the one-word frame sweeps, which put the wrap limit at 0.95 to [0.94895, 0.95125)
+    // over five pitches - agree with the source exactly; and all 176 chart-bearing corpus
+    // renderings are byte-identical under either. The 6 % is recorded as open, not fitted away.
+    //
+    // Two limits of the measurement, both deliberate. It is a *horizontal* axis' constant: a
+    // vertical category axis' wrap limit has no reduction in it either
+    // (VCartesianAxis.cxx:768-773), so the reserve is zero there and nothing was measured. And it
+    // is added to the collision test alone, not to `Depth`: what is measured is the
+    // separation the reference keeps between two labels, and whether its shape is genuinely wider
+    // than its text — which would also deepen the band a rotated axis reserves — is not.
+    // ---------------------------------------------------------------------------------------
+
     /// <summary>Whether any label would wrap in the room one tick's worth of axis gives it.</summary>
     /// <remarks>
     /// <para>
@@ -454,11 +525,77 @@ public static class ChartAxisLabels
     /// <strong>Passing this test does not turn the axis; it turns line breaking off.</strong>
     /// <c>lcl_hasWordBreak</c> sets <c>m_bLineBreakAllowed = false</c> and restarts the layout
     /// (<c>VCartesianAxis.cxx:888-903</c>), and the 45° only follows if the labels then
-    /// <em>collide</em> as single lines. Round 30's decks all carried a one-word label, for which
-    /// the two boundaries are 0.95 and 1.00 of the spacing and only the outer one is visible: a
-    /// single word wider than 0.95 of a tick but narrower than a whole one breaks, unbreaks and
-    /// comes out upright, so the deck turns at the collision and the wrap limit leaves no trace.
-    /// Round 63's decks separate them by giving one label a space in it.
+    /// <em>collide</em> as single lines. Round 63's decks separate the two by giving one label a
+    /// space in it.
+    /// <para>
+    /// <strong>On a one-word label the two boundaries very nearly coincide, and this remark used
+    /// to say they were 0.95 and 1.00 of the spacing.</strong> They are not: the collision keeps
+    /// the same five per cent clear that the wrap does, so a single word past 0.95 of a tick
+    /// restarts the wrap <em>and</em> collides, and the axis turns. Round 110 swept the tick pitch
+    /// continuously at five run lengths and read the one-word turn threshold at
+    /// [0.94895, 0.95125) of the spacing, with no free parameter — see the block beside
+    /// <see cref="WrapFraction"/>. What the one-word case cannot show is the collision on its
+    /// own, which is why that round had to alternate two label widths.
+    /// </para>
+    /// <para>
+    /// <strong>0.95 is the room, and it is now measured directly rather than inferred from when
+    /// the axis turns.</strong> A label made of several short words can never break inside a word,
+    /// so the axis never restarts and the label is simply drawn wrapped — and <em>which words land
+    /// on which line</em> is the room, read straight out of the reference's own PDF with no
+    /// threshold model in between. On <c>ooo</c>-free runs of Carlito at 11 pt
+    /// (<c>probes/chart-wrap-r111</c> §1), four composition transitions swept continuously by the
+    /// chart frame's width:
+    /// </para>
+    /// <list type="table">
+    /// <item><description>line 1 takes a third token between pitch 52.003 and 52.464, needing
+    /// 49.438 pt → the room is in [0.9423, 0.9507) of the pitch.</description></item>
+    /// <item><description>line 1 takes a fourth between 73.178 and 73.632, needing 69.713 →
+    /// [0.9468, 0.9527).</description></item>
+    /// <item><description>line 2 takes a third word between 61.074 and 61.528, needing 58.282 →
+    /// [0.9472, 0.9543).</description></item>
+    /// <item><description>the same at <strong>eight</strong> categories rather than five, between
+    /// 51.972 and 52.154 → [0.9479, 0.9512), so the room does not move with the category
+    /// count.</description></item>
+    /// </list>
+    /// <para>
+    /// They intersect at <strong>[0.9472, 0.9507)</strong> and 0.95 is inside, with no free
+    /// parameter beyond the advance.
+    /// </para>
+    /// <para>
+    /// <strong>What is NOT the room is the two-word restart, and round 110's "the wrap restarts at
+    /// 0.875 of the pitch" is a statement about a different quantity.</strong> On a two-word label
+    /// 26.2.4.2 restarts — turns the axis — while the label's widest word still fits that 0.95
+    /// room, and the boundary is not a fraction of the pitch at all. Measured on the same
+    /// instrument, all at 11 pt, the threshold pitch at which a widest word of 47.285 pt stops
+    /// restarting the axis (<c>probes/chart-wrap-r111</c> §2):
+    /// </para>
+    /// <list type="table">
+    /// <item><description><strong>It moves with the width of the label's OTHER words</strong>, at
+    /// eight prefix widths from 10.327 to 35.596 pt: 53.2→55.9 pt of pitch, a slope in
+    /// (0.0949, 0.1147) pt of pitch per pt of prefix.</description></item>
+    /// <item><description><strong>Width, not character count</strong>: <c>iiii</c> (4 characters,
+    /// 10.327 pt) sits with <c>oo</c> (2 characters, 11.865 pt) and nowhere near <c>oooo</c>; a
+    /// per-character rule predicts 54.58 against a measured (52.912, 53.517].</description></item>
+    /// <item><description><strong>Position-blind</strong>: a prefix of two words of the same total
+    /// behaves as one (<c>ooo ooo</c>, (55.936, 56.541], against <c>oooooo</c>'s
+    /// (55.634, 55.936]), and a word added <em>after</em> the long one counts too.</description></item>
+    /// <item><description><strong>And it moves with the number of categories, which no property of
+    /// the label and the pitch can do.</strong> The same label at eight categories restarts at
+    /// (52.444, 52.721] where five categories give (53.819, 54.122]; a second pair, at a pitch of
+    /// 33, splits (32.879, 33.162] against (33.658, 33.953]. Both are ~2.4 % of the
+    /// pitch.</description></item>
+    /// </list>
+    /// <para>
+    /// So the restart is decided against a geometry that is <em>not</em> the one 26.2.4.2 draws,
+    /// and it is not implemented here: every form that fits needs three fitted terms and still
+    /// misses the category count. A plot-squeeze account — the labels measured unwrapped
+    /// (<c>createMaximumLabels</c>) overflowing the plot and shrinking the pitch the decision is
+    /// taken at — has the right sign and the right category dependence and is <strong>refuted by
+    /// the four transitions above</strong>: their label is 110 pt unwrapped against a 52 pt pitch,
+    /// far more overflow than any two-word case here, and their room is still exactly 0.95.
+    /// It is not hyphenation either (r110 §4.2, and a run of one letter has no hyphenation point
+    /// to take). Carried as open.
+    /// </para>
     /// </para>
     /// <list type="table">
     /// <item><description><c>Middle Column</c> among twelve categories at 10 pt in Liberation
@@ -488,7 +625,8 @@ public static class ChartAxisLabels
         Length limit,
         Length size,
         ChartText measurer,
-        bool bold)
+        bool bold,
+        IHyphenator? hyphenator)
     {
         if (limit <= Length.Zero) return false;
 
@@ -502,6 +640,106 @@ public static class ChartAxisLabels
 
             foreach (string word in Words(text))
                 if (measurer.Measure(word, size, bold).Width > limit) return true;
+
+            if (hyphenator is not null && Hyphenates(text, limit, size, measurer, bold, hyphenator))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the hyphenating fill would start one of a label's lines inside a word.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is the arm of <c>lcl_hasWordBreak</c> that a width rule cannot reach.</strong>
+    /// The test above asks whether any single word is wider than the slot, which is one way for a
+    /// line to begin mid-word and the only one available without a dictionary. The other is
+    /// hyphenation: with a pattern file loaded the outliner puts as much of the next word on the
+    /// current line as a hyphen allows, and the line after it then begins in the middle of that
+    /// word — which <c>lcl_hasWordBreak</c> (<c>VCartesianAxis.cxx:369-404</c>) reports, and
+    /// which clears <c>m_bLineBreakAllowed</c> and restarts the axis at <c>:888-905</c>. Every
+    /// label of <c>038_Competitive_Advantage_Card</c> is two words that fit their slot one to a
+    /// line; the reference turns that axis 45 degrees and it is this that makes it.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on the reference with the words held fixed and only the dictionary
+    /// varied</strong> (<c>probes/chart-hyph-r105</c> §1.1): tagging that witness' labels
+    /// <c>en-US</c>, <c>en-GB</c>, <c>fr-FR</c>, <c>es-ES</c> or nothing at all — the four locales
+    /// LibreOffice 26.2.4.2 ships patterns for — turns the axis, and <c>de-DE</c>, <c>ru-RU</c> or
+    /// <c>zxx</c> wraps it upright. The control is the same sentence with an unhyphenatable second
+    /// word, <c>Cost Stretched</c>, which wraps under all eight.
+    /// </para>
+    /// <para>
+    /// <strong>The limit on how much of the word may stay is a CHARACTER COUNT, not a width, and
+    /// measuring the hyphen instead is wrong in the permissive direction.</strong>
+    /// <c>ImpBreakLine</c> walks the line's own <c>CharPosArray</c> to <c>nMaxBreakPos</c>, the
+    /// first character of the line that does not fit, and asks the hyphenator for a point at most
+    /// <c>nMaxBreakPos - nWordStart - 1</c> characters into the word —
+    /// <c>editeng/source/editeng/impedit3.cxx</c>:2143-2165, whose <c>+1</c> is commented
+    /// <em>"Before the dickey letter"</em> and reserves one character's room for the hyphen
+    /// rather than measuring one. <c>Hyphenator::hyphenate</c> then enforces it as
+    /// <c>i &lt; Leading</c> (<c>hyphenimp.cxx</c>:445). A hyphen is narrower than the letter it
+    /// stands in for, so asking whether <c>Cost Ser-</c> fits admits breaks the reference
+    /// refuses: <c>Cost Service</c> is the measured case, and it is the one word of twenty-two
+    /// that the width form got wrong (§2 of <c>probes/hyphen-r106</c>). Read out of a tree that
+    /// is 27.2 alpha rather than the 26.2.4.2 reference binary, and confirmed against that binary
+    /// on the twenty-two authored fixtures rather than taken on trust.
+    /// </para>
+    /// <para>
+    /// The fill is the greedy one <see cref="Wrap"/> already models, over blank-separated words,
+    /// and only the boolean is wanted — so once a hyphenated break is found there is no need to
+    /// carry the broken text, and where none is found nothing was hyphenated and
+    /// <see cref="Wrap"/>'s plain answer stands unchanged. That is why the drawn text is untouched
+    /// by this: a label that hyphenates never reaches the drawing, because line breaking is turned
+    /// off and the arrangement starts again.
+    /// </para>
+    /// </remarks>
+    private static bool Hyphenates(
+        string text, Length limit, Length size, ChartText measurer, bool bold,
+        IHyphenator hyphenator)
+    {
+        string[] words = text.Split(' ');
+        if (words.Length < 2) return false;
+
+        string line = string.Empty;
+
+        foreach (string word in words)
+        {
+            string candidate = line.Length == 0 ? word : line + " " + word;
+
+            if (line.Length == 0 || measurer.Measure(candidate, size, bold).Width <= limit)
+            {
+                line = candidate;
+                continue;
+            }
+
+            // `nWordLen > 3` (impedit3.cxx:2152): a word of three characters or fewer is not
+            // offered to the hyphenator at all, whatever its patterns say.
+            if (word.Length <= 3)
+            {
+                line = word;
+                continue;
+            }
+
+            // How many of the word's characters fit after what is already on the line. The
+            // comparison is strict because CharPosArray holds each character's end and the walk
+            // is `< nRemainingWidth`.
+            int fits = 0;
+            while (fits < word.Length
+                   && measurer.Measure(line + " " + word[..(fits + 1)], size, bold).Width < limit)
+            {
+                fits++;
+            }
+
+            // One character of that room belongs to the hyphen, so the piece that stays behind is
+            // at most `fits - 1` characters long. A point inside that leaves the next line
+            // starting in the middle of the word, which is the break the reference restarts on.
+            foreach (int point in hyphenator.FindHyphenationPoints(word, Hyphenators.DefaultLanguage))
+                if (point >= 2 && point <= fits - 1) return true;
+
+            line = word;
         }
 
         return false;
@@ -568,7 +806,8 @@ public static class ChartAxisLabels
         int rhythm,
         bool staggered,
         double rotation,
-        bool vertical)
+        bool vertical,
+        Length reserve)
     {
         // Staggering puts alternate labels on two rows, so what a label collides with is the one
         // two places away rather than the one beside it.
@@ -595,7 +834,11 @@ public static class ChartAxisLabels
                 double along = gap * cosine;
                 double across = gap * sine;
 
-                double width = (boxes[at].Width.Emu + boxes[previous].Width.Emu) / 2.0;
+                // `reserve` is added to the sum of the two half-widths, which is exactly the
+                // same arithmetic as widening *each* box by it — so it turns with the labels
+                // rather than being a gap measured along the axis.
+                double width =
+                    ((boxes[at].Width.Emu + boxes[previous].Width.Emu) / 2.0) + reserve.Emu;
                 double height = (boxes[at].Height.Emu + boxes[previous].Height.Emu) / 2.0;
 
                 if (along < width && across < height) return true;

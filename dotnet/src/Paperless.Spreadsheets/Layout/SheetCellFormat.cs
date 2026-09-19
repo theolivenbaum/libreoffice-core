@@ -165,10 +165,14 @@ public sealed record SheetCellFormat
     /// <c>Hyperlink</c> style is an underlined blue font, and a column heading ruled off from its
     /// data is the other common case.
     /// <para>
-    /// <strong>The underline survives that style and the colour does not.</strong> A hyperlink
-    /// cell is drawn as an <c>SvxURLField</c> in the application's <c>LINKS</c> colour whatever
-    /// <see cref="Colour"/> says — see <c>SheetTextLayout</c>'s <c>LinkColour</c> — so the blue
-    /// half of "underlined blue font" never reaches the page and this half always does.
+    /// <strong>Neither half of that style decides a hyperlink cell, and this property does not
+    /// either.</strong> A hyperlink cell is drawn as an <c>SvxURLField</c>, and
+    /// <c>ScEditUtil::GetCellFieldValue</c> gives the field's font the application's <c>LINKS</c>
+    /// colour <em>and</em> <c>LINESTYLE_SINGLE</c> in the same breath, over whatever
+    /// <see cref="Colour"/> and this property say — see <c>SheetTextLayout</c>'s
+    /// <c>LinkColour</c> and <c>Line</c>. So such a cell is drawn underlined whether or not this
+    /// property says so, and one stating <see cref="SheetUnderline.DoubleLine"/> is drawn with a
+    /// single line. This property is what an <em>unlinked</em> cell is underlined by.
     /// </para>
     /// </remarks>
     public SheetUnderline Underline { get; init; }
@@ -179,6 +183,41 @@ public sealed record SheetCellFormat
 
     /// <summary>The colour the text is filled with.</summary>
     public Colour Colour { get; init; } = Colour.Black;
+
+    /// <summary>
+    /// Whether that colour reaches the EditEngine as a <em>hard character attribute</em>, which is
+    /// what lets it beat the colour a hyperlink field would otherwise impose.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImpEditEngine::SeekCursor</c> applies the field's own LINKS colour and then, under the
+    /// comment <c>#i1550# hard color attrib should win over text color from field</c>, re-applies
+    /// any <c>EE_CHAR_COLOR</c> covering the field's position
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:2947-2957). So a hyperlink cell is navy only
+    /// where the text under the field states nothing of its own — see <c>SheetTextLayout</c>'s
+    /// <c>FieldInk</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Whether a stated colour is hard is a property of the importer, not of the file</strong>,
+    /// and the three disagree. It is <b>never</b> true from SpreadsheetML, because
+    /// <c>WorksheetGlobals::insertHyperlink</c> (<c>sc/source/filter/oox/worksheethelper.cxx</c>)
+    /// calls <c>rEE.Clear()</c> and inserts a bare field, discarding the cell's rich runs and its
+    /// colour together. It is true from BIFF for any font colour that is not <c>0x7FFF</c>,
+    /// because <c>lclInsertUrl</c>'s <c>CELLTYPE_STRING</c> branch applies the pattern through
+    /// <c>ScPatternAttr::FillEditItemSet</c>, which puts a hard item unless the colour is
+    /// <c>COL_AUTO</c> (<c>sc/source/core/data/patattr.cxx</c>:1196-1209), and its
+    /// <c>CELLTYPE_EDIT</c> branch keeps the run's own attributes. And it is true from ODF only
+    /// for a <c>text:span</c>'s own <c>fo:color</c>: a cell-level colour arrives as an engine
+    /// default rather than as a character attribute and does not beat the field.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2, twice each: an authored <c>link-colour.xlsx</c>, the <c>.xls</c> the
+    /// reference itself converts it to, and an authored <c>link-colour-odf.fods</c> —
+    /// <c>probes/quantise-r120/</c> §5.2. The same content is drawn navy in one format and in the
+    /// file's own colour in another.
+    /// </para>
+    /// </remarks>
+    public bool ColourIsHard { get; init; }
 
     /// <summary>How the text sits across the column.</summary>
     public SheetHorizontalAlignment Horizontal { get; init; } = SheetHorizontalAlignment.General;

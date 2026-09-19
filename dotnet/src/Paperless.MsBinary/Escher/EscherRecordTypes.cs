@@ -155,6 +155,19 @@ public static class EscherPropertyIds
     public const ushort TextInsetBottom = 132;
 
     /// <summary>
+    /// Whether the host, not the file, decides the shape's text margins.
+    /// </summary>
+    /// <remarks>
+    /// A boolean of the text group, so it lives in bit 3 of property 191 and asking for 188
+    /// directly finds nothing — see <c>EscherPropertyTable.Boolean</c>. Excel's own answer is
+    /// 20000 EMU on each of the four sides
+    /// (<c>EXC_OBJ_TEXT_MARGIN</c>, <c>sc/source/filter/inc/xlescher.hxx:140</c>), applied by
+    /// <c>XclImpDrawObjBase::PreProcessSdrObject</c> at
+    /// <c>sc/source/filter/excel/xiescher.cxx:546-553</c>.
+    /// </remarks>
+    public const ushort AutoTextMargin = 188;
+
+    /// <summary>
     /// Whether and how the shape's own text wraps at its margins, an <c>MSO_WRAPMODE</c>.
     /// </summary>
     /// <remarks>
@@ -262,8 +275,61 @@ public static class EscherPropertyIds
     /// </remarks>
     public const ushort PictureTransparent = 263;
 
+    /// <summary>
+    /// The embedded object this shape shows, as an index into the host's object pool.
+    /// </summary>
+    /// <remarks>
+    /// Its presence is what makes a picture frame an <em>OLE</em> object rather than a plain
+    /// picture — <c>SvxMSDffManager::ImportGraphic</c> branches to <c>ImportOLE</c> on
+    /// <c>IsProperty(DFF_Prop_pictureId)</c> (<c>filter/source/msfilter/msdffimp.cxx</c>:4025-4030)
+    /// — and the object it builds there is not the one the Escher attributes were applied to.
+    /// </remarks>
+    public const ushort PictureId = 267;
+
+    /// <summary>
+    /// How the interior is filled — <c>MSO_FILLTYPE</c>, solid when the shape states none.
+    /// </summary>
+    /// <remarks>
+    /// Zero is <c>mso_fillSolid</c>; 1 to 8 are the pattern, texture, picture and gradient forms,
+    /// which still paint; 9 (<c>mso_fillBackground</c>) and anything above paint nothing at all —
+    /// the <c>default:</c> of <c>DffPropertyReader::ApplyFillAttributes</c>' switch
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1330-1400).
+    /// </remarks>
+    public const ushort FillType = 384;
+
     /// <summary>The shape's foreground fill colour.</summary>
     public const ushort FillColour = 385;
+
+    /// <summary>
+    /// How opaque the fill is, as a 16.16 fixed-point fraction of one.
+    /// </summary>
+    /// <remarks>
+    /// <c>DFF_Prop_fillOpacity</c>. <c>ApplyFillAttributes</c> turns it into an
+    /// <c>XFillTransparenceItem</c> for every fill style but a gradient
+    /// (<c>filter/source/msfilter/msdffimp.cxx</c>:1367-1376 in this tree).
+    /// </remarks>
+    public const ushort FillOpacity = 386;
+
+    /// <summary>
+    /// The second fill colour — the one a pattern's <em>black</em> pixels stand for.
+    /// </summary>
+    /// <remarks><c>DFF_Prop_fillBackColor</c>; white where the shape states none.</remarks>
+    public const ushort FillBackColour = 387;
+
+    /// <summary>
+    /// The blip a pattern, texture or picture fill draws.
+    /// </summary>
+    /// <remarks>
+    /// <c>DFF_Prop_fillBlip</c>. A one-based index into the drawing group's blip store, exactly
+    /// as <see cref="Picture"/> is; both are written with the property table's blip bit set.
+    /// </remarks>
+    public const ushort FillBlip = 390;
+
+    /// <summary>A texture tile's width in EMUs, <c>DFF_Prop_fillWidth</c>.</summary>
+    public const ushort FillWidth = 393;
+
+    /// <summary>A texture tile's height in EMUs, <c>DFF_Prop_fillHeight</c>.</summary>
+    public const ushort FillHeight = 394;
 
     /// <summary>
     /// Whether the shape is filled at all — a <em>boolean</em> property, so read it with

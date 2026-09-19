@@ -256,10 +256,30 @@ internal static class OdsDrawings
             height = placed.Height;
         }
 
+        // And three kinds state no rectangle at all: their geometry is two points.
+        bool segment = false;
+        if (turned is null && Endpoints(frame) is { } pair)
+        {
+            segment = true;
+            x = pair.X;
+            y = pair.Y;
+            width = pair.Width;
+            height = pair.Height;
+        }
+
         // Read before the branches below because a shape's ink is the same question whatever
         // else it holds, and because the fill of a frame that turns out to hold a picture is
         // simply unused rather than wrong.
-        OdsShapeInk.Ink ink = OdsShapeInk.Read(file.Styles, frame);
+        // **A segment's ink is deliberately not taken**, because the only outline this can paint
+        // is the box's. <see cref="Layout.SheetShapeInk"/> falls back to the rectangle for a shape
+        // that names no preset, and a rectangle is not a line: the corpus's 30 elbow connectors
+        // state their real path as an `svg:d` — `M1238 6853v1508h808v1507` on
+        // `016_Free_Organizational_Chart`'s `Elbow Connector 46` — which is a shape this reader
+        // has no parser for. Painting them is left; what is not left is the *extent*, which is
+        // what a print area is made of. The two straight-segment kinds the corpus does hold are
+        // axis-aligned, so their boxes are degenerate and `SheetShapeInk.Draw` returns on them
+        // anyway.
+        OdsShapeInk.Ink ink = segment ? default : OdsShapeInk.Read(file.Styles, frame);
 
         SheetDrawing drawing = new()
         {
@@ -290,8 +310,16 @@ internal static class OdsDrawings
         // 1 inch wide at A2 with an end cell of E2 and 26.2.4.2 draws its line at x 289.644
         // against 73.644 without the end cell, which is the four inches the end cell states.
         // **Reach: 2 shapes in 2 of the 307 converted `.ods` state both.**
+        //
+        // **A segment is excluded for the same reason, and it is not a fine judgement**: Calc
+        // writes a connector's cached end anchor as the cell the object is *anchored in*, not as
+        // the far corner of the line. `017_Timeline_Templates`' `Straight Connector 2` sits in A1
+        // and runs to `svg:y2="15.7957in"`, and its `table:end-cell-address` is `A1` with an
+        // `end-y` of `0.0394in` — so taking the end cell collapses a fifteen-inch line to a point
+        // and the print area never grows.
         if (!sheetAnchored
             && turned is null
+            && !segment
             && EndCell(Attribute(frame, OdfNamespaces.Table, "end-cell-address")) is { } end)
         {
             drawing = drawing with
@@ -604,6 +632,62 @@ internal static class OdsDrawings
         }
 
         return (column - 1, row - 1);
+    }
+
+    /// <summary>
+    /// The rectangle of a shape whose geometry is a pair of points rather than a box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>draw:line</c>, <c>draw:connector</c> and <c>draw:measure</c> state no
+    /// <c>svg:width</c>, no <c>svg:height</c> and no <c>svg:x</c>: they state
+    /// <c>svg:x1</c>, <c>svg:y1</c>, <c>svg:x2</c> and <c>svg:y2</c>, and their rectangle is the
+    /// box those two points bound. <c>SdXMLLineShapeContext::startFastElement</c>
+    /// (<c>xmloff/source/draw/ximpshap.cxx</c>:1045-1097) says so in as many words — it takes the
+    /// smaller of each coordinate as the shape's position, puts the pair in the polygon and leaves
+    /// the size at 1 × 1, so the object's own bounding rectangle is the polygon's — and
+    /// <c>SdXMLConnectorShapeContext</c> (<c>:1963-2035</c>) sets <c>StartPosition</c> and
+    /// <c>EndPosition</c> from the same four attributes.
+    /// </para>
+    /// <para>
+    /// <strong>A reader that looks only for <c>svg:width</c> gives every one of them a zero-sized
+    /// box, and a zero-sized box widens no print area.</strong> That is one page of
+    /// <c>017_Timeline_Templates_for_Excel_b88faee6</c>: its <c>Straight Connector 2</c> is the
+    /// timeline's spine, anchored in A1 and running from <c>svg:y1="0.6965in"</c> to
+    /// <c>svg:y2="15.7957in"</c>, well below the last cell of a sheet whose data ends at row 66.
+    /// 26.2.4.2 prints that sheet on two pages with the second carrying only the line's tail, and
+    /// deleting the one <c>draw:connector</c> from the file makes the reference itself print one —
+    /// three pages against two for the workbook, which is exactly the gap this closes. The
+    /// <c>.xlsx</c> twin never had it, because a <c>twoCellAnchor</c> states the same connector's
+    /// end as row 78 and the SpreadsheetML reader has always taken it.
+    /// <c>probes/ods-residue-r95/variants-ods.py</c>.
+    /// </para>
+    /// <para>
+    /// Reach over the 307 converted <c>.ods</c>: <strong>3 documents, 41 <c>draw:line</c>,
+    /// 31 <c>draw:connector</c>, no <c>draw:measure</c></strong>, of which 28 are diagonal and all
+    /// 72 state a stroke. <c>probes/ods-residue-r95/lineshape-census.py</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The <c>draw:</c> element.</param>
+    private static (Length X, Length Y, Length Width, Length Height)? Endpoints(XElement frame)
+    {
+        if (frame.Name.LocalName is not ("line" or "connector" or "measure")) return null;
+
+        Length? x1 = OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "x1"));
+        Length? y1 = OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "y1"));
+        Length? x2 = OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "x2"));
+        Length? y2 = OdfValue.ParseLength(Attribute(frame, OdfNamespaces.SvgCompatible, "y2"));
+
+        if (x1 is not { } left || y1 is not { } top
+            || x2 is not { } right || y2 is not { } bottom)
+        {
+            return null;
+        }
+
+        return (Length.FromEmu(Math.Min(left.Emu, right.Emu)),
+                Length.FromEmu(Math.Min(top.Emu, bottom.Emu)),
+                Length.FromEmu(Math.Abs(right.Emu - left.Emu)),
+                Length.FromEmu(Math.Abs(bottom.Emu - top.Emu)));
     }
 
     /// <summary>The frame's description, which ODF writes as a child element rather than an attribute.</summary>

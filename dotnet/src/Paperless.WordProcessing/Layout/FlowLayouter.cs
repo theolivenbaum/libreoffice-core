@@ -224,6 +224,10 @@ public static class FlowLayouter
             LaidOutParagraph layout =
                 paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine
                 || paragraph.NeedsGlyphFallback || paragraph.HasScriptSpace
+                // And a character width, which is the one property of the shortcut's own
+                // arguments that cannot express it: the text overload measures from a face, a
+                // size and the shaping, and a scale is none of those.
+                || paragraph.IsHorizontallyScaled
                 ? layouter.Layout(
                     paragraph.Measure(),
                     paragraph.Format,

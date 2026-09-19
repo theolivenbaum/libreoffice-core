@@ -27,7 +27,9 @@ namespace Paperless.Presentations.Layout;
 /// Caladea is all of them.
 /// </para>
 /// <para>
-/// <strong>That is no longer true of 26.2.4.2, and this tree has not caught up.</strong>
+/// <strong>The source chain that reads it exists in 26.2.4.2 and the drawn answer still does not
+/// follow it</strong> — the paragraph after next is the measurement, and it is the reason this
+/// tree is <em>not</em> "behind" here. The chain, as round 85 read it:
 /// <c>oox/source/drawingml/textbodypropertiescontext.cxx</c>:242-243 now sets
 /// <c>PROP_TextFitToSizeFontScale</c> and <c>PROP_TextFitToSizeSpacingScale</c> from the element,
 /// <c>SvxShape</c> puts them on the <c>SdrTextFitToSizeTypeItem</c>
@@ -42,12 +44,33 @@ namespace Paperless.Presentations.Layout;
 /// so an element stating <c>fontScale</c> alone yields a spacing scale of <strong>zero</strong>,
 /// fails the guard, and is searched from scratch exactly as before. Censused over the corpus:
 /// <strong>326 <c>a:normAutofit</c> state <c>fontScale</c> and 209 state <c>lnSpcReduction</c>,
-/// the latter in 40 of the 251 <c>.pptx</c></strong>. <strong>Read from the source and censused,
-/// not measured at the reference</strong> — that is the next round's job, and it must be measured
-/// rather than implemented on this reading alone. <c>@lnSpcReduction</c> is still read nowhere
-/// here. A <c>.ppt</c> is unaffected either way: <c>filter/source/msfilter/svdfppt.cxx</c>:1099
-/// builds the item from its type alone and both of its scales default to zero
-/// (<c>include/svx/sdtfsitm.hxx</c>:68-69).
+/// the latter in 40 of the 251 <c>.pptx</c></strong>. A <c>.ppt</c> is unaffected either way:
+/// <c>filter/source/msfilter/svdfppt.cxx</c>:1099 builds the item from its type alone and both of
+/// its scales default to zero (<c>include/svx/sdtfsitm.hxx</c>:68-69).
+/// </para>
+/// <para>
+/// <strong>Measured at the reference in round 94, and the drawn size does not follow the stated
+/// pair at all — so this tree is right to search and must not be "caught up".</strong> Ten
+/// one-attribute variants of each of two corpus decks, rendered through 26.2.4.2, drawn
+/// <c>Tf</c> sizes read out of its own PDF (<c>probes/slides-ink-r94/fontscale-variants.tsv</c>):
+/// on <c>171128IPAP.pptx</c> slide 31 the stated 90000, an absent attribute, 50000 and 25000 all
+/// draw 29.991 pt, and so do all four of those beside a stated <c>lnSpcReduction</c> — which is
+/// the arm this paragraph predicts would bite. Removing the <c>a:normAutofit</c> element outright
+/// is the only variant that moves anything, to 32.003. On
+/// <c>NWD-GLA-Community-Outreach-Day-Oct-2025.pptx</c> slide 5, whose own element states
+/// <c>fontScale="25000" lnSpcReduction="20000"</c>, nine variants including
+/// <c>fontScale="100000" lnSpcReduction="10000"</c> draw the identical 13.011 and 14.995 pt, and
+/// the unscaled sizes are 51.987 and 60.009 — so what is drawn is <c>constScaleLevels</c>' last
+/// row, 0.250, and not the file's number.
+/// </para>
+/// <para>
+/// <strong>The trap in measuring it is that PowerPoint's stored scale is near the answer the
+/// search finds</strong>, because both are fitting the same text to the same box: at the file's
+/// own value the two hypotheses agree, and only an absurd variant separates them. And even where
+/// the pair does arrive, <c>ScaleContentToFitWindow</c> seeds from it, formats <em>once</em>, and
+/// walks the table from row 0 whenever that format overflows — so it is a first guess a single
+/// overflow discards, never an override. <c>@lnSpcReduction</c> is read nowhere here and does not
+/// need to be.
 /// </para>
 /// <para>
 /// <em>It is not a search.</em> LibreOffice 25.2 replaced the bisection with a walk down a fixed

@@ -270,6 +270,39 @@ public sealed partial record ChartSeries(
     /// </remarks>
     public bool HasLine { get; init; } = true;
 
+    /// <summary>
+    /// Whether the line through this series' points is a flattened cubic spline rather than a
+    /// polyline.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CurveStyle_CUBIC_SPLINES</c>. OOXML spells it <c>c:smooth</c> on each
+    /// <c>c:ser</c> and ODF <c>chart:interpolation="cubic-spline"</c> on the plot area's style;
+    /// <see cref="ChartSpline"/> is what it means for the geometry.
+    /// </para>
+    /// <para>
+    /// <strong>It is a property of the plot group and not of the series, however the file spells
+    /// it.</strong> <c>OOX_CHART_SMOOTHED_PER_SERIES</c> is <c>0</c>
+    /// (<c>oox/inc/drawingml/chart/seriesconverter.hxx</c>:37), so
+    /// <c>TypeGroupConverter::convertLineSmooth</c> is called once per series
+    /// <em>against the chart type's</em> property set
+    /// (<c>oox/source/drawingml/chart/typegroupconverter.cxx</c>:585-588) — one series stating
+    /// <c>c:smooth val="1"</c> smooths every series in its group. The readers therefore resolve
+    /// the flag per group and put the same answer on each of that group's series. No corpus
+    /// document distinguishes the two rules: all fourteen smoothed plot groups are uniform.
+    /// </para>
+    /// <para>
+    /// <strong>An absent <c>c:smooth</c> does not mean "not smooth".</strong>
+    /// <c>SeriesModel</c>'s constructor is <c>mbSmooth( !bMSO2007Doc )</c>
+    /// (<c>oox/source/drawingml/chart/seriesmodel.cxx</c>:124) and both the line and the scatter
+    /// series contexts read it as <c>getBool( XML_val, !bMSO2007Doc )</c>
+    /// (<c>seriescontext.cxx</c>:618, :726), so a file that is not an Office 2007 one smooths by
+    /// default. That is not a curiosity: it is the whole of one corpus witness. See
+    /// <c>probes/chart-smooth-r102</c>.
+    /// </para>
+    /// </remarks>
+    public bool Smooth { get; init; }
+
     /// <summary>The label every point of this series carries, or null for none.</summary>
     public ChartDataLabel? Label { get; init; }
 
@@ -1084,6 +1117,14 @@ public sealed partial record ChartPlot
     /// it does not, and a chart on a zoomed sheet drew a denser axis than the reference for that
     /// reason alone.
     /// </para>
+    /// <para>
+    /// <strong>No consumer sets it any more, and the mechanism it belongs to is why.</strong>
+    /// <c>SheetChart</c> multiplied the print zoom into a chart's type sizes and recorded it here;
+    /// it now lays the chart out on the chart's own page and scales the finished drawing, so the
+    /// zoom never reaches the composition and this is 1 everywhere. Kept because the quantity is
+    /// real — a caller that does scale a chart's type has to say so — and because
+    /// <see cref="ChartLayout"/>'s interval cap is still the ratio that would notice.
+    /// </para>
     /// </remarks>
     public double TypeScale { get; init; } = 1.0;
 
@@ -1460,6 +1501,38 @@ public sealed partial record ChartPlot
     /// its own, which decides whether the whole picture is stretched.
     /// </remarks>
     public (double X, double Y, double Width, double Height)? PlotAreaFraction { get; init; }
+
+    /// <summary>
+    /// The <em>outer</em> plot rectangle a BIFF chart states, in 1/4000 of the chart frame.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CHFRAMEPOS</c> (0x104F) inside the primary <c>CHAXESSET</c> group. A BIFF chart has no
+    /// real automatic plot area: <c>XclImpChChart::Convert</c>
+    /// (<c>sc/source/filter/excel/xichart.cxx</c>:4030-4048, this tree) hands the record's
+    /// rectangle straight to <c>XDiagramPositioning</c> whenever
+    /// <c>IsManualPlotArea()</c> holds and both position modes are
+    /// <c>EXC_CHFRAMEPOS_PARENT</c>, so no layout heuristic runs at all.
+    /// </para>
+    /// <para>
+    /// It is the rectangle <em>including</em> the axes' labels and excluding their titles —
+    /// <c>setDiagramPositionIncludingAxes</c> — which is why it stands beside
+    /// <see cref="PlotArea"/> (ODF's inner <c>chart:coordinate-region</c>) rather than replacing
+    /// it: what it supplies is the rectangle the labels are then taken out of.
+    /// </para>
+    /// <para>
+    /// Kept in chart units rather than resolved by the reader because the conversion needs the
+    /// frame: <c>XclImpChRoot::CalcHmmFromChartX</c> (<c>:310-318</c>) is
+    /// <c>unit * n + gap</c> with <c>unit = (frame - 2 * gap) / 4000</c> and
+    /// <c>gap = GetHmmFromPixelX(5.0)</c> (<c>xlchart.cxx</c>:1245-1251). The gap is
+    /// <strong>250 in hundredths of a millimetre</strong> for the headless reference, because
+    /// <c>XclRootData</c>'s screen-pixel width keeps its 50.0 default when there is no active
+    /// frame to ask (<c>xlroot.cxx</c>:105 against :150-163) — and headless conversion has none.
+    /// Measured against 26.2.4.2's own resolved model in
+    /// <c>probes/chart-resid-r99/results.md</c> §1.
+    /// </para>
+    /// </remarks>
+    public (int X, int Y, int Width, int Height)? OuterPlotAreaUnits { get; init; }
 
     /// <summary>
     /// Whether a pie is drawn as concentric rings — a doughnut — rather than as one filled disc.

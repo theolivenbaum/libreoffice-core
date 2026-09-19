@@ -73,8 +73,16 @@ public static partial class SlideTextLayout
     /// own for a rotated shape, the slide's for an upright one. The insets are applied here.
     /// </param>
     /// <param name="fonts">The face cache.</param>
+    /// <param name="markerPictures">
+    /// Where to put the picture bullets, when the caller draws them. A picture marker is not a
+    /// glyph run and cannot travel in the return value; passing null lays the text out exactly as
+    /// before and simply does not collect them, which is what a caller measuring a height wants.
+    /// </param>
     public static List<PlacedGlyphRun> Place(
-        SlideTextBody body, DocRect textRectangle, SlideFonts fonts)
+        SlideTextBody body,
+        DocRect textRectangle,
+        SlideFonts fonts,
+        List<PlacedPicture>? markerPictures = null)
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(fonts);
@@ -121,7 +129,11 @@ public static partial class SlideTextLayout
 
             for (int line = 0; line < lines.Count; line++)
             {
-                if (line == 0) EmitMarker(placed, block, lines[0], area.X, top, fonts, body.Device);
+                if (line == 0)
+                {
+                    EmitMarker(
+                        placed, markerPictures, block, lines[0], area.X, top, fonts, body.Device);
+                }
 
                 Emit(placed, block, lines[line], area.X, top, line == 0);
 
@@ -430,6 +442,7 @@ public static partial class SlideTextLayout
 
     private static void EmitMarker(
         List<PlacedGlyphRun> placed,
+        List<PlacedPicture>? markerPictures,
         Block block,
         PlacedLine line,
         Length areaLeft,
@@ -437,6 +450,12 @@ public static partial class SlideTextLayout
         SlideFonts fonts,
         MetricGrid device)
     {
+        if (MarkerPicture(block.Paragraph) is { } bitmap)
+        {
+            EmitMarkerPicture(markerPictures, block, line, areaLeft, top, bitmap);
+            return;
+        }
+
         if (Shaped(block.Paragraph, block.Scaling, fonts) is not
             { Face: { } face, Shaped: { } shaped } marked)
         {
@@ -454,19 +473,127 @@ public static partial class SlideTextLayout
         if (marker.IsSymbol)
         {
             LineMetrics metrics = LineSpacing.Resolve(face, device);
-            Length ascent = Rounded(metrics.ScaledAscent(size));
+
+            // The box's height is the bullet at the paragraph's UNSCALED size; the descent taken
+            // off the bottom of it is the drawn size's. See BulletBoxHeight.
+            long box = BulletBoxHeight(metrics, first, marker).Mm100;
             Length descent = Rounded(metrics.ScaledDescent(size));
 
-            baseline = top
-                       + line.Height
-                       - Length.FromEmu(line.TextHeight.Emu / 2)
-                       + Length.FromEmu((ascent.Emu - descent.Emu) / 2);
+            // Outliner::ImpCalcBulletArea's vertical, in the hundredth of a millimetre it is
+            // computed in — Top = H - TH + TH/2 - box/2, Bottom = Top + box - 1, where the -1 is
+            // tools::Rectangle's own both-edges convention (include/tools/gen.hxx:597) — and
+            // Outliner::StripBullet then takes the descent off Bottom to reach the baseline
+            // (outliner.cxx:1461-1467, :951-956).
+            long height = line.Height.Mm100;
+            long text = line.TextHeight.Mm100;
+            long bottom = height - text + (text / 2) - (box / 2) + box - 1;
+
+            baseline = top + Length.FromMm100(bottom) - descent;
         }
 
         placed.Add(new PlacedGlyphRun(
             Build(shaped, marked.Text, size, marked.Reference ?? Reference(face),
                   new DocPoint(pen, baseline), Length.Zero),
             marker.Colour ?? first.Colour));
+    }
+
+    /// <summary>
+    /// Places a picture bullet in the box <c>ImpCalcBulletArea</c> computes for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The vertical is the same expression a character symbol takes and stops one step earlier: a
+    /// bitmap is drawn from the box's <em>top</em> at the graphic's own size —
+    /// <c>DrawBulletInfo(*pFmt-&gt;GetBrush()-&gt;GetGraphicObject(), aBulletPos,
+    /// pPara-&gt;GetBulletSize())</c> with <c>aBulletPos.Y = rStartPos.Y + aBulletArea.Top()</c>
+    /// (<c>editeng/source/outliner/outliner.cxx</c>:965-999) — where a character is drawn from
+    /// its bottom and then lifted by its descent. <c>SVX_NUM_BITMAP</c> is excluded from
+    /// <c>ImpCalcBulletArea</c>'s baseline branch (<c>:1470</c>), so the box is the centred one in
+    /// both cases.
+    /// </para>
+    /// <para>
+    /// It costs no glyph and no shaping, which is the whole reason it is a separate path: the
+    /// character route would recode the level's bullet slot, resolve a face for it and draw
+    /// whatever that face holds — on a deck whose level is a bitmap, a Private Use code point no
+    /// installed face has, at half again the text's size. See <see cref="SlideMarkerPicture"/>.
+    /// </para>
+    /// </remarks>
+    private static void EmitMarkerPicture(
+        List<PlacedPicture>? markerPictures,
+        Block block,
+        PlacedLine line,
+        Length areaLeft,
+        Length top,
+        SlideMarkerPicture picture)
+    {
+        if (markerPictures is null) return;
+        if (picture.Width <= Length.Zero || picture.Height <= Length.Zero) return;
+
+        Length pen = areaLeft + block.Paragraph.StartIndent + block.Paragraph.FirstLineIndent;
+
+        long height = line.Height.Mm100;
+        long text = line.TextHeight.Mm100;
+        long box = picture.Height.Mm100;
+        long boxTop = height - text + (text / 2) - (box / 2);
+
+        markerPictures.Add(new PlacedPicture(
+            picture.Image,
+            new DocRect(pen, top + Length.FromMm100(boxTop), picture.Width, picture.Height))
+        {
+            Vector = picture.Vector,
+            IsInline = true,
+        });
+    }
+
+    /// <summary>
+    /// The height of the box a character bullet is centred in: the bullet's ascent plus descent
+    /// at the paragraph's <em>unscaled</em> size, whatever the fit scaled the drawn one to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Outliner::ImpCalcBulletArea</c> takes the box's height from <c>ImplGetBulletSize</c>,
+    /// which sets <c>ImpCalcBulletFont</c>'s font on the reference device and reads
+    /// <c>GetTextHeight()</c> back — and <strong>caches the answer on the paragraph</strong>
+    /// (<c>editeng/source/outliner/outliner.cxx</c>:1315-1355). The autofit search formats the
+    /// same outliner once unscaled and then again at each row of <c>constScaleLevels</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:303-333), so the call that fills that cache is
+    /// the <em>unscaled</em> one and the shrunken passes read it back. The bullet is still
+    /// <em>drawn</em> at the scaled size, because <c>StripBullet</c> calls
+    /// <c>ImpCalcBulletFont</c> again for the font it paints with (<c>:906-913</c>) and that one
+    /// does multiply by <c>getScalingParameters().fFontY</c> (<c>:851-855</c>). So a fitted
+    /// paragraph centres a small bullet in a large box.
+    /// </para>
+    /// <para>
+    /// <strong>This checkout has the cache keyed on the scaling parameters and would not do
+    /// it</strong> — <c>IsBulletInvalid</c> compares a stored <c>ScalingParameters</c>
+    /// (<c>include/editeng/outliner.hxx</c>:154-172) — and the checkout declares
+    /// <c>27.2.0.0.alpha0+</c>. <strong>26.2.4.2 does do it</strong>, and that is measured rather
+    /// than read: <c>probes/slides-r100/make-bullet-fit-probe.py</c> is one 24 pt bulleted body
+    /// per slide in a box swept 60…420 pt, so the search answers a different row each time. The
+    /// ten slides it does not scale agree with 26.2.4.2 to <strong>0.057 pt</strong>; on the six
+    /// it does, the reference's bullet is 1.615 to 6.533 pt lower than the box-centred rule puts
+    /// it, and the residual is
+    /// <c>(1 − fontScale) × unscaledBulletHeight / 2</c> at every one —
+    /// 231, 203, 144, 115, 58 and 58 hundredths of a millimetre against that expression's 231.0,
+    /// 202.1, 144.4, 115.5, 57.8 and 57.8, over five distinct font scales. The drawn bullet size,
+    /// the drawn text size and the body's baseline pitch agree exactly on all sixteen, so nothing
+    /// but this term is in question.
+    /// </para>
+    /// <para>
+    /// Reach: it is the whole of round 99's O28 baseline residual. On the 263 corpus pages whose
+    /// show sequence agrees with 26.2.4.2's <em>and</em> whose every body show sits within 0.10 pt
+    /// of the reference's baseline, the bullets beyond 0.10 pt go from <strong>315 of 1243 to
+    /// 20</strong>.
+    /// </para>
+    /// </remarks>
+    private static Length BulletBoxHeight(
+        LineMetrics metrics, SlideTextRun first, SlideMarker marker)
+    {
+        // The cache was filled before the search, so with no font scale at all — the marker's own
+        // relative size is not the search's and was already in it.
+        Length unscaled = ScaledMarker(Scaling.None, first.Size, marker.Scale);
+
+        return Rounded(metrics.ScaledAscent(unscaled)) + Rounded(metrics.ScaledDescent(unscaled));
     }
 
     /// <summary>
@@ -494,6 +621,14 @@ public static partial class SlideTextLayout
     /// all</b> — 293 on <c>2015-Civil-Rights-Website-training.ppt</c>, 185 on
     /// <c>71393_pp7.ppt</c>, 170 on <c>171128IPAP.pptx</c>. Both families, so it is this layout
     /// rather than either reader.
+    /// </para>
+    /// <para>
+    /// <strong>But the bullet it does not draw still has a box, and that box is a floor on the
+    /// line's height</strong> — which is what <c>requireText: false</c> is for. The floor comes
+    /// off <c>Outliner::GetBulletArea</c>, and that reaches <c>Outliner::GetNumberFormat</c>
+    /// (<c>editeng/source/outliner/outliner.cxx</c>:1289-1312), which asks the paragraph's
+    /// <em>depth</em> and its numbering rule and never looks at <c>EE_PARA_BULLETSTATE</c>. So
+    /// suppressing the glyph does not remove the box. See <see cref="BulletFloored"/>.
     /// </para>
     /// <para>
     /// <strong>A character bullet whose file names no face is drawn from OpenSymbol, not from the
@@ -529,11 +664,11 @@ public static partial class SlideTextLayout
     /// </para>
     /// </remarks>
     private static MarkedParagraph? Shaped(
-        SlideParagraph paragraph, Scaling scaling, SlideFonts fonts)
+        SlideParagraph paragraph, Scaling scaling, SlideFonts fonts, bool requireText = true)
     {
         if (paragraph.Marker is not { } marker) return null;
         if (marker.Text.Length == 0) return null;
-        if (paragraph.Text.Length == 0) return null;
+        if (requireText && paragraph.Text.Length == 0) return null;
         if (paragraph.Runs.Count == 0) return null;
 
         SlideTextRun first = paragraph.Runs[0];
@@ -743,14 +878,42 @@ public static partial class SlideTextLayout
     private static Length MarkerReach(
         SlideParagraph paragraph, Scaling scaling, SlideFonts fonts)
     {
-        if (Shaped(paragraph, scaling, fonts) is not { Shaped: { } shaped } marked)
+        Length width;
+
+        if (MarkerPicture(paragraph) is { } picture)
+        {
+            width = picture.Width;
+        }
+        else if (Shaped(paragraph, scaling, fonts) is { Shaped: { } shaped } marked)
+        {
+            width = shaped.Width(marked.Size);
+        }
+        else
+        {
             return Length.Zero;
+        }
 
         // Never negative: the marker's right edge only ever pushes the first line further right,
         // and a hanging indent wider than the marker leaves the line where the file put it.
-        Length reach = paragraph.FirstLineIndent + shaped.Width(marked.Size);
+        Length reach = paragraph.FirstLineIndent + width;
         return reach > Length.Zero ? reach : Length.Zero;
     }
+
+    /// <summary>
+    /// The picture a paragraph's marker is, when it has one and the paragraph draws it.
+    /// </summary>
+    /// <remarks>
+    /// The same two guards a character marker takes in <see cref="Shaped"/>: a paragraph with no
+    /// text draws no marker at all, and one with no runs has nothing to draw beside. The box a
+    /// paragraph <em>without</em> text still keeps is <see cref="BulletFloored"/>'s and asks the
+    /// marker directly.
+    /// </remarks>
+    private static SlideMarkerPicture? MarkerPicture(SlideParagraph paragraph)
+        => paragraph.Marker is { Picture: { } picture }
+           && paragraph.Text.Length > 0
+           && paragraph.Runs.Count > 0
+            ? picture
+            : null;
 
     /// <summary>
     /// The stretches of a paragraph that are fields, and so break between characters.
@@ -856,7 +1019,7 @@ public static partial class SlideTextLayout
             runs.Add(new FormattedRun(run.Start, run.Length, face, escaped, Tracking: run.Tracking));
             styles.Add(new RunStyle(
                 run.Colour, reference, face, run.IsUnderlined, run.IsStruckThrough,
-                run.Escapement.RiseOf(size), size, run.IsShadowed));
+                run.Escapement.RiseOf(size), size, run.IsShadowed, run.Escapement));
         }
 
         if (first is null) return null;
@@ -912,8 +1075,11 @@ public static partial class SlideTextLayout
                 // gap of 67/2048, so keeping it makes an 18 pt line 20.70 pt where LibreOffice
                 // draws 20.15 — half a point per line, measured on the wrapping cell of
                 // slide-table-grid.pptx, whose four reference baselines are 20.154 pt apart.
-                (Length ascent, Length metric) =
-                    FaceHeight(runs, styles, box.Line.Start, box.Line.VisibleEnd, body.Device);
+                // To End rather than VisibleEnd: a trailing blank is a portion of the line and
+                // EditEngine measures every portion of it. See LargestSize, which carries the
+                // citation and the witness — and MeasuredEnd, for the one portion it skips.
+                (Length ascent, Length metric) = FaceHeight(
+                    runs, styles, box.Line.Start, MeasuredEnd(measured.Text, box.Line), body.Device);
 
                 Length faceHeight = metric > Length.Zero ? metric : box.Height;
                 // Through LineSpacingRule.Apply, whose whole-twip arithmetic this branch wants:
@@ -935,34 +1101,44 @@ public static partial class SlideTextLayout
                 Length faceAscent = ascent > Length.Zero ? ascent : box.Baseline;
 
                 lines.Add(appended
-                    ? Appended(box, faceAscent, faceHeight, paragraph, paragraphIndex)
+                    ? BulletFloored(
+                        Appended(box, faceAscent, faceHeight, paragraph, paragraphIndex),
+                        paragraph, fonts, body.Device)
                     : Spaced(
                         new PlacedLine(box, faceAscent, faceLine, faceHeight),
                         scaling));
                 continue;
             }
 
-            Length em = appended && paragraph.Text.Length > 0
-                ? EndSize(runs, styles)
-                : LargestSize(runs, styles, box.Line.Start, box.Line.VisibleEnd);
-
             // An autofitted body that is not being scaled measures its lines at the *device's*
             // realisation of the em rather than at the em. See DeviceRealised.
-            if (body.AutoFit && scaling.Font is <= 0 or 1.0) em = DeviceRealised(em);
+            bool realised = body.AutoFit && scaling.Font is <= 0 or 1.0;
 
-            // The rule itself: one em of ascent, 1.2 em of box, then whatever the paragraph's own
-            // spacing does to it. A paragraph stating 150% gets 1.5 x 1.2 em, which is what
-            // EditEngine's proportional spacing applies to the height it just computed.
-            // Rounded to a whole hundredth of a millimetre, which is the unit EditEngine holds a
-            // line height in: SetHeight takes a sal_uInt16 of the outliner's own map unit, and for
-            // a draw object that unit is 1/100 mm. Keeping the exact EMU instead leaves a line
-            // height the reference cannot represent, and the error accumulates down the block.
-            Length natural = Length.FromMm100(
-                (long)Math.Floor((em.Mm100 * LineHeightFactor) + 0.5));
+            // One em of ascent and 1.2 em of box -- except where an escaped run makes the line
+            // taller than that, which is what `FixedCellBox` is for. The height is a whole
+            // hundredth of a millimetre, which is the unit EditEngine holds a line height in:
+            // SetHeight takes a sal_uInt16 of the outliner's own map unit, and for a draw object
+            // that unit is 1/100 mm. Keeping the exact EMU instead leaves a line height the
+            // reference cannot represent, and the error accumulates down the block.
+            Length em;
+            Length natural;
+
+            if (appended && paragraph.Text.Length > 0)
+            {
+                em = Realised(EndSize(runs, styles), realised);
+                natural = FixedCellHeight(em);
+            }
+            else
+            {
+                (em, natural) = FixedCellBox(
+                    runs, styles, box.Line.Start, MeasuredEnd(measured.Text, box.Line), realised);
+            }
 
             if (appended)
             {
-                lines.Add(Appended(box, em, natural, paragraph, paragraphIndex));
+                lines.Add(BulletFloored(
+                    Appended(box, em, natural, paragraph, paragraphIndex),
+                    paragraph, fonts, body.Device));
                 continue;
             }
 
@@ -1201,6 +1377,38 @@ public static partial class SlideTextLayout
     /// metric, so the ordinal in "5th" leaves its line exactly as tall as the date beside it
     /// (<c>editeng/source/editeng/impedit3.cxx:3121-3126</c>).
     /// </para>
+    /// <para>
+    /// <strong>The runs a line touches run to its <see cref="TextLine.End"/>, not to its
+    /// <see cref="TextLine.VisibleEnd"/> — a trailing blank is on the line and is measured.</strong>
+    /// EditEngine walks <em>every</em> portion of the line, <c>GetStartPortion()</c> to
+    /// <c>GetEndPortion()</c> inclusive, skipping only a <c>PortionKind::LINEBREAK</c>, and takes the
+    /// largest ascent and the largest descent it finds (<c>editeng/source/editeng/impedit3.cxx</c>:
+    /// 1496-1519); a portion that happens to be blank is not exempt. Trailing blanks are excluded
+    /// from a line's <em>width</em> — that is what <c>VisibleEnd</c> is for, and it is still what
+    /// the line is drawn and aligned by — but nothing excludes them from its <em>height</em>.
+    /// </para>
+    /// <para>
+    /// It is only ever visible when the trailing blank is bigger than the text before it, which a
+    /// real deck does: <c>pres_ioc_phuket.ppt</c> page 26's white box ends its wrapped paragraph
+    /// with a single space at <strong>28 pt</strong> after 19 pt italic text, and 26.2.4.2 draws
+    /// that space — a one-glyph 28.01 pt show at the end of the last line — and sizes the line by
+    /// it. The box states <c>draw:auto-grow-height="true"</c> with <c>fo:min-height="0cm"</c>, so
+    /// the height it is drawn at is the height of the block: 26.2.4.2 gives it
+    /// <strong>3.267 cm</strong> and, measuring that last line at 19 pt instead, we gave it
+    /// <strong>2.884 cm</strong>. The difference is
+    /// <c>fround(988 × 1.2) − fround(670 × 1.2) = 1186 − 804 = 382</c> hundredths of a millimetre
+    /// against the 383 measured off the two content streams, and the reference's own line pitch
+    /// confirms which line moved: from the second baseline to the third it is <strong>31.81 pt</strong>
+    /// where ours is 22.79, and 31.81 pt is 1122 units, which is
+    /// <c>(804 − 670) + 988</c> — the 19 pt line's descent plus the <em>28 pt</em> line's ascent.
+    /// </para>
+    /// <para>
+    /// The whole box closes on it. Its three lines are 24 pt, 19 pt and 28 pt, so the block is
+    /// <c>1016 + 804 + 1186 = 3006</c> plus 0.13 cm of padding at each end — <strong>3266</strong>
+    /// against the 3267 the reference's own flat-ODP export states for the shape — where measuring
+    /// the last line at 19 pt gives <c>1016 + 804 + 804 + 260 = 2884</c>, which is the 81.77 pt we
+    /// drew.
+    /// </para>
     /// </remarks>
     private static Length LargestSize(
         List<FormattedRun> runs, List<RunStyle> styles, int start, int end)
@@ -1221,6 +1429,209 @@ public static partial class SlideTextLayout
         // on it: the first run's size, which is what the paragraph mark carries.
         return runs.Count > 0 ? Nominal(runs, styles, 0) : Length.FromPoints(18);
     }
+
+    /// <summary>
+    /// A line's ascent and its height under font-independent line spacing: one em of ascent and
+    /// 1.2 em of box for ordinary text, and more than that where an escaped run reaches further.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImpEditEngine::CreateLines</c> finishes a line by walking every portion of it through
+    /// <c>RecalcFormatterFontMetrics</c> and taking the largest ascent and the largest descent it
+    /// meets — separately (<c>editeng/source/editeng/impedit3.cxx</c>:1496-1519). Under
+    /// <c>IsFixedCellHeight()</c> that function answers <c>ascent = fontHeight</c> and
+    /// <c>descent = fround(1.2 × fontHeight) − fontHeight</c> (<c>:3138-3142</c>), so for text
+    /// carrying no escapement the sum is <c>fround(1.2 × em)</c> exactly and this is the rule
+    /// <see cref="LargestSize"/> plus <see cref="FixedCellHeight"/> already gave.
+    /// </para>
+    /// <para>
+    /// <strong>A raised or lowered run is measured twice and the larger answer wins each side</strong>
+    /// (<c>:3164-3183</c>). The function forces the proportion back to 100 before it takes the
+    /// metric, so an escaped portion contributes the <em>full</em> ascent like any other; then,
+    /// for a subscript, it re-derives the descent as
+    /// <c>descent × proportion / 100 − fontHeight × escapement / 100</c> — integer arithmetic in
+    /// hundredths of a millimetre, and the second term is a <em>subtraction of a negative</em>, so
+    /// a subscript's descent grows by the whole of its drop. A superscript does the same to the
+    /// ascent. Neither ever shrinks the line, because both are compared against the unescaped
+    /// value already accumulated.
+    /// </para>
+    /// <para>
+    /// <strong>What it costs is a line a quarter of an em taller wherever a subscript appears,
+    /// and on an autofitted body that is a whole <c>constScaleLevels</c> row.</strong> At 28 pt —
+    /// 988 hundredths of a millimetre — the plain descent is <c>fround(988 × 1.2) − 988 = 198</c>
+    /// and a <c>-25% 58%</c> subscript's is <c>198 × 58 / 100 + 988 × 25 / 100 = 114 + 247 = 361</c>,
+    /// so the line is 1349 rather than 1186.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 by variant rather than derived, and it is the drop that
+    /// does it rather than the shrink.</strong> <c>pods05.ppt</c> page 32 holds an autofitted box
+    /// whose runs carry <c>style:text-position="-25% 58%"</c> subscripts; the reference draws that
+    /// page's dominant text at 9 pt where this tree drew 11. Take 26.2.4.2's own flat ODP of the
+    /// deck and render it straight back through the same binary and page 32 still comes out at
+    /// 9 pt, so the round trip is faithful there. Change <em>only</em> the offset, to
+    /// <c>0% 58%</c> — the same shrunken size, no drop — and the same binary draws it at
+    /// <strong>11 pt, this tree's answer</strong>. Change only the proportion instead, to
+    /// <c>-25% 100%</c>, and it stays at 9: the drop alone moves the row, and the shrink on its
+    /// own does not move it far enough to cross one. <c>probes/slides-r107/results.md</c> §2.
+    /// </para>
+    /// </remarks>
+    private static (Length Ascent, Length Height) FixedCellBox(
+        List<FormattedRun> runs, List<RunStyle> styles, int start, int end, bool realised)
+    {
+        long ascent = 0;
+        long descent = 0;
+        bool measured = false;
+
+        // A line consisting of nothing but its own hard break measures zero, and EditEngine then
+        // falls back to `ImplCalculateFontIndependentLineSpacing` of the break character's own
+        // font with no escapement anywhere in it (`impedit3.cxx`:1480-1491). That is the
+        // `start == end` case, so it deliberately passes `escaped` false below.
+        bool wholeLine = start != end;
+
+        for (int i = 0; i < runs.Count; i++)
+        {
+            FormattedRun run = runs[i];
+            bool touches = run.Start < end && start < run.End;
+            bool contains = start == end && run.Covers(start);
+            if (!touches && !contains) continue;
+
+            measured = true;
+            Accumulate(i, wholeLine);
+        }
+
+        if (!measured)
+        {
+            // An empty paragraph still occupies a line, and it is as tall as the text that would
+            // go on it: the first run's size, which is what the paragraph mark carries.
+            if (runs.Count > 0)
+            {
+                Accumulate(0, false);
+            }
+            else
+            {
+                Length fallback = Realised(Length.FromPoints(18), realised);
+                ascent = fallback.Mm100;
+                descent = FixedCellHeight(fallback).Mm100 - ascent;
+            }
+        }
+
+        return (Length.FromMm100(ascent), Length.FromMm100(ascent + descent));
+
+        void Accumulate(int index, bool escaped)
+        {
+            long height = Realised(Nominal(runs, styles, index), realised).Mm100;
+            long own = height;
+            long below = FixedCellHeight(Length.FromMm100(height)).Mm100 - height;
+
+            SlideEscapement escapement =
+                escaped && index < styles.Count ? styles[index].Escapement : default;
+
+            if (escapement.Percent != 0)
+            {
+                // `DFLT_ESC_PROP` is what an unstated proportion means, and zero is how this tree
+                // spells "no escapement at all" -- neither reaches here with a non-zero percent.
+                long proportion = escapement.Proportion is 0 or 100 ? 100 : escapement.Proportion;
+                long rise = height * escapement.Percent / 100;
+
+                if (escapement.Percent > 0) own = Math.Max(own, (own * proportion / 100) + rise);
+                else below = Math.Max(below, (below * proportion / 100) - rise);
+            }
+
+            ascent = Math.Max(ascent, own);
+            descent = Math.Max(descent, below);
+        }
+    }
+
+    /// <summary>The box a font-independent line of this em size occupies: <c>fround(1.2 em)</c>.</summary>
+    /// <remarks>
+    /// <c>ImplCalculateFontIndependentLineSpacing</c>, <c>impedit3.cxx</c>:501-505, whose own
+    /// constant is <c>12.0 / 10.0</c> and whose rounding is <c>basegfx::fround</c>.
+    /// </remarks>
+    private static Length FixedCellHeight(Length em)
+        => Length.FromMm100((long)Math.Floor((em.Mm100 * LineHeightFactor) + 0.5));
+
+    /// <summary>The em size, through the device's grid when the caller asks for it.</summary>
+    private static Length Realised(Length em, bool realised) => realised ? DeviceRealised(em) : em;
+
+    /// <summary>
+    /// Where a line's <em>height</em> measurement stops: its <see cref="TextLine.End"/>, less the
+    /// hard line break that ends it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A hard line break does not size the line it ends, and every other portion of that
+    /// line does.</strong> EditEngine's metrics loop walks <c>GetStartPortion()</c> to
+    /// <c>GetEndPortion()</c> inclusive and skips exactly one kind —
+    /// <c>if ( rTP.GetKind() != PortionKind::LINEBREAK )</c>, with the comment beside it naming
+    /// the case: <em>"problem with hard font height attribute, when everything but the line break
+    /// has this attribute"</em> (<c>editeng/source/editeng/impedit3.cxx</c>:1498-1516). The kind is
+    /// set by <c>EE_FEATURE_LINEBR</c> and by nothing else (<c>:1088-1099</c>), and the break is
+    /// the line's last character — <c>pLine->SetEnd(nPortionStart + 1)</c> (<c>:1441-1449</c>) — so
+    /// skipping the portion is dropping one character off the end of the range. Read in this
+    /// checkout, which declares <c>27.2.0.0.alpha0+</c> and is not the reference binary's source;
+    /// the paragraph after next is the same claim measured at 26.2.4.2 itself.
+    /// </para>
+    /// <para>
+    /// <strong>A line that is nothing but the break keeps it, and that is the same source rather
+    /// than an exception to it.</strong> <c>EditLine::CalcTextSize</c> adds nothing for a
+    /// <c>LINEBREAK</c> portion (<c>editeng/source/editeng/EditLine.cxx</c>:69-71), so such a line
+    /// measures zero and takes the fallback above the loop: <c>SeekCursor(pNode,
+    /// pLine-&gt;GetStart()+1, aTmpFont)</c> and then, under <c>IsFixedCellHeight()</c>,
+    /// <c>ImplCalculateFontIndependentLineSpacing(aTmpFont.GetFontHeight())</c>
+    /// (<c>impedit3.cxx</c>:1478-1491) — the height of the break's <em>own</em> character.
+    /// Trimming the last character here leaves <c>start == end</c>, which is precisely the case
+    /// <see cref="LargestSize"/> and <see cref="FaceHeight"/> answer from the run that covers
+    /// <c>start</c>, so no special case is needed for it.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2, one variable, five boxes per slide</strong>
+    /// (<c>probes/slides-r100/make-break-probe.py</c>, <c>break-probe.txt</c>). Each box holds
+    /// 18 pt text and one construct whose size is swept 18, 24, 28, 36, 54, 72 pt, and the boxes
+    /// are read out of the reference's own PDF by their baselines:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><c>BREAK</c> — <c>"AAA"</c>, a break at the swept size, <c>"BBB"</c>.
+    /// Both baselines are <strong>462.019 and 440.419 on all six slides</strong>: the break's size
+    /// changes nothing.</description></item>
+    /// <item><description><c>BLANK</c> — a trailing space at the swept size, and <c>RUN</c> — a
+    /// visible glyph at it. Both move on every slide, identically to each other, 462.019 → 408.019
+    /// over the sweep. So a blank sizes its line exactly as a glyph does, which is round 99's rule
+    /// re-measured at the binary on a deck built for this.</description></item>
+    /// <item><description><c>TWICE</c> — two breaks in a row, so the middle line holds nothing but
+    /// one. Its height <em>does</em> follow the swept size, and follows it as
+    /// <c>fround(1.2 × em)</c> exactly: the first-to-third baseline distance is
+    /// <c>127 + fround(1.2 × em) + 635</c> hundredths of a millimetre on all six, 1524 at 18 pt
+    /// through 3810 at 72 pt.</description></item>
+    /// </list>
+    /// <para>
+    /// <strong>What it was worth.</strong> Reaching <see cref="TextLine.End"/> rather than
+    /// <see cref="TextLine.VisibleEnd"/> is right, and it brought this in with it: a line
+    /// separator is trailing whitespace, so the old range already excluded it by accident.
+    /// <c>Inducement-to-Insurance-Business.ppt</c> page 14 is the corpus witness — a bottom-anchored
+    /// title whose paragraph ends <c>…Section 8 of RESPA?</c> and then a line break set in
+    /// <strong>54 pt</strong> after 28 pt text. 26.2.4.2 gives that line the same 30.246 pt pitch
+    /// as every other line of the block; we gave it 52.696, pushing the block 28 pt further up and
+    /// one more line off the top of the page.
+    /// </para>
+    /// </remarks>
+    private static int MeasuredEnd(ReadOnlySpan<char> text, TextLine line)
+    {
+        int end = Math.Min(line.End, text.Length);
+
+        return end > line.Start && IsLineSeparator(text[end - 1]) ? end - 1 : end;
+    }
+
+    /// <summary>
+    /// True for a character that can only be a manual line break, never the end of a paragraph.
+    /// </summary>
+    /// <remarks>
+    /// The set <c>TextMeasurer</c> fills lines by: OOXML's <c>a:br</c> and <c>w:br</c> and ODF's
+    /// <c>text:line-break</c> all arrive as U+2028 and a binary PowerPoint's as U+000B. The three
+    /// characters a paragraph may end with — <c>'\r'</c>, <c>'\n'</c> and U+2029 — are deliberately
+    /// not in it: they are not a <c>LINEBREAK</c> portion and never reach a line's interior.
+    /// </remarks>
+    private static bool IsLineSeparator(char character)
+        => character is '\u2028' or '\u000B' or '\u000C' or '\u0085';
 
     /// <summary>The size a run would take were it not escaped.</summary>
     private static Length Nominal(List<FormattedRun> runs, List<RunStyle> styles, int index)
@@ -1562,8 +1973,9 @@ public static partial class SlideTextLayout
     /// </para>
     /// <para>
     /// The bullet area's own height can raise such a line further
-    /// (<c>:1974-1985</c>, which halves the difference into the ascent). That is deliberately not
-    /// modelled: no measured case needs it, and the witness above is reproduced without it.
+    /// (<c>:1974-1985</c>, which halves the difference into the ascent). That is
+    /// <see cref="BulletFloored"/>, and it is applied to this method's answer rather than inside
+    /// it, because it is outside the four line-spacing arms in the reference too.
     /// </para>
     /// </remarks>
     private static PlacedLine Appended(
@@ -1596,6 +2008,136 @@ public static partial class SlideTextLayout
         }
 
         return new PlacedLine(box, em, natural, natural);
+    }
+
+    /// <summary>
+    /// Raises an <em>empty</em> paragraph's line to its bullet's box when the bullet is the taller
+    /// of the two, halving the difference into the ascent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The last block of <c>ImpEditEngine::CreateAndInsertEmptyLine</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:1974-1985, this tree):
+    /// </para>
+    /// <code>
+    /// if ( !bLineBreak )
+    /// {
+    ///     tools::Long nMinHeight = aBulletArea.GetHeight();
+    ///     if ( nMinHeight &gt; static_cast&lt;tools::Long&gt;(pTmpLine-&gt;GetHeight()) )
+    ///     {
+    ///         tools::Long nDiff = nMinHeight - static_cast&lt;tools::Long&gt;(pTmpLine-&gt;GetHeight());
+    ///         // distribute nDiff upwards and downwards
+    ///         pTmpLine-&gt;SetMaxAscent( pTmpLine-&gt;GetMaxAscent() + nDiff/2 );
+    ///         pTmpLine-&gt;SetHeight( nMinHeight );
+    ///     }
+    /// }
+    /// </code>
+    /// <para>
+    /// Four properties of that hunk decide where it can be seen, and all four were measured
+    /// against 26.2.4.2 before it was written — the source below is
+    /// <c>27.2.0.0.alpha0+</c> and is the explanation, not the evidence.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <strong>It is only for a paragraph with no characters.</strong> <c>bLineBreak</c> is
+    /// <c>GetNode()-&gt;Len() &gt; 0</c>, so the line appended after a paragraph's trailing hard
+    /// break is excluded and a paragraph holding text is never floored by its own bullet.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>It is the last thing done to the line</strong>, after the <c>Min</c>, <c>Fix</c>
+    /// and <c>Prop</c> arms — so a proportional line spacing cannot shrink the line below the
+    /// box, and the floor does not scale with the percentage.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>The box exists even when no bullet is drawn.</strong> <c>GetBulletArea</c> goes
+    /// through <c>Outliner::GetNumberFormat</c>, which reads the paragraph's depth and the
+    /// numbering rule and never <c>EE_PARA_BULLETSTATE</c>; the empty-paragraph suppression the
+    /// readers apply (see <see cref="Shaped"/>) is a painting rule.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>A level whose format is <c>SVX_NUM_NUMBER_NONE</c> has a box of no height</strong>
+    /// — <c>Outliner::ImplGetBulletSize</c> returns <c>Size(0, 0)</c> for it
+    /// (<c>outliner.cxx</c>:1329-1332) — and so does a paragraph at no level at all, whose
+    /// <c>GetNumberFormat</c> is null. Both are a null <see cref="SlideParagraph.Marker"/> here.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// <strong>Measured by single-variable experiment at 26.2.4.2</strong>, on its own flat ODP of
+    /// <c>slides/done-012/ppt/JesuitAssocOfStudentPersonnel.ppt</c> page 24 cut to one slide, with
+    /// the shrink-to-fit turned off so the answer is a continuous baseline pitch rather than a
+    /// <c>constScaleLevels</c> row (<c>probes/slides-size2-r110</c>). Two 20 pt bulleted items
+    /// separated by one empty paragraph, everything else held fixed:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// Sweeping <c>fo:line-height</c> 100, 95, 90, 85, 80, 70, 60, 50 %, the reference's empty
+    /// line is <strong>787 hundredths of a millimetre at every percentage at or below 90</strong>
+    /// and follows the text line above it at 95 and 100. 787 is Liberation Sans' ascent plus
+    /// descent at 20 pt; <c>1.2 em × 0.8</c> is 678, which is what this tree drew.
+    /// </description></item>
+    /// <item><description>
+    /// Moving the same empty paragraph between five structures at 80 %: second
+    /// <c>&lt;text:p&gt;</c> of a <c>&lt;text:list-item&gt;</c> — floored; its own
+    /// <c>&lt;text:list-item&gt;</c> — floored; a <c>&lt;text:list-header&gt;</c> of a list style
+    /// whose level 1 is a <c>text:list-level-style-bullet</c> — floored; a
+    /// <c>&lt;text:list-header&gt;</c> of one whose level 1 is a
+    /// <c>text:list-level-style-number</c> with an empty <c>style:num-format</c> — <em>not</em>
+    /// floored; a bare <c>&lt;text:p&gt;</c> outside every list — <em>not</em> floored. Swapping
+    /// the paragraph <em>style</em> between the floored and unfloored cases moves nothing, so it
+    /// is the level's bullet and not the paragraph's margins.
+    /// </description></item>
+    /// <item><description>
+    /// <strong>The box is the bullet's own, which identifies it.</strong> Setting the level's
+    /// <c>fo:font-size</c> to 50 % removes the floor entirely (the box is 394, below the line);
+    /// 200 % raises the empty line to 1576, which is the face's ascent plus descent at 40 pt; and
+    /// naming <c>DejaVu Sans</c> instead of <c>Arial</c> at 100 % moves it 787 → 821, which is
+    /// that face's <c>(1901 + 483) / 2048</c> against Liberation Sans' <c>(1854 + 434) / 2048</c>.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// The height is <see cref="BulletBoxHeight"/>'s — the same cached, <em>unscaled</em> box the
+    /// bullet is centred in, for the same reason and on the same measurement.
+    /// </para>
+    /// </remarks>
+    private static PlacedLine BulletFloored(
+        PlacedLine line, SlideParagraph paragraph, SlideFonts fonts, MetricGrid device)
+    {
+        // bLineBreak: an appended line whose paragraph has characters is the line after a
+        // trailing hard break, and the reference's guard excludes it.
+        if (paragraph.Text.Length != 0) return line;
+
+        // ...and an empty paragraph has a box only where its reader left it at its level. See
+        // SlideParagraph.EmptyKeepsMarkerLevel: OOXML sets the level to -1 and the other two do
+        // not, so this is a .ppt and ODF rule and the OOXML column cannot reach it.
+        if (!paragraph.EmptyKeepsMarkerLevel) return line;
+
+        Length box;
+
+        // A picture bullet's box is `pFmt->GetGraphicSize()` rather than a face's ascent plus
+        // descent (`Outliner::ImplGetBulletSize`, `outliner.cxx`:1345-1350), and it is stated in
+        // absolute units at import — so no font is resolved for it and the fit does not scale it.
+        if (paragraph.Marker is { Picture: { } picture })
+        {
+            box = picture.Height;
+        }
+        else if (Shaped(paragraph, Scaling.None, fonts, requireText: false) is
+                 { Face: { } face } marked)
+        {
+            box = BulletBoxHeight(
+                LineSpacing.Resolve(face, device), paragraph.Runs[0], marked.Marker);
+        }
+        else
+        {
+            return line;
+        }
+
+        if (box <= line.Height) return line;
+
+        // nDiff/2 is integer division of hundredths of a millimetre, and SetHeight's one-argument
+        // form sets the text height to the same value (EditLine.cxx:79-86).
+        Length half = Length.FromMm100((box.Mm100 - line.Height.Mm100) / 2);
+
+        return line with { Ascent = line.Ascent + half, Height = box, TextHeight = box };
     }
 
     /// <summary>
@@ -1880,31 +2422,34 @@ public static partial class SlideTextLayout
         if (size <= Length.Zero || width <= Length.Zero) return null;
 
         int unitsPerEm = face.UnitsPerEm > 0 ? face.UnitsPerEm : 1000;
-        FontVerticalMetrics metrics =
-            LineSpacing.ResolveDecorations(face, LineSpacing.Resolve(face));
+        LineMetrics line = LineSpacing.Resolve(face);
 
-        Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
+        // BOTH the thickness and the offset come off the PDF writer's own 720 dpi device, in whole
+        // hundredths of a millimetre, for a slide exactly as for a sheet. Round 120 took only the
+        // thickness from there and left the offset in design units; round 123 measured what that
+        // costs and moved it. See `LineSpacing.ResolveRuleWidths`.
+        LineSpacing.RuleWidths widths =
+            LineSpacing.ResolveRuleWidths(face, line, size, MetricGrid.TextLine);
 
         List<DocRect> rules = [];
 
         if (decoration.Underline)
         {
-            // The face records the underline's offset as negative below the baseline.
-            Length thickness = Scaled(metrics.UnderlineThickness);
+            Length thickness = widths.Underline;
             if (thickness > Length.Zero)
             {
                 rules.Add(new DocRect(
-                    left, baseline - Scaled(metrics.UnderlinePosition), width, thickness));
+                    left, baseline + widths.UnderlineOffset, width, thickness));
             }
         }
 
         if (decoration.Strikethrough)
         {
-            Length thickness = Scaled(metrics.StrikeoutThickness);
+            Length thickness = widths.Strikeout;
             if (thickness > Length.Zero)
             {
                 rules.Add(new DocRect(
-                    left, baseline - Scaled(metrics.StrikeoutPosition), width, thickness));
+                    left, baseline + widths.StrikeoutOffset, width, thickness));
             }
         }
 
@@ -2037,6 +2582,11 @@ public static partial class SlideTextLayout
     /// decorations rather than with the measured run, because the shadow is drawn from the same
     /// glyphs at an offset and so moves no line break.
     /// </param>
+    /// <param name="Escapement">
+    /// The whole escapement, offset and proportion together, because the height a line takes needs
+    /// both and neither <see cref="Rise"/> nor <see cref="NominalSize"/> carries the pair. See
+    /// <see cref="FixedCellBox"/>.
+    /// </param>
     private readonly record struct RunStyle(
         Colour Colour,
         FontReference? Font,
@@ -2045,7 +2595,8 @@ public static partial class SlideTextLayout
         bool IsStruckThrough = false,
         Length Rise = default,
         Length NominalSize = default,
-        bool IsShadowed = false);
+        bool IsShadowed = false,
+        SlideEscapement Escapement = default);
 
     /// <summary>One paragraph, measured and broken.</summary>
     private sealed record Block(

@@ -217,7 +217,10 @@ public class DrawingChartDateAxisTests
 
         dash.Count.ShouldBe(2);
         dash[0].Emu.ShouldBeLessThan(dash[1].Emu);
-        ((double)(dash[0].Emu + dash[1].Emu)).ShouldBe(38100.0 * 2, 2.0);
+        // A `prstDash` states its ink and gap as multiples of the line's own width, so the
+        // total follows the width through `convertEmuToHmm`: 38100 EMU is 106 hundredths of a
+        // millimetre, which is 38160 EMU.
+        ((double)(dash[0].Emu + dash[1].Emu)).ShouldBe(38160.0 * 2, 2.0);
 
         // A line that names no pattern stays solid, which is the case every other chart is.
         plot.Series[1].DashPattern.ShouldBeNull();

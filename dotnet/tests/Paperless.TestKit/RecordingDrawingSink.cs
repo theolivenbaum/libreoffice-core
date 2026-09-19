@@ -153,7 +153,13 @@ public sealed class RecordingDrawingSink : IDrawingSink
     }
 
     /// <inheritdoc/>
-    public void ClipPath(GraphicsPath path, FillRule rule = FillRule.NonZero) => Clips++;
+    public void ClipPath(GraphicsPath path, FillRule rule = FillRule.NonZero)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        Clips++;
+        ClipPaths.Add(path);
+    }
 
     /// <inheritdoc/>
     public void Transform(AffineTransform transform) => Transforms++;
@@ -172,6 +178,15 @@ public sealed class RecordingDrawingSink : IDrawingSink
 
     /// <summary>How many clips were pushed.</summary>
     public int Clips { get; private set; }
+
+    /// <summary>The paths those clips were taken on, in order.</summary>
+    /// <remarks>
+    /// The count alone cannot tell a rectangular clip from a shaped one, and that distinction is
+    /// the whole of some questions: a picture inside an ellipse and a picture inside its bounding
+    /// box are both "one clip". The paths are recorded rather than applied, exactly as the class
+    /// note says of every other geometric call.
+    /// </remarks>
+    public List<GraphicsPath> ClipPaths { get; } = [];
 
     /// <summary>How many transforms were applied.</summary>
     public int Transforms { get; private set; }

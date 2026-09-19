@@ -8,6 +8,7 @@ using Paperless.Core.Numbering;
 using Paperless.Text.Encodings;
 using Paperless.Text.Layout;
 using Paperless.WordProcessing.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Rtf;
 
@@ -596,9 +597,11 @@ public sealed partial class RtfDocumentReader
                 return;
             case "bkmkstart":
                 state.Destination = RtfDestination.BookmarkStart;
+                BeginBookmarkName();
                 return;
             case "bkmkend":
                 state.Destination = RtfDestination.BookmarkEnd;
+                BeginBookmarkName();
                 return;
             case "atnid" or "atnref" or "atndate" or "atnparent"
                  or "annotprot" or "xe" or "tc" or "tcn" or "datafield" or "fname" or "ftnsep"
@@ -913,16 +916,46 @@ public sealed partial class RtfDocumentReader
             case "i":
                 state.Italic = token.Parameter != 0;
                 return;
-            case "ul" or "uld" or "uldash" or "uldashd" or "uldashdd" or "uldb" or "ulhwave"
-                 or "ulldash" or "ulth" or "ulthd" or "ulthdash" or "ulthdashd" or "ulthdashdd"
-                 or "ulthldash" or "ululdbwave" or "ulw" or "ulwave":
-                state.Underline = token.Parameter != 0;
+            // `\uldb` and `\ululdbwave` are the two that draw TWO lines; the other fifteen draw
+            // one, whatever pattern they name, because nothing below this draws a pattern.
+            case "uldb" or "ululdbwave":
+                state.Underline = token.Parameter != 0
+                    ? TextUnderline.DoubleLine
+                    : TextUnderline.None;
+                return;
+            // The `\ulth` family and `\ulhwave` are the heavy forms —
+            // `RTFDocumentImpl` maps them to `thick`, `dottedHeavy`, `dashedHeavy`,
+            // `dashDotHeavy`, `dashDotDotHeavy`, `dashLongHeavy` and `wavyHeavy`
+            // (`rtfdocumentimpl.cxx`:2085-2102) — so they are one line at about twice the weight.
+            case "ulth" or "ulthd" or "ulthdash" or "ulthdashd" or "ulthdashdd" or "ulthldash"
+                 or "ulhwave":
+                state.Underline = token.Parameter != 0
+                    ? TextUnderline.BoldLine
+                    : TextUnderline.None;
+                return;
+            case "ul" or "uld" or "uldash" or "uldashd" or "uldashdd"
+                 or "ulldash" or "ulw" or "ulwave":
+                state.Underline = token.Parameter != 0
+                    ? TextUnderline.SingleLine
+                    : TextUnderline.None;
                 return;
             case "ulnone":
-                state.Underline = false;
+                state.Underline = TextUnderline.None;
                 return;
             case "strike" or "striked":
                 state.Strike = token.Parameter != 0;
+                return;
+            case "charscalex":
+                // A bare `\charscalex` is ONE HUNDRED, not zero: the tokeniser's own `defValue` is 100
+                // (`rtftokenizer.cxx`:253), which is the opposite of `\kerning` directly below and the
+                // one place the two differ. Out of range is 100 too, because the control word is
+                // dispatched to `NS_ooxml::LN_EG_RPrBase_w` (`rtfdispatchvalue.cxx`:193) -- the very
+                // sprm `w:w` uses, so it meets the DOCX filter's 1..600 rule in the same place.
+                // Measured at 26.2.4.2: 60 draws at 0.59974, 99 at 0.98665, 130 at 1.29981, and `0`,
+                // `900`, `-50` and a bare `\charscalex` all at 1.00000.
+                state.WidthPerCent = token.Parameter is { } scale and >= 1 and <= 600
+                    ? scale
+                    : TextWidthScale.Natural;
                 return;
             case "kerning":
                 // A size threshold rather than a switch, and read as a switch because that is all

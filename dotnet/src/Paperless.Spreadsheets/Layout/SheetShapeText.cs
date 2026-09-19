@@ -1,3 +1,4 @@
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 
 namespace Paperless.Spreadsheets.Layout;
@@ -38,16 +39,27 @@ public enum SheetShapeAnchor
 /// <param name="Bold">
 /// Whether the run states <c>b="1"</c>.
 /// </param>
+/// <param name="Colour">
+/// The ink the run states, or null where it states none and the drawing layer's black is right.
+/// </param>
 /// <remarks>
+/// <para>
 /// The weight is carried and the slant is not, and the asymmetry is measured rather than tidy: a
 /// bold face is a <em>different file</em> with different advances, so a bold run measured in the
 /// regular face wraps in the wrong place and is drawn in the wrong ink — <c>Air_Boss_Master_List
 /// .xlsx</c>'s note box is one paragraph of <c>b="1"</c> that 26.2.4.2 draws in Carlito-Bold and
-/// wraps two lines shorter than we did. Nothing downstream reads a slant yet, so reading one here
-/// would be a field with no consumer.
+/// wraps two lines shorter than we did.
+/// </para>
+/// <para>
+/// <strong>The slant stays uncarried because it has nil reach and that is measured</strong>: over
+/// the 64 corpus <c>.xls</c>, 0 of 367 applied <c>TXO</c> formatting runs state an italic, and
+/// 26.2.4.2's own resolved view of all nine shape-path workbooks holds 0 italic spans
+/// (<c>probes/sheet-wrap-r99</c> §4, N23). The colour does not: the same pair of censuses puts it
+/// at 48 stated runs and 119 drawn spans in two workbooks, so it is carried.
+/// </para>
 /// </remarks>
 public readonly record struct SheetShapeRun(
-    string Text, Length Size, string? Family = null, bool Bold = false);
+    string Text, Length Size, string? Family = null, bool Bold = false, Colour? Colour = null);
 
 /// <summary>One paragraph of a shape's text.</summary>
 /// <remarks>
@@ -88,8 +100,9 @@ public sealed record SheetShapeParagraph
 /// </para>
 /// <para>
 /// <strong>What this carries is what can be drawn, and no more.</strong> A run's size, typeface and
-/// weight are carried because all three decide the face, the line height and the wrap; its slant
-/// and colour are not, because nothing downstream would use them. The typeface arrives already resolved — a
+/// weight are carried because all three decide the face, the line height and the wrap, and its
+/// colour because the painter draws it; its slant is not, on the census
+/// <see cref="SheetShapeRun"/> cites. The typeface arrives already resolved — a
 /// <c>a:latin typeface="+mn-lt"</c> has been through the theme's font scheme before it gets here,
 /// since taking that attribute literally asks the resolver for a family called <c>+mn-lt</c> and
 /// gets whatever fontconfig offers for a name that exists nowhere.

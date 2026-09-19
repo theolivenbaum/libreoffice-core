@@ -71,8 +71,12 @@ public static class DrawingChartPlot
     /// </remarks>
     private static readonly Colour AutomaticChartAreaLine = Colour.FromRgb(0xD9D9D9);
 
-    /// <summary>0.75 pt — <c>getDefaultChartAreaLineWidth()</c>'s 9525 EMU.</summary>
-    private static readonly Length AutomaticChartAreaLineWidth = Length.FromEmu(9525);
+    /// <summary>
+    /// <c>getDefaultChartAreaLineWidth()</c>'s 9525 EMU, as the reference keeps it — 26 hundredths
+    /// of a millimetre, 0.73701 pt, and not the 0.75 the EMU spells.
+    /// </summary>
+    private static readonly Length AutomaticChartAreaLineWidth =
+        DrawingChartAutoFormat.LineWidth(9525);
 
     /// <summary>How many <c>c:pt</c> a cache is trusted to declare.</summary>
     /// <remarks>The same ceiling <see cref="DrawingChart"/> applies, for the same reason.</remarks>
@@ -131,6 +135,10 @@ public static class DrawingChartPlot
         {
             if (candidate.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
             if (KindOf(candidate.Name.LocalName) is not { } matched) continue;
+
+            if (matched == ChartPlotKind.OfPie && IsExploded(candidate))
+                matched = ChartPlotKind.Pie;
+
             groups.Add(candidate);
             kinds.Add(matched);
         }
@@ -923,6 +931,24 @@ public static class DrawingChartPlot
     /// two different routes — the first because it is a <c>c:dateAx</c>, the second because
     /// "Netherlands" is one word too wide for its slot.
     /// </para>
+    /// <para>
+    /// <strong>A <c>c:valAx</c> gets none of it either, and for a second reason.</strong> Those
+    /// three lines are inside <c>switch (aScaleData.AxisType) case CATEGORY: case SERIES: case
+    /// DATE:</c> (<c>axisconverter.cxx:324-326</c>), and a <c>c:valAx</c> is set to
+    /// <c>AxisType::REALNUMBER</c> or <c>PERCENT</c> — on the X axis at <c>:306</c> and on the Y
+    /// axis at <c>:311</c> — so it never enters that case at all and keeps the same model defaults
+    /// a date axis keeps. A <c>c:serAx</c> is <c>AxisType::SERIES</c> and <em>does</em> enter it,
+    /// so it is set like a category axis. <strong>Wrapping off is what lets a value axis turn 45°
+    /// instead of thinning</strong>: <c>canAutoAdjustLabelPlacement</c> refuses while
+    /// <c>m_bLineBreakAllowed</c> is true (<c>VCartesianAxis.cxx:539-556</c>), so an axis carrying
+    /// it can only raise its rhythm. Measured on
+    /// <c>027_Simple_personal_cash_flow_statement</c> page 6, whose savings chart runs its money
+    /// axis along the bottom: 26.2.4.2 draws its eight labels turned and this tree drew four
+    /// upright, having dropped the other four to the rhythm. It is also the arm chart2 would
+    /// refuse anyway — <c>isBreakOfLabelsAllowed</c> opens with <em>"no break for value
+    /// axis"</em>, <c>!m_bUseTextLabels</c> (<c>:522-524</c>) — so no OOXML value axis wraps under
+    /// either rule, and this only settles what happens when its labels collide.
+    /// </para>
     /// </remarks>
     private static ChartAxisText AxisTextOf(XElement? axis)
     {
@@ -935,13 +961,16 @@ public static class DrawingChartPlot
 
         rotation -= 360.0 * Math.Floor(rotation / 360.0);
 
-        bool date = axis is not null && Is(axis, "dateAx");
+        // Only the axes chart2 gives `AxisType::CATEGORY` or `SERIES` and that are not a
+        // `c:dateAx` reach the three lines above; everything else — a date axis, a value axis,
+        // and a chart with no such element at all — keeps chart2's own model defaults.
+        bool converted = axis is not null && (Is(axis, "catAx") || Is(axis, "serAx"));
 
         return new ChartAxisText(
             rotation * Math.PI / 180.0,
-            OverlapAllowed: !date && stated is 0,
-            LineBreakAllowed: !date && rotation is 0.0 or 90.0 or 270.0,
-            Stagger: date ? ChartLabelStagger.Auto : ChartLabelStagger.SideBySide);
+            OverlapAllowed: converted && stated is 0,
+            LineBreakAllowed: converted && rotation is 0.0 or 90.0 or 270.0,
+            Stagger: converted ? ChartLabelStagger.SideBySide : ChartLabelStagger.Auto);
     }
 
     /// <summary>
@@ -1255,6 +1284,8 @@ public static class DrawingChartPlot
         // A group's own c:dLbls is the default every series in it inherits.
         ChartDataLabel? groupLabel = LabelOf(Child(group, "dLbls"), null, kind, office2007);
 
+        bool smooth = SmoothOf(group, kind, office2007);
+
         // Which of a stock plot's four numbers each of its series carries, by position. Four
         // series are open, high, low, close and three are high, low, close — which is
         // TypeGroupConverter's own "int nRoleIdx = (aSeries.size() == 3) ? 1 : 0" over the roles
@@ -1338,7 +1369,7 @@ public static class DrawingChartPlot
                 numbers,
                 SuppressesFill(properties) ? null : FillOf(properties, theme) ?? autoFill,
                 SuppressesLine(properties) ? null : LineOf(properties, theme) ?? autoLine,
-                StatedLineWidth(properties) ?? AutoLineWidth(automatic, frame, theme, seriesIndex),
+                SeriesLineWidth(element, properties, automatic, frame, theme, seriesIndex),
                 PointFills(
                     element,
                     numbers.Length,
@@ -1356,6 +1387,7 @@ public static class DrawingChartPlot
                 MarkerLine = LineOf(MarkerProperties(element), theme),
                 MarkerSize = MarkerSizeOf(element),
                 HasLine = scatterLine && !SuppressesLine(properties),
+                Smooth = smooth,
                 DashPattern = DashOf(properties),
                 LineCap = CapOf(properties),
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
@@ -1450,6 +1482,121 @@ public static class DrawingChartPlot
            && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
             ? v
             : null;
+
+    /// <summary>
+    /// Whether an of-pie group states an exploded series, which is what makes 26.2.4.2 draw it
+    /// as a plain pie.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Measured at the reference, one attribute at a time and in both directions.</strong>
+    /// The corpus holds two <c>c:ofPieChart</c> documents and they part company here:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <c>029_Unit_Circle_Chart_Pie_Theme_8a922142.docx</c> states
+    /// <c>&lt;c:explosion val="1"/&gt;</c> on its series. 26.2.4.2 draws it as one circle of
+    /// four wedges with four labels and a four-entry legend — no second plot, no composite
+    /// slice, no connector lines — and its own <c>--convert-to fodt</c> of the file carries a
+    /// bare <c>chart:class="chart:circle"</c> with no <c>loext:sub-pie</c>.
+    /// <strong>Delete that one element and the export carries
+    /// <c>loext:sub-pie="true"</c>.</strong>
+    /// </description></item>
+    /// <item><description>
+    /// <c>028_Unit_Circle_Chart_Optimized_Graph_83d9c756.docx</c> states no explosion at all
+    /// (it carries seventeen <c>c:dPt</c>, so the per-point elements are not what decides it)
+    /// and the reference draws its pie-plus-bar in full.
+    /// <strong>Add <c>&lt;c:explosion val="1"/&gt;</c> to its series and the export stops
+    /// carrying <c>loext:sub-bar</c>.</strong>
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// So the attribute decides it in both directions on both documents. <strong>The mechanism
+    /// is not established</strong>: <c>PieChartTypeTemplate::matchesTemplate</c> reads the
+    /// series' <c>Offset</c> and answers <c>PieChartOffsetMode_ALL_EXPLODED</c>
+    /// (<c>chart2/source/model/template/PieChartTypeTemplate.cxx</c>:307-366, this tree), which
+    /// is the obvious suspect for re-templating the diagram out of its of-pie type, but that
+    /// reading requires every point's offset to equal the series' and <c>029</c>'s do not — so
+    /// it is a lead and not the answer. What is recorded here is the measurement.
+    /// </para>
+    /// <para>
+    /// <strong>It is not the whole of what separates us from the reference on that
+    /// document, and the rest is left open.</strong> With the explosion removed, 26.2.4.2 draws
+    /// <c>029</c> as a <em>bar</em>-of-pie when <c>c:ofPieType</c> is changed to <c>bar</c> and
+    /// still as a plain pie when it is left at <c>pie</c> — at four, five, six and seven points
+    /// — while <c>028</c> with <c>val="pie"</c> forced onto it draws a full pie-of-pie at
+    /// sixteen. So the pie sub-type carries a second condition that a small series fails and
+    /// this tree does not model; <c>probes/chart-smooth-r102</c> has the variants. It costs
+    /// nothing here because the corpus's only pie-of-pie is the exploded one.
+    /// </para>
+    /// </remarks>
+    private static bool IsExploded(XElement group)
+    {
+        foreach (XElement series in Children(group, "ser"))
+        {
+            if (Drawing.Number(Child(series, "explosion"), "val") is > 0) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a plot group's lines are drawn as flattened cubic splines.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three things decide it, and all three are the reference's, not the schema's.
+    /// </para>
+    /// <para>
+    /// <strong>Only a two-dimensional line, stock or scatter group can be smoothed.</strong>
+    /// <c>TypeGroupConverter::convertLineSmooth</c> does nothing unless
+    /// <c>!isSeriesFrameFormat() &amp;&amp; meTypeCategory != TYPECATEGORY_RADAR</c>
+    /// (<c>oox/source/drawingml/chart/typegroupconverter.cxx</c>:686), and
+    /// <c>isSeriesFrameFormat()</c> is <c>mb3dChart || mbSeriesIsFrame2d</c> (<c>:261-264</c>) —
+    /// which the type table sets false for exactly <c>TYPEID_LINE</c>, <c>TYPEID_STOCK</c> and
+    /// <c>TYPEID_SCATTER</c> (<c>:95-117</c>). A bar, an area, a pie, a bubble or a radar
+    /// group's <c>c:smooth</c> is read and discarded. Stock is in the list for fidelity and has
+    /// no corpus witness, and <see cref="ChartLayout"/> draws a stock plot as candles rather
+    /// than as a polyline in any case.
+    /// </para>
+    /// <para>
+    /// <strong>One smoothed series smooths the group.</strong> See
+    /// <see cref="ChartSeries.Smooth"/>: the property is set on the chart type, once per series,
+    /// so the last series to state anything wins and any series stating <c>1</c> is enough
+    /// — <c>convertLineSmooth</c> is only reached for a series whose <c>mbSmooth</c> is true
+    /// (<c>:586-587</c>).
+    /// </para>
+    /// <para>
+    /// <strong>An unstated <c>c:smooth</c> is <c>!office2007</c> and not false.</strong>
+    /// <c>SeriesModel</c>'s <c>mbSmooth( !bMSO2007Doc )</c>
+    /// (<c>oox/source/drawingml/chart/seriesmodel.cxx</c>:124). Measured both ways over the
+    /// three corpus documents holding a line or scatter group that states no <c>c:smooth</c> at
+    /// all: <c>Demick_JetBlue.pptx</c> and <c>171128IPAP.pptx</c> both declare
+    /// <c>&lt;Application&gt;Microsoft Office PowerPoint&lt;/Application&gt;</c> with
+    /// <c>&lt;AppVersion&gt;12.0000&lt;/AppVersion&gt;</c> and 26.2.4.2's own ODF export of them
+    /// carries no <c>chart:interpolation</c> on those groups;
+    /// <c>microsoft_learn_multi_chart_examples.xlsx</c> declares <c>AppVersion 3.1</c>, is
+    /// therefore not an Office 2007 file, and its export carries
+    /// <c>chart:interpolation="cubic-spline"</c> on two of its five charts — whose reference
+    /// PDF then draws 60 and 200 segments for a four-point and an eleven-point series.
+    /// </para>
+    /// </remarks>
+    private static bool SmoothOf(XElement group, ChartPlotKind kind, bool office2007)
+    {
+        if (kind is not (ChartPlotKind.Line or ChartPlotKind.Scatter or ChartPlotKind.Stock))
+            return false;
+
+        // mb3dChart is the other half of isSeriesFrameFormat, and a c:line3DChart is the one
+        // spelling that reaches here with it set.
+        if (group.Name.LocalName is "line3DChart") return false;
+
+        bool smooth = false;
+
+        foreach (XElement element in Children(group, "ser"))
+            smooth |= Flag(element, "smooth") ?? !office2007;
+
+        return smooth;
+    }
 
     /// <summary>
     /// What marker a series draws, or none.
@@ -2065,9 +2212,125 @@ public static class DrawingChartPlot
             _ => LineCap.Butt,
         };
 
+    /// <summary>
+    /// How wide a series' own line is drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three cases, and the middle one is the one that is easy to miss. A series stating
+    /// <c>a:ln/@w</c> takes that width. A series stating <strong>no <c>a:ln</c> at all</strong>
+    /// takes the automatic entry — the theme's subtle line times the chart style's
+    /// <c>mnRelLineWidth</c>, which is 300 % at style 1 and 500 % at style 18. And a series that
+    /// states an <c>a:ln</c> <em>without</em> a <c>w</c> takes neither: it is drawn at a flat
+    /// <see cref="SeriesLineDefault"/>.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 on one fixture varied one attribute at a time, read back through its
+    /// own <c>--convert-to ods</c> so the number is the reference's resolved model rather than a
+    /// rasterised guess (<c>probes/stroke-resid-r117/results.md</c> §4.4):
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     no <c>c:spPr</c>, theme 9525, <c>c:style val="1"</c> → <c>svg:stroke-width="0.079cm"</c>
+    ///     = 9525 × 300 % as a whole 1/100 mm.
+    ///   </description></item>
+    ///   <item><description>
+    ///     no <c>c:spPr</c>, theme 9525, <c>c:style val="18"</c> → <c>0.132cm</c> = 9525 × 500 %.
+    ///     Wrapping the style in the <c>mc:AlternateContent</c> that pairs
+    ///     <c>c14:style val="118"</c> with a <c>c:style val="18"</c> fallback changes nothing,
+    ///     which is the fallback winning as <see cref="DrawingChartAutoFormat.StyleOf"/> says.
+    ///   </description></item>
+    ///   <item><description>
+    ///     the same chart with <c>&lt;c:spPr&gt;&lt;a:ln&gt;&lt;a:solidFill/&gt;&lt;/a:ln&gt;</c>
+    ///     and no <c>w</c> → <c>0.035cm</c>, and <strong>raising the theme's subtle line to 38100
+    ///     moves every gridline from 0.026 to 0.106 cm and leaves the series at 0.035</strong>. So
+    ///     it is a constant and not a scaled theme width.
+    ///   </description></item>
+    ///   <item><description>
+    ///     and it is not a property of the series being drawn as a line: a <em>bar</em> series and
+    ///     a <em>pie</em> series stating the same <c>a:ln</c> at the same style are both
+    ///     <c>0.035cm</c> too, even though <c>spFilledSeriesLines</c> is
+    ///     <c>AUTOFORMAT_INVISIBLE</c> over styles 17-32 and so gives them no automatic width at
+    ///     all to replace.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// A <c>c:dPt</c> is the exception and <see cref="PointsStateTheirOwnLine"/> carries it.
+    /// </para>
+    /// <para>
+    /// Reading it the other way — applying the relative multiplier to a series that states an
+    /// <c>a:ln</c> — draws <c>064_Small_business_cash_flow</c>'s alert line at 3.74 pt against the
+    /// reference's 0.99, which is what this rule was found by.
+    /// </para>
+    /// <para>
+    /// <strong>Where 35 hundredths of a millimetre comes from is not established.</strong> It is
+    /// chart2's own answer once the OOXML importer has set no width, and it could not be located
+    /// in the 27.2 tree; the measurements above are what this rests on.
+    /// </para>
+    /// </remarks>
+    /// <param name="element">The <c>c:ser</c>, for its <c>c:dPt</c> children.</param>
+    /// <param name="properties">The series' <c>c:spPr</c>.</param>
+    /// <param name="automatic">The chart-space automatic-format context.</param>
+    /// <param name="frame">Whether the series is drawn as a line or as an area.</param>
+    /// <param name="theme">The theme, for the automatic entry.</param>
+    /// <param name="seriesIndex">The series' <c>c:idx</c>.</param>
+    private static Length SeriesLineWidth(
+        XElement element,
+        XElement? properties,
+        ChartAutoContext automatic,
+        ChartAutoObject frame,
+        DrawingTheme? theme,
+        int seriesIndex)
+    {
+        if (StatedLineWidth(properties) is { } stated) return stated;
+
+        if (Drawing.Child(properties, "ln") is null)
+        {
+            return AutoLineWidth(automatic, frame, theme, seriesIndex);
+        }
+
+        return PointsStateTheirOwnLine(element) ? Length.Zero : SeriesLineDefault;
+    }
+
+    /// <summary>
+    /// Whether every mark this series draws takes its outline from a <c>c:dPt</c> rather than from
+    /// the series.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>c:dPt</c>'s own <c>a:ln</c> is resolved per point, and a point's answer is <em>not</em>
+    /// the series' — measured on the pie fixture with one <c>c:dPt</c> added, whose <c>a:ln</c>
+    /// states a colour and no <c>w</c>: 26.2.4.2 strokes that one wedge at <c>0 w</c> and the other
+    /// three, which take the series' identical <c>a:ln</c>, at 0.99036. So a stated <c>a:ln</c> with
+    /// no width is <see cref="SeriesLineDefault"/> on a series and a hairline on a point.
+    /// </para>
+    /// <para>
+    /// <strong>This model has no per-point line width</strong> — <c>ChartSeries.PointFills</c> has
+    /// no companion — so every mark takes the series' one. This asks whether any point states an
+    /// <c>a:ln</c> of its own and, when one does, gives the whole series the point's answer. That is
+    /// exact for a series where <em>every</em> point states one, which is the shape that occurs:
+    /// <c>bitesize-writing-a-report.pptx</c>'s pie carries ten of them and 26.2.4.2 strokes all
+    /// twenty of its wedge outlines at <c>0 w</c>. It is wrong for a series where only some points
+    /// state one, and the proper fix is a per-point width in the model rather than this.
+    /// </para>
+    /// </remarks>
+    /// <param name="element">The <c>c:ser</c>.</param>
+    private static bool PointsStateTheirOwnLine(XElement element)
+    {
+        foreach (XElement point in Children(element, "dPt"))
+        {
+            if (Drawing.Child(Child(point, "spPr"), "ln") is not null) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>35 hundredths of a millimetre — see <see cref="SeriesLineWidth"/>.</summary>
+    private static readonly Length SeriesLineDefault = Length.FromMm100(35);
+
     private static Length? StatedLineWidth(XElement? properties)
         => Drawing.Number(Drawing.Child(properties, "ln"), "w") is { } emu
-            ? Length.FromEmu(Math.Max(emu, 0))
+            ? DrawingChartAutoFormat.LineWidth(Math.Max(emu, 0))
             : null;
 
     /// <summary>
@@ -2094,7 +2357,7 @@ public static class DrawingChartPlot
         if (Drawing.Number(line, "w") is not { } emu || emu <= 0) return Length.Zero;
 
         _ = theme;
-        return Length.FromEmu(emu * relative / 100);
+        return DrawingChartAutoFormat.LineWidth(emu * relative / 100);
     }
 
     /// <summary>A shape property bag's solid fill, or null when it has none.</summary>
@@ -2290,7 +2553,7 @@ public static class DrawingChartPlot
     {
         XElement? line = Drawing.Child(properties, "ln");
         return Drawing.Number(line, "w") is { } emu && emu > 0
-            ? Length.FromEmu(emu)
+            ? DrawingChartAutoFormat.LineWidth(emu)
             : Length.Zero;
     }
 

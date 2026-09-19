@@ -178,8 +178,9 @@ it is against the wrong page. State the size Impress will actually use.
 
 ### Hand-written DOCX files
 
-Five documents that LibreOffice cannot produce, because what they exercise is something its own
-export normalises away. Each is written by a script rather than converted, and each is minimal.
+The documents below are ones LibreOffice cannot produce, because what they exercise is something
+its own export normalises away. *The count that stood here said five and the table has long held
+more; a number in prose beside a table it does not compute is a number that decays.* Each is written by a script rather than converted, and each is minimal.
 
 `shape-geometry.pptx` is hand-written for the same reason and one more. LibreOffice's own PPTX
 export resolves every themed fill to a literal colour and rounds every offset through hundredths
@@ -199,6 +200,13 @@ combination that tells the two transform orders apart.
 | `paragraph-spacing-collapsed.rtf` | And again in the format that defaults the other way round from the rest of the Word family. `\htmautsp` is the opt-in and reads backwards from its name: it asks for HTML auto-spacing, which is the *collapsing* behaviour. Hand-written, because LibreOffice's RTF export writes the control word only when the document collapses and the interesting cases are both sides of it |
 | `page-top-line-gap.docx` | Where a face's **external** leading sits in the line box, which is a different quantity from every other entry in this group and needs a document that can only be read against a page's top margin. The gap leaves line *n*'s descent and arrives in line *n*+1's ascent, so a pitch comparison cancels it and only an absolute first baseline can see it. Two blocks, each starting a page: one in Liberation Sans, whose `hhea` gap is 67/2048, and one in Carlito, whose gap is zero. LibreOffice puts the first Liberation Sans baseline at **82.3008 pt** inside a 72 pt margin — 206 twips of ascent, not the 199 the ascender alone gives — and the Carlito block is the control that must not move either way. Hand-written rather than round-tripped, because it has to name two faces with different line gaps and a conversion rewrites them |
 | `paragraph-shading.docx` | Paragraph backgrounds, hand-written so every edge is a round number of twips. Thirteen paragraphs: one shaded directly with indents *and* spacing on both sides, so the fill can be shown to span the indents and to stop at the lines; a pair shaded the same colour with spacing between them, which LibreOffice paints as **one** band; a pair shaded different colours with the same spacing, which it paints as two with the gap left white; a paragraph shaded only by its style; and one whose style overrides its parent's fill with `w:fill="auto"`, which paints nothing. It is hand-written because LibreOffice's own DOCX export moves a paragraph fill into a `w:pPr/w:shd` on every paragraph of the style, which would lose the direct-versus-style distinction |
+| `words-style-char-scale.docx` | `w:w`, character width scaling, stated by a paragraph **style** over runs that state nothing — which makes the paragraph *uniform*, and a uniform paragraph is rebuilt from its own face, size, shaping and tracking by three separate fallbacks that carried no width. Five paragraphs: the style states 60 per cent; a run states it; neither does; and then the same three-way contrast over eighteen words, **long enough to wrap**. That last arm is the point of the fixture: with the pen scaled and the line breaker not, every line is drawn at exactly `scale ×` its unscaled width and broken in the unscaled places, and no one-line measurement can tell that state from a correct one. Built by `probes/charscale-r143/make-fixture.py`; 60 rather than the corpus's commonest 99 because the question is whether the scale is applied at all. |
+| `words-object-duplicate.docx` | A `w:object` carrying `w:dxaOrig`/`w:dyaOrig` and holding a `v:shapetype`, a `v:shape` whose own `style` states the box, and a `v:imagedata` inside the shape — the smallest markup that shows a replacement picture being drawn twice. LibreOffice cannot produce it: its own export writes the picture as a `w:drawing`, and the defect lives in the VML path. 26.2.4.2 draws **one** image, at `77.3 x 49.5`; the two rectangles a broken reader draws are `77.25 x 49.5` from the shape's style and `77 x 49.85` from `dxaOrig`/`dyaOrig` over twenty, so asserting the *size* is what distinguishes "one picture" from "the wrong one of the two". Built by `probes/vmldup-r140/make-fixture.py`; it carries an empty `word/settings.xml` for the reason the paragraph below this table gives. |
+| `words-table-border-align.docx` | Five one-table arms, one per page, whose three columns state horizontal borders of **different widths across one boundary** — 0.5 / 3.0 / 1.5 pt, and the same shapes with the statement moved to the other side of the boundary and with a `double`. It is the smallest markup that separates *centred on the grid line* from *hanging below it*, because for a boundary of one width the two descriptions put the ink in exactly the same place. 26.2.4.2 draws the three bands as `95.001..95.501`, `95.001..98.001` and `95.001..96.501` — **one shared top edge, three different bottoms**. Built by `probes/tablerow-r146/make-probes.py`; it carries a real `word/settings.xml`, and `height-nosettings.docx` beside it in that probe directory is the control showing the compatibility defaults do not reach this family. |
+| `words-table-split.docx` | A table row cut by a page boundary, and what the two halves pay for the rule at the cut. One 46-row table whose cells state `w:top nil` and a 1 pt `w:bottom` — so the cut's rule is stated on the side the *boundary* rules do not use — with row 30 holding thirty paragraphs so that the row itself straddles the page. 26.2.4.2 rules the foot of page 1 at **759.201..760.201** and the head of page 2 at **70.901..71.901**, both hanging downwards from the frame edge, and the follow's first line starts at 71.901, so the follow is charged the whole of it. It separates three errors that a one-page table cannot: a part charged its own *top* rule is charged nothing here; a part that does not charge the boundary band above it fits one line too many; and a part that finishes its row and charges a band at its foot rules one boundary twice. Copied from `probes/tablerow-r146/fixtures/split.docx`, built by that round's `make-probes.py`; it carries a real `word/settings.xml`. |
+| `odt-text-scale.fodt` | `style:text-scale`, the ODF spelling of the character width, which the ODT reader did not read. Six paragraphs, each drawing **the same word** so the widths are directly comparable and the ratio is exact rather than a per-character proxy: an absent scale, a stated `100%`, `99%`, `60%`, `130%`, and an unscaled paragraph holding a `60%` `text:span`. The 99 % arm is the one worth having — at 12 pt the face is built at `trunc(240 x 99 / 100) = 237` twips, so the reference draws **0.98665** of the unscaled arm and not 0.99, and an implementation using the percentage itself is wrong on the corpus's commonest value. The last paragraph is the uniform-paragraph shortcut: a run that measures differently has to defeat the fold or it is measured at the paragraph's width. Flat rather than zipped because the whole point is one attribute per arm and a conversion rewrites them; measured against 26.2.4.2 in `probes/odtscale-r148/`. |
+| `words-char-scale.rtf` | `\charscalex`, the RTF spelling of the character width, which the reader did not read. The same six arms as `odt-text-scale.fodt` and drawing **the same word** in every one of them, so the ratios are exact rather than a per-character proxy: absent, `100`, `99`, `60`, `130`, and an unscaled paragraph holding a `60` group. A bare `\charscalex` is **100** and not 0 — the opposite of `\kerning`, whose bare form is zero by RTF's default-of-zero rule — and out of range resets to 100, because the control word is dispatched to the very sprm `w:w` uses. 26.2.4.2 draws the arms at 1.00000 / 0.98665 / 0.59974 / 1.29981. Built by `probes/charscale-r150/make-fixture.py`. |
+| `words-char-scale.doc` | **26.2.4.2's own conversion of the `.rtf` beside it**, so both formats are asserted on one document and a disagreement between the two readers shows up in one place. The sprm is `sprmCCharScale` (0x4852, two bytes unsigned, anything outside 1..600 replaced with 100), and it was **verified present in the CHPX before the fixture was measured** — a fixture converted and not checked measures nothing and reports agreement. The reference draws it identically to the `.rtf`, to five places. |
 
 #### Why `contextual-spacing-styles` is hand-written, and why every `w:after` in it is zero
 
@@ -324,6 +332,73 @@ number-format type rather than from the value the cell holds
 (`XclExpFormulaCell::WriteContents`, `sc/source/filter/excel/xetable.cxx:1098`). With the
 value omitted, LibreOffice computes the formula on load and writes a genuine cached result —
 which is the only way to get a `STRING` record into a file LibreOffice wrote.
+
+### The five `sheet-cf-*.xlsx` conditional-format fixtures
+
+One per `cfRule` family `XlsxConditionalStyles` evaluates as a predicate on the cell, plus one for
+the base cell a multi-range `sqref`'s formula is written for. `probes/cond-format-r96/make-fixtures.py`
+authors them; they are about 2.5 kB each and hold every part a real writer emits — both `_rels`
+parts, `workbook.xml`, a `styles.xml` with a real `dxfs` table, `sharedStrings.xml` and one
+worksheet — because a fixture missing a part the importer takes its defaults from answers a
+different question.
+
+| file | what it separates |
+|---|---|
+| `sheet-cf-contains-text.xlsx` | the search is unanchored and case-folded, and a numeric cell is searched as its *number* rather than as what is drawn |
+| `sheet-cf-ends-with.xlsx` | the needle must be the tail, case is folded, and a cell shorter than the needle cannot match |
+| `sheet-cf-blank-cells.xlsx` | a cell holding three spaces **is** blank and the number `0` is not — `containsBlanks` is `LEN(TRIM(cell))=0`, not "states nothing" — with `notContainsBlanks` on the same range as the partition |
+| `sheet-cf-duplicate-values.xlsx` | the cache key is the lowercased string or the number and never both, so `7` and `"7"` are not duplicates of each other |
+| `sheet-cf-multi-range-anchor.xlsx` | `ScRangeList::GetTopLeftCorner` orders addresses `(tab, col, row)`, so `$B1="hit"` on `B3 A5` is anchored at **A5**; the componentwise minimum `A3` paints the *other* cell |
+
+**Every expectation in `XlsxConditionalPredicateTests` is 26.2.4.2's own output.** Each fixture was
+converted twice — `--convert-to fods` for the rule the reference thinks it imported and
+`--convert-to pdf` for which cells it then painted, read back as filled rectangles and coloured
+text spans — and both are banked under `probes/cond-format-r96/fixture-reference/`. The two
+findings a synthetic could most easily have invented, the blank rule and the anchor, were each
+established on a real corpus document first (`Application_Compliance_Checklist_5_Apr_2021.xlsx`)
+and only then reproduced minimally.
+
+### The six `sheet-cf-stored-vs-drawn` / `sheet-cf-data-bar-*.xlsx` fixtures
+
+Round 97's, authored by `probes/cond-format-r97/make-fixtures.py` on the same terms — every part a
+real writer emits, and every expectation read back out of 26.2.4.2's own PDF by
+`probes/cond-format-r97/fixture-paint.py` into `fixture-reference/painted.txt`.
+
+| file | what it separates |
+|---|---|
+| `sheet-cf-stored-vs-drawn.xlsx` | a cell's **drawn** text and its **compared** value are two different strings: `\talpha` and `alpha` draw the same five glyphs and are not duplicates, and a cell holding one tab is *not* blank because `TRIM` takes spaces and not tabs |
+| `sheet-cf-data-bar-lengths.xlsx` | no `x14` extension, so the axis stays `NONE` and `minLength`/`maxLength` decide the bar |
+| `sheet-cf-data-bar-auto.xlsx` | the *same* main-namespace markup plus an extension with no `axisPosition`: the axis becomes `AUTOMATIC`, the two lengths stop being read, and a cell on the minimum draws nothing. This is the shape every corpus rule has |
+| `sheet-cf-data-bar-negative.xlsx` | the zero position, the dashed axis (drawn over the *whole* cell where the bar is inset 0.2 pt), and a stated `x14:negativeFillColor` |
+| `sheet-cf-data-bar-default-negative.xlsx` | the same rule with **no** `negativeFillColor` — the control for the one above. `mbNeg` defaults to *true*, so the negatives take the source's `COL_LIGHTRED` |
+| `sheet-cf-data-bar-only.xlsx` | `showValue="0"` takes the cell's number off the page rather than hiding it behind the bar, and does not change the row's height |
+
+**The last pair is why an optional attribute needs a fixture that omits it.** The first four were
+authored to exercise the feature, so each states the optional attribute — and the arm that
+`…-negative` was built to pin was written up backwards for exactly that reason, because the file
+that would have refuted it had not been authored. The corpus is the other way round: eight of its
+nine rules state no negative colour at all. **Author the absent case as well as the present one**,
+and prefer a pair differing in one attribute over two unrelated fixtures.
+
+**A stem is a filename, and `soffice --convert-to` names its output after the stem alone.** Two
+fixtures sharing one anywhere the same conversion runs silently overwrite each other's PDF, and
+each is then scored against the other's rendering. `dotnet/tests/corpus` already holds 69
+stems duplicated between its own subdirectories, so check a new one against the whole corpus —
+`features/`, `minimal/`, `/home/user/sample-files` and `/home/user/corpus-odf` — before authoring
+it, and render one document per output directory regardless.
+
+### The two round-138/139 sheet fixtures
+
+Both are built by a script rather than converted, and both had their expected values read out of
+26.2.4.2's own rendering of the fixture before any assertion was written.
+
+| file | what it separates |
+|---|---|
+| `sheet-shape-picture-fill.xlsx` | an `a:blipFill` inside `xdr:sp/xdr:spPr` — a shape whose own **interior** is a bitmap, which is a fill and not an `xdr:pic`. Reduced from the corpus's ten such shapes to one anchor. 26.2.4.2 places the image once, at `143.972 0 0 71.972 100.998 686.324 cm`. Built by `probes/sheetfill-r138/make-fixture.py` |
+| `sheet-odf-numfmt-padding.ods` | the two padding directives an ODF number format states as something other than itself. `_x` — "leave the width of `x` blank" — has **no ODF spelling at all**: the exporter writes the spaces into a `number:text` and records what they stood for in `loext:blank-width-char`, as `<char>[<position>]` groups separated by `_`. `*x` becomes a `number:fill-character`. Four columns: the ASCII accounting format, whose blanks are all one character wide; the **euro** accounting format, whose `€` is above ASCII and therefore **two** and whose trailing text carries a multi-group spec with positions (`€1_-3` over four spaces); a fill character with no blanks beside it, so the two are separable; and `0.00`, which has neither. Built by `probes/odfpad-r142/make-fixture.py`, which writes an `.xlsx` and converts it — the committed file is the exporter's, because the exporter is what is under test |
+| `sheet-odf-numfmt-sections.ods` | the **ODF** form of a multi-section number format, which is not one element but several linked by `style:map`, the named style holding the *last* section. Six columns, one format each; four rows — 150, −100, 0 and a string — so a cell's address states which arm it is. It separates the three rules that are not in the specification's prose: a single `value()>=0` map writes no condition into the code, a `number:text-style` owner's last map is unconditional, and a `fo:color` outside LibreOffice's ten keyword colours is dropped. Built by `probes/odfnumfmt-r141/make-fixture.py`, which writes an `.xlsx` and converts it with 26.2.4.2 — **the committed file is the one the exporter wrote**, because what is under test is how that exporter states a multi-section format |
+| `sheet-numfmt-colour.xlsx` | a number format's `[Red]`/`[Blue]` colour clause, and **which subformat a value selects**. Its fourth cell holds the same `-2.5` as its second under a *colourless* format, so an implementation that colours by the sign of the number rather than by the selected section fails on it — a red-only fixture cannot tell the two apart, and nor can one that omits the blue section, since `[Blue]` is `#0000FF` and not `#000080`. Built by `probes/numfmtcolour-r139/make-fixture.py` |
+| `sheet-print-centring.fods` | `style:table-centering`, Calc's "centre the printed block on the page". Four sheets, each naming its own master page, differing in that one attribute and nothing else: absent, `horizontal`, `vertical`, `both`. A page layout is per master page, so four sheets put the whole factorial in one file and one rendering, and the arms share every other input by construction rather than by four files agreeing. One 4 cm column on a 21 cm page with 2 cm margins leaves 13 cm of slack, so the shift is half of it — 6.5 cm, **184.252 pt** — predicted before anything was rendered; 26.2.4.2 draws the arms at `(57.685, 66.332)`, `(241.937, 66.332)`, `(57.685, 424.177)` and `(241.937, 424.177)`, those *y* being **baselines** read from its own `Td` rather than the ink tops `pymupdf` reports, which sit the face's ascent above them. The `none` arm is the control and is the shape of the defect it pins: while the reader asked for `style:table-centring`, every sheet in the corpus looked like that control. Built by `probes/odscentre-r150/make-fixture.py`. |
 
 ## Writing a flat-XML corpus document by hand
 

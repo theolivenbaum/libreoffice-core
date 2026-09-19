@@ -16,6 +16,7 @@ public sealed class XlsxSharedStrings
 {
     private readonly List<string> _strings = [];
     private readonly Dictionary<int, IReadOnlyList<XlsxRichRun>> _runs = [];
+    private readonly Dictionary<int, string> _stored = [];
 
     private XlsxSharedStrings()
     {
@@ -48,7 +49,18 @@ public sealed class XlsxSharedStrings
             // The runs are recorded only for the strings that have any, so a workbook whose text
             // is all one format carries an empty dictionary rather than one entry per string.
             if (XlsxRichRuns.Read(item) is { } runs) table._runs[table._strings.Count] = runs;
-            table._strings.Add(ReadRichString(item));
+
+            // The stored spelling is recorded only where it differs from the drawn one, which on
+            // every corpus workbook but a handful of strings is nowhere: a table runs to tens of
+            // thousands of entries and holding a second copy of each would double it for nothing.
+            string drawn = ReadRichString(item, out string stored);
+            if (!ReferenceEquals(drawn, stored)
+                && !string.Equals(drawn, stored, StringComparison.Ordinal))
+            {
+                table._stored[table._strings.Count] = stored;
+            }
+
+            table._strings.Add(drawn);
         }
 
         return table;
@@ -59,6 +71,18 @@ public sealed class XlsxSharedStrings
     /// </summary>
     /// <param name="index">The shared string index a cell states.</param>
     internal IReadOnlyList<XlsxRichRun>? RunsAt(int index) => _runs.GetValueOrDefault(index);
+
+    /// <summary>
+    /// The string at an index as Calc <em>stores</em> it, which is not always the string it
+    /// draws.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="XlsxCellText.Stored"/> says what the difference is and why a conditional
+    /// format has to compare this one. Null on the same terms as the indexer.
+    /// </remarks>
+    /// <param name="index">The shared string index a cell states.</param>
+    internal string? StoredAt(int index)
+        => _stored.TryGetValue(index, out string? stored) ? stored : this[index];
 
     /// <summary>
     /// Flattens an <c>si</c>, <c>is</c> or comment <c>text</c> element to plain text.
@@ -81,23 +105,61 @@ public sealed class XlsxSharedStrings
     /// return that Calc draws as nothing at all.
     /// </para>
     /// </remarks>
-    public static string ReadRichString(XElement? element)
-    {
-        if (element is null) return string.Empty;
+    public static string ReadRichString(XElement? element) => ReadRichString(element, out _);
 
-        StringBuilder text = new();
+    /// <summary>
+    /// The same flattening, in both of the spellings the cell has at once.
+    /// </summary>
+    /// <remarks>
+    /// One walk rather than two, because <c>Drawn(Stored(x))</c> is <c>Of(x)</c>: each run is
+    /// decoded once and normalised once, which is what the drawn spelling alone already cost.
+    /// The two are the same instance whenever the string holds nothing to normalise, which is
+    /// nearly every string in the corpus.
+    /// </remarks>
+    /// <param name="element">The <c>si</c>, <c>is</c> or comment <c>text</c> element.</param>
+    /// <param name="stored">
+    /// Receives the string Calc stores — <see cref="XlsxCellText.Stored"/>, which is what a
+    /// conditional format compares. The return value is the one it draws.
+    /// </param>
+    internal static string ReadRichString(XElement? element, out string stored)
+    {
+        if (element is null)
+        {
+            stored = string.Empty;
+            return string.Empty;
+        }
+
+        StringBuilder drawn = new();
+        StringBuilder? raw = null;
+
+        void Append(string? value)
+        {
+            string kept = XlsxCellText.Stored(value);
+            string shown = XlsxCellText.Drawn(kept);
+
+            // The second builder is started only once a run has parted company with itself, and
+            // it then has to catch up on everything already appended — which is the same text in
+            // both, or the two would have parted earlier.
+            if (raw is null && !ReferenceEquals(kept, shown)) raw = new StringBuilder(drawn.ToString());
+
+            drawn.Append(shown);
+            raw?.Append(kept);
+        }
+
         foreach (XElement child in element.Elements())
         {
             if (Xlsx.Is(child, "t"))
             {
-                text.Append(XlsxCellText.Of(child.Value));
+                Append(child.Value);
             }
             else if (Xlsx.Is(child, "r"))
             {
-                foreach (XElement run in Xlsx.Children(child, "t"))
-                    text.Append(XlsxCellText.Of(run.Value));
+                foreach (XElement run in Xlsx.Children(child, "t")) Append(run.Value);
             }
         }
-        return text.ToString();
+
+        string text = drawn.ToString();
+        stored = raw is null ? text : raw.ToString();
+        return text;
     }
 }

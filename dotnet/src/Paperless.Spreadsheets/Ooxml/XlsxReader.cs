@@ -92,6 +92,11 @@ public static class XlsxReader
             // index. See XlsxChartRanges.
             XlsxChartRanges ranges = new(file, reader);
 
+            // The `dxfs` a pivot table's own `<format>` records index, read once for the workbook
+            // rather than once per sheet. See XlsxPivotFormats.
+            IReadOnlyList<XlsxPivotFormats.Difference> pivotDifferences = XlsxPivotFormats.Read(
+                file.StyleSheet, XlsxPalette.Read(file.StyleSheet, file.ThemeRoot));
+
             foreach (XlsxSheetEntry entry in file.Sheets)
             {
                 ContentSection section = new()
@@ -118,6 +123,23 @@ public static class XlsxReader
 
                 (SheetCellFormats formats, SheetRichText rich) =
                     XlsxSheetFormats.Read(worksheet, cellFormats, file);
+
+                // A conditional format is the one thing that states a fill and a font at once, so
+                // its rules are evaluated with the decoration, once, and the font half comes back
+                // to be laid over the text formats.
+                SheetFormatting formatting = XlsxCellDecoration.Read(
+                    file.StyleSheet, file.ThemeRoot, worksheet, file.SharedStrings,
+                    out Dictionary<(int Row, int Column), SheetConditionalText> conditionalText,
+                    entry.Name, file.Workbook);
+                formats = formats.WithConditionalText(conditionalText);
+
+                // A pivot table's frame is generated when the table is imported and is stated by
+                // no cell of the workbook, so it is laid over the stated decoration rather than
+                // read out of it. See XlsxPivotGrid.
+                (formatting, formats) =
+                    XlsxPivotGrid.Apply(
+                        file.LoadPivotTables(entry), formatting, formats, cellFormats.StyleDefault,
+                        pivotDifferences);
 
                 // A shown cell comment is an object on the internal layer, which Calc prints
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
@@ -147,7 +169,8 @@ public static class XlsxReader
                     Cells = table,
                     StatedMerges = XlsxSheetReader.ReadMerges(worksheet),
                     HyperlinkRanges = XlsxSheetReader.ReadHyperlinks(worksheet),
-                    Formatting = XlsxCellDecoration.Read(file.StyleSheet, file.ThemeRoot, worksheet),
+                    ConditionalRanges = XlsxSheetReader.ReadConditionalRanges(worksheet),
+                    Formatting = formatting,
                     Formats = formats,
                     RichText = rich,
                     Drawings = drawings,

@@ -57,6 +57,59 @@ internal readonly record struct SheetBandFace(string? Family, bool Bold, bool It
 /// </remarks>
 internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement placement)
 {
+    /// <summary>
+    /// How far inside its cell a data bar is painted, on every edge.
+    /// </summary>
+    /// <remarks>
+    /// Two pixels of the PDF writer's own 720 dpi device — <c>2 * nOneX</c> in
+    /// <c>drawDataBars</c> — which is 4 twips. See <see cref="DrawDataBars"/> for the
+    /// measurements this was checked against.
+    /// </remarks>
+    private static readonly Length BarInset = Length.FromPoints(0.2);
+
+    /// <summary>
+    /// How many columns past the printed block a merged cell's fill may reach.
+    /// </summary>
+    /// <remarks>
+    /// One. <c>ScOutputData::DrawBackground</c>'s width accumulation breaks at
+    /// <c>nCol &gt; mnX2 + 2</c> while adding the width of column <c>nCol - 1</c>, so the last
+    /// column it can add is <c>mnX2 + 1</c>. See <see cref="DrawBackgrounds"/> for the 26.2.4.2
+    /// measurement that settles it, which is what the bound rests on — a wider merge is cut here
+    /// and not merely clipped by the paper.
+    /// </remarks>
+    private const int OverflowLimit = 1;
+
+    /// <summary>
+    /// One dash of a data bar's axis, and one gap: <c>LineInfo</c>'s 3 logic units.
+    /// </summary>
+    /// <remarks>
+    /// <strong>The logic unit is a hundredth of a millimetre, not a twip</strong>, and the axis is
+    /// what says so: <c>LineInfo(LineStyle::Dash, 1)</c> with <c>SetDashLen(3)</c> and
+    /// <c>SetDistance(3)</c> comes out of 26.2.4.2's PDF of
+    /// <c>sheet-cf-data-bar-negative.xlsx</c> as <c>0.02835 w</c> and a dash array of eight
+    /// <c>0.08504</c>, which are exactly 1 and 3 hundredths of a millimetre. That settles
+    /// <see cref="BarInset"/> too: one pixel of the writer's 720 dpi device is 2540/720 = 3.5278
+    /// of the same unit, so <c>2 * nOneX</c> is 7.0556, which is 0.19999 pt.
+    /// </remarks>
+    private static readonly Length AxisDash = Length.FromPoints(3 * 2.54 / 100 * 72 / 25.4);
+
+    /// <summary>The axis line's own width, which is one of those units.</summary>
+    private static readonly Length AxisWidth = Length.FromPoints(2.54 / 100 * 72 / 25.4);
+
+    /// <summary>
+    /// One unit of a border's dash table: ten twips, half a point.
+    /// </summary>
+    /// <remarks>
+    /// <c>svtools::GetLineDashing</c>'s table is in units the caller scales, and the caller is
+    /// <c>CreateBorderPrimitives</c> with <c>PatternScale() * 10.0</c>
+    /// (<c>svx/source/sdr/primitive2d/sdrframeborderprimitive2d.cxx</c>:599). A Calc cell's
+    /// pattern scale is <c>fColScale</c>, which for a print or PDF export is the constant
+    /// twips-to-1/100 mm factor 2540/1440 = 1.76389 — so one table unit is
+    /// <c>10 × 1.76389</c> hundredths of a millimetre, which is ten twips exactly. The print
+    /// zoom multiplies it afterwards, as it multiplies the width.
+    /// </remarks>
+    private static readonly Length DashUnit = Length.FromTwips(10);
+
     /// <summary>One centimetre, the width of the printed row headings.</summary>
     /// <remarks><c>PRINT_HEADER_WIDTH</c>, <c>sc/source/ui/inc/printfun.hxx:45</c>.</remarks>
     public static Length HeadingWidth { get; } = Length.FromTwips(567);
@@ -97,11 +150,25 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// </para>
     /// <para>
     /// A merged block takes its fill from its origin cell and covers the whole block, which is why
-    /// this asks <see cref="DecorationAt"/> rather than the formatting directly.
-    /// <c>ScOutputData::DrawBackground</c> extends one run across <c>ATTR_MERGE</c>'s column count
-    /// (<c>sc/source/ui/view/output.cxx:1155-1170</c>); painting the origin's colour into each
-    /// covered cell's own rectangle covers the same area with the same ink, and survives a block
-    /// split across two pages, which one extended rectangle would not.
+    /// this asks <see cref="DecorationAt"/> rather than the formatting directly. Inside the printed
+    /// block, painting the origin's colour into each covered cell's own rectangle covers the same
+    /// area with the same ink as <c>ScOutputData::DrawBackground</c>'s single extended run
+    /// (<c>sc/source/ui/view/output.cxx:1148-1172</c> in this tree, which is 27.2.0.0.alpha0+ and
+    /// not the reference binary's source).
+    /// </para>
+    /// <para>
+    /// <strong>What it does not cover is a merge running off the right of the block, which the
+    /// reference paints past it anyway — up to a bound of its own rather than the paper's.</strong>
+    /// The run's width is accumulated
+    /// over the merged columns and the accumulation stops at <c>nCol &gt; mnX2 + 2</c>, where the
+    /// column whose width is added is <c>nCol - 1</c> — so the fill reaches one column past the
+    /// block's last and no further, however wide the merge is. <see cref="OverflowLimit"/> is that
+    /// bound. Measured at 26.2.4.2 rather than read off the loop, on
+    /// <c>tests/corpus/features/sheet-merge-fill-overflow.fods</c>: a 2 cm column A alone on page 1
+    /// with a merge of A:D (11 cm) and one of A:C (8 cm) is painted <strong>5 cm wide in both
+    /// cases</strong>, which is A + B exactly, while the unmerged control keeps its 2 cm. On page 2,
+    /// where the origin is off the block to the left, the same two merges are painted B + C + D and
+    /// B + C — their covered columns' own widths, which is what this already draws.
     /// </para>
     /// </remarks>
     /// <param name="columns">The columns on the page.</param>
@@ -113,15 +180,242 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         SheetFormatting formatting = sheet.Formatting;
         if (formatting.IsEmpty) return;
 
+        SheetMerges merges = sheet.Merges;
+        int lastPrinted = placement.Cells.LastColumn;
+
         foreach (PlacedRow row in rows)
         {
             foreach (PlacedColumn column in columns)
             {
                 if (DecorationAt(row.Row, column.Column).Background is not { } colour) continue;
 
-                Fill(new DocRect(column.X, row.Y, column.Width, row.Height), colour, sink);
+                // The repeated print-title columns are in `columns` too, at their own band's X
+                // and with their own fixed width, so only a column of the page's own block may be
+                // widened — a merge beginning inside a repeat band is drawn as it always was.
+                Length width = column.Width;
+                if (!merges.IsEmpty
+                    && column.Column >= placement.Cells.FirstColumn
+                    && column.Column <= lastPrinted)
+                {
+                    width += Overflow(merges, row.Row, column.Column, lastPrinted);
+                }
+
+                Fill(new DocRect(column.X, row.Y, width, row.Height), colour, sink);
             }
         }
+    }
+
+    /// <summary>
+    /// How much of a merge runs off the right of the printed block and is painted anyway.
+    /// </summary>
+    /// <remarks>
+    /// Zero unless the merge's own <em>origin</em> is the position asked about and the merge reaches
+    /// past <paramref name="lastPrinted"/>. The origin is what carries <c>ATTR_MERGE</c> and
+    /// therefore the column count the run is extended by; a covered cell carries
+    /// <c>ATTR_MERGE_FLAG</c> and no count, so a merge whose origin is off the left of the block
+    /// extends nothing and each of its covered columns paints its own rectangle as before. Measured
+    /// as well as read: on page 2 and page 27 of <c>TOGAF9-Tool-ConfReqts-CSQ.xls</c> the reference
+    /// draws exactly the covered columns' own widths for merges that begin on an earlier page
+    /// column, and widening those two costs 0.01 and 0.65 of ink.
+    /// </remarks>
+    /// <param name="merges">The sheet's merged blocks.</param>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    /// <param name="lastPrinted">The last column of the page's printed block.</param>
+    private Length Overflow(SheetMerges merges, int row, int column, int lastPrinted)
+    {
+        if (merges.Covering(row, column) is not { } merge) return Length.Zero;
+        if (merge.LastColumn <= lastPrinted) return Length.Zero;
+        if (column != merge.FirstColumn) return Length.Zero;
+
+        Length extra = Length.Zero;
+        int limit = Math.Min(merge.LastColumn, lastPrinted + OverflowLimit);
+        for (int at = column + 1; at <= limit; at++)
+        {
+            if (sheet.Grid.Columns.IsHidden(at)) continue;
+            extra += SheetDeviceUnits.Snap(sheet.Grid.Columns.SizeAt(at)) * _scale;
+        }
+
+        return extra;
+    }
+
+    /// <summary>Paints the bars a <c>dataBar</c> conditional format draws over its cells.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>drawDataBars</c> (<c>sc/source/ui/view/output.cxx</c>:883-953) is the whole of the
+    /// geometry and it is short. The cell's rectangle is inset by two device pixels on every
+    /// edge; the axis sits at <see cref="SheetDataBar.Zero"/> per cent of what is left; and the
+    /// bar runs from there to <see cref="SheetDataBar.Length"/> per cent of the remaining width
+    /// on whichever side its sign names. **A length of zero returns before painting anything**,
+    /// which is why a cell sitting exactly on an automatic minimum shows no bar at all rather
+    /// than a hairline.
+    /// </para>
+    /// <para>
+    /// <strong>The inset is a device pixel and the device is the PDF writer's, at 720 dpi</strong>
+    /// — <c>vcl::PDFWriter</c>'s reference resolution, so <c>PixelToLogic(Size(1,1))</c> is two
+    /// twips and <c>2 * nOneX</c> is <see cref="BarInset"/>. Measured rather than derived from
+    /// that: on 26.2.4.2's own PDF of <c>088_To-do_list_with_progress_tracker</c> the full-length
+    /// bar spans 518.54-600.55 inside a 518.35-600.75 cell and stands 20.62 pt in a 21.01 pt row,
+    /// which is 0.195 pt a side, and on
+    /// <c>tests/corpus/features/sheet-cf-data-bar-auto.xlsx</c> the rows give 0.21. The residual
+    /// against 0.2 is under a fortieth of a point.
+    /// </para>
+    /// <para>
+    /// The axis is drawn across the <em>whole</em> cell and not across the inset rectangle —
+    /// <c>Point aPoint1(nPosZero, rRect.Top())</c> — which the negative fixture shows directly:
+    /// its first row's bar stands y 71.0-85.49 and its axis runs 70.8-85.69.
+    /// </para>
+    /// </remarks>
+    /// <param name="columns">The columns on the page.</param>
+    /// <param name="rows">The rows on the page.</param>
+    /// <param name="sink">Receives the drawing commands.</param>
+    public void DrawDataBars(
+        IReadOnlyList<PlacedColumn> columns, IReadOnlyList<PlacedRow> rows, IDrawingSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(rows);
+
+        SheetFormatting formatting = sheet.Formatting;
+        if (formatting.IsEmpty) return;
+
+        foreach (PlacedRow row in rows)
+        {
+            foreach (PlacedColumn column in columns)
+            {
+                if (formatting.BarAt(row.Row, column.Column) is not { } bar) continue;
+                if (bar.Length == 0) continue;
+
+                Length left = column.X + BarInset;
+                Length right = column.Right - BarInset;
+                Length top = row.Y + BarInset;
+                Length bottom = row.Bottom - BarInset;
+                if (right <= left || bottom <= top) continue;
+
+                Length span = right - left;
+                Length zero = left + (span * (bar.Zero / 100.0));
+
+                Length from;
+                Length to;
+                if (bar.Length < 0)
+                {
+                    to = zero;
+                    from = zero + ((zero - left) * (bar.Length / 100.0));
+                }
+                else
+                {
+                    from = zero;
+                    to = zero + ((right - zero) * (bar.Length / 100.0));
+                }
+
+                if (to > from) Fill(new DocRect(from, top, to - from, bottom - top), bar.Colour, sink);
+
+                if (bar.HasAxis) AxisLine(zero, row, bar.AxisColour, sink);
+            }
+        }
+    }
+
+    /// <summary>Paints the icons an <c>iconSet</c> conditional format draws over its cells.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>drawIconSets</c> (<c>sc/source/ui/view/output.cxx</c>:960-989) is four statements, and
+    /// three of them are geometry:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     <strong>The icon is as tall as the cell's own font, not a fixed size.</strong> The ten
+    ///     points at <c>:967</c> is a fallback for a null <c>mnHeight</c>, and
+    ///     <c>GetIconSetInfo</c> <em>always</em> sets that field, from the cell's
+    ///     <c>ATTR_FONT_HEIGHT</c> (<c>sc/source/core/data/colorscale.cxx</c>:1222-1224), so the
+    ///     branch at <c>:969-980</c> always wins. Measured on 26.2.4.2's own renderings of the
+    ///     corpus, the per-icon area runs from 19.4 pt² on <c>066_Agile_Gantt_chart</c> to
+    ///     103.9 pt² on <c>069_Blue_modern_balance_sheet</c> — a range of more than five to one,
+    ///     where a constant ten points would be 100 pt² throughout.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <strong>It is square</strong>, because its width is the bitmap's own aspect ratio times
+    ///     that height (<c>:982-984</c>) and every icon-set asset the reference ships is 16 × 16.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <strong>It sits in the bottom-left corner, two device pixels in on both axes</strong> —
+    ///     <c>Point(rRect.Left() + 2 * nOneX, rRect.Bottom() - 2 * nOneY - aHeight)</c> at
+    ///     <c>:988</c> — the same inset as a data bar's, which is why this shares
+    ///     <see cref="BarInset"/> rather than restating it. It is clipped to the cell
+    ///     (<c>:987</c>), so an icon taller than its row is cut rather than spilling.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// The font height is the cell's <em>stated</em> one: <c>GetIconSetInfo</c> reads
+    /// <c>mrDoc.GetPattern(rAddr)</c>, the cell's own attribute pattern, which a conditional
+    /// format's <c>dxf</c> does not reach — Calc applies a condition's font as a style at fill
+    /// time and not to the pattern the icon measures itself against. It scales with the print
+    /// scale because <c>aHeight</c> is a logic length in a mapped-out output device.
+    /// </para>
+    /// </remarks>
+    /// <param name="columns">The columns on the page.</param>
+    /// <param name="rows">The rows on the page.</param>
+    /// <param name="sink">Receives the drawing commands.</param>
+    public void DrawIconSets(
+        IReadOnlyList<PlacedColumn> columns, IReadOnlyList<PlacedRow> rows, IDrawingSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(sink);
+
+        SheetFormatting formatting = sheet.Formatting;
+        if (formatting.IsEmpty) return;
+
+        foreach (PlacedRow row in rows)
+        {
+            foreach (PlacedColumn column in columns)
+            {
+                if (formatting.IconAt(row.Row, column.Column) is not { } icon) continue;
+                if (icon.Glyph == SheetIconGlyph.Unpainted) continue;
+
+                // The stated size times the print scale, and no device-pixel round trip:
+                // `drawIconSets` converts `mnHeight` straight from twips to hundredths of a
+                // millimetre (`:977`) and hands it to `DrawBitmap`, so unlike a *face* it is
+                // never selected at whole pixels. The conversion's own truncation is under a
+                // thousandth of a millimetre and below anything measurable in a PDF.
+                Length side = sheet.Formats.At(row.Row, column.Column).FontSize * _scale;
+                if (side <= Length.Zero) continue;
+
+                DocRect box = new(
+                    column.X + BarInset, row.Bottom - BarInset - side, side, side);
+
+                sink.Save();
+                sink.ClipPath(GraphicsPath.Rectangle(
+                    new DocRect(column.X, row.Y, column.Width, row.Height)));
+                SheetIconArtwork.Draw(sink, box, icon.Glyph);
+                sink.Restore();
+            }
+        }
+    }
+
+    /// <summary>The dashed vertical a data bar draws at its zero, when it has one inside the cell.</summary>
+    /// <remarks>
+    /// <c>LineInfo(LineStyle::Dash, 1)</c> with four dashes of three logic units and three
+    /// between them, over the cell's own full height. **No corpus rule reaches it** — all nine
+    /// resolve a minimum at or above zero, so their zero sits on the left edge and
+    /// <c>drawDataBars</c> returns before the axis — so the only witness is
+    /// <c>tests/corpus/features/sheet-cf-data-bar-negative.xlsx</c>, on which 26.2.4.2 draws four
+    /// of them, one per row that has a bar and none on the row whose length is zero.
+    /// </remarks>
+    private static void AxisLine(Length at, PlacedRow row, Colour colour, IDrawingSink sink)
+    {
+        sink.StrokePath(
+            new GraphicsPath().MoveTo(new DocPoint(at, row.Y)).LineTo(new DocPoint(at, row.Bottom)),
+            new Stroke(
+                Paint.Solid(colour),
+                AxisWidth,
+                LineCap.Butt,
+                LineJoin.Round,
+                // Four dashes and four gaps rather than one of each, because `SetDashCount(4)`
+                // is what the reference states and its PDF carries all eight entries. The two
+                // spellings paint the same line; this one matches operator for operator.
+                DashPattern: [
+                    AxisDash, AxisDash, AxisDash, AxisDash,
+                    AxisDash, AxisDash, AxisDash, AxisDash,
+                ]));
     }
 
     /// <summary>
@@ -853,37 +1147,92 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// would put the red one 2.5 pt too long.
     /// </para>
     /// </remarks>
-    private static void Stroke(Edge edge, Edges edges, IDrawingSink sink)
+    private void Stroke(Edge edge, Edges edges, IDrawingSink sink)
     {
         SheetBorder border = edge.Border;
-        Length start = edge.From - edges.ExtensionAt(edge, edge.From);
-        Length end = edge.To + edges.ExtensionAt(edge, edge.To);
+        Length start = edge.From - (edges.ExtensionAt(edge, edge.From) * _scale);
+        Length end = edge.To + (edges.ExtensionAt(edge, edge.To) * _scale);
 
         // A double rule is two lines about the centre, the gap between them untouched.
         if (border.IsDouble)
         {
-            Length half = (border.Primary + border.Distance + border.Secondary) / 2;
-            Line(edge, start, end, half - (border.Primary / 2), border.Primary, sink);
-            Line(edge, start, end, (border.Secondary / 2) - half, border.Secondary, sink);
+            Length half = (border.Primary + border.Distance + border.Secondary) * _scale / 2;
+            Line(edge, start, end, half - (border.Primary * _scale / 2), border.Primary, sink);
+            Line(edge, start, end, (border.Secondary * _scale / 2) - half, border.Secondary, sink);
             return;
         }
 
         Line(edge, start, end, Length.Zero, border.Primary, sink);
     }
 
-    private static void Line(
+    /// <summary>
+    /// The width one line of a border is stroked at: the stated width times the print scale,
+    /// floored at a tenth of a point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A cell border is scaled by the sheet's print scale exactly as its geometry is,
+    /// and this drew every one of them at full size.</strong> Calc hands
+    /// <c>svx::frame::Style</c> a width in twips times <c>nScaleX</c>
+    /// (<c>ScDocument::FillInfo</c>, <c>sc/source/core/data/fillinfo.cxx:1144-1147</c>), and for
+    /// a print or a PDF export <c>nScaleX</c> is the constant twips-to-1/100 mm factor
+    /// (<c>ScPrintFunc::InitModes</c>, <c>printfun.cxx:2627-2628</c>) — the zoom arrives later,
+    /// as the fractional scale of the <c>Map100thMM</c> map mode the whole page is drawn
+    /// through (<c>:2639-2641</c>), which multiplies the widths along with the coordinates.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 rather than read off that: one workbook of thirteen cells, one
+    /// border style each, exported at nine stated print scales
+    /// (<c>probes/sheet-border-r115/make.py</c>). The drawn <c>w</c> operators are the stated
+    /// width times the scale at every one of them — <c>thin</c> 0.75, 0.5625, 0.375, 0.315,
+    /// 0.1875 and 3.0 pt at 100, 75, 50, 42, 25 and 400 per cent — and the same nine numbers
+    /// come back out of the file saved as <c>.xls</c>, so the two filters share this.
+    /// </para>
+    /// <para>
+    /// <strong>The floor is a tenth of a point</strong>, which is one pixel of the PDF export's
+    /// own 720 dpi device: <c>PDFPage::appendLineInfo</c> writes <c>72/DPIX</c> for anything
+    /// that does not survive as a whole logic unit (<c>vcl/source/pdf/PDFPage.cxx:497-505</c>).
+    /// Measured: <c>hair</c> is 1 twip and is drawn at 0.1 pt at 100 per cent and at 0.19956 at
+    /// 400, and <c>thin</c> at a scale of 10 per cent is drawn at 0.1 rather than 0.075.
+    /// </para>
+    /// <para>
+    /// <strong>A patterned line's width goes through a whole 1/100 mm first.</strong> The dashed
+    /// styles reach the metafile as a <c>LineInfo</c> whose width is
+    /// <c>std::round(getTransformedLineWidth(...))</c> in logic units
+    /// (<c>drawinglayer/source/processor2d/vclmetafileprocessor2d.cxx:1818-1819</c>) where a
+    /// solid one keeps its double, so a dotted <c>thin</c> is 26 rather than 26.46 hundredths of
+    /// a millimetre. Measured at 0.737 against a solid 0.75004, and 1.75745 against 1.75008 for
+    /// the medium ones — and the rounding happens before the zoom, since at 42 per cent the same
+    /// lines are 0.30956 and 0.73817.
+    /// </para>
+    /// </remarks>
+    /// <param name="border">The border the line belongs to, for its pattern.</param>
+    /// <param name="width">One line's stated width.</param>
+    private Length Drawn(SheetBorder border, Length width)
+    {
+        if (width <= Length.Zero) return Length.Zero;
+
+        Length stated = border.Pattern == SheetBorderPattern.Solid
+            ? width
+            : Length.FromMm100(Math.Max(1, width.Mm100));
+
+        return Length.Max(stated * _scale, HairlineWidth);
+    }
+
+    private void Line(
         Edge edge, Length start, Length end, Length offset, Length width, IDrawingSink sink)
     {
         if (width <= Length.Zero) return;
 
         Length at = edge.At + offset;
+        Length drawn = Drawn(edge.Border, width);
 
         // Butt caps and round joins, which is what LibreOffice's own export writes for a border:
         // "q 2.49983 w 0 J 1 j". A square cap would add half a width at each end and undo the
         // extension arithmetic above.
         Stroke pen = new(
-            Paint.Solid(edge.Border.Colour), width, LineCap.Butt, LineJoin.Round,
-            DashPattern: Dashes(edge.Border, width));
+            Paint.Solid(edge.Border.Colour), drawn, LineCap.Butt, LineJoin.Round,
+            DashPattern: Dashes(edge.Border));
 
         GraphicsPath path = edge.IsHorizontal
             ? new GraphicsPath().MoveTo(new DocPoint(start, at)).LineTo(new DocPoint(end, at))
@@ -896,23 +1245,58 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// The dash pattern a border pattern draws with, or null for a solid line.
     /// </summary>
     /// <remarks>
-    /// Proportional to the line's width, which is how <c>SvxBorderLine</c> states them: the
-    /// patterns are defined as multiples of the width rather than in absolute lengths, so a thick
-    /// dashed border has long dashes and a hairline one has short ones.
+    /// <para>
+    /// <strong>Absolute, and not a multiple of the line's width.</strong> A border's dashing is a
+    /// fixed table scaled by the border's own <em>pattern scale</em>, which for a Calc cell is the
+    /// twips-to-1/100 mm factor and nothing to do with how thick the line is:
+    /// <c>ScDocument::FillInfo</c> builds every <c>svx::frame::Style</c> as
+    /// <c>Style(pBox-&gt;GetLeft(), fColScale)</c> (<c>sc/source/core/data/fillinfo.cxx</c>:1144-1147),
+    /// which lands in <c>mfPatternScale</c>; <c>CreateBorderPrimitives</c> then asks for
+    /// <c>svtools::GetLineDashing(type, PatternScale() * 10.0)</c>
+    /// (<c>svx/source/sdr/primitive2d/sdrframeborderprimitive2d.cxx</c>:599-601) and
+    /// <c>GetDashing</c> is a table of small integers — 1/2 dotted, 6/2 fine-dashed, 16/5 dashed,
+    /// 16/5/5/5 dash-dot and 16/5/5/5/5/5 dash-dot-dot
+    /// (<c>svtools/source/control/ctrlbox.cxx</c>:248-283). Ten of those units times 1.76389
+    /// hundredths of a millimetre is <see cref="DashUnit"/>: ten twips, half a point.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 rather than read off that. On a thirteen-style fixture the arrays are
+    /// the same five whatever the border's width — a <c>thin</c> dotted rule and a <c>medium</c>
+    /// dotted one both draw <c>[0.49999 0.99998]</c> — and they take the print scale like
+    /// everything else, coming out as <c>[0.21001 0.42002]</c> at 42 per cent
+    /// (<c>probes/sheet-border-r115/results.md</c> §4). Confirmed again on a corpus document
+    /// rather than a fixture: page 1 of <c>079_Org_charts_visual</c> is drawn at a fitted scale of
+    /// 0.40002 and its dotted borders come out <c>0.29481 w</c> with <c>[.20001 .40001] 0</c> —
+    /// which is <c>26/100 mm × 0.40002</c> for the width and <c>[0.5 1.0] pt × 0.40002</c> for the
+    /// dash, to five figures and with no free parameter.
+    /// </para>
+    /// <para>
+    /// <strong>The dash lengths are not rounded to a whole logic unit and the width is.</strong>
+    /// <c>VclMetafileProcessor2D::processPolygonStrokePrimitive2D</c> writes
+    /// <c>std::round(getTransformedLineWidth(...))</c> for the width and a bare
+    /// <c>getTransformedLineWidth(...)</c> for <c>SetDashLen</c> and <c>SetDistance</c>
+    /// (<c>drawinglayer/source/processor2d/vclmetafileprocessor2d.cxx</c>:1818-1874), which is
+    /// why <see cref="Drawn"/> rounds and this does not.
+    /// </para>
     /// </remarks>
-    private static IReadOnlyList<Length>? Dashes(SheetBorder border, Length width)
+    /// <param name="border">The border whose pattern is wanted.</param>
+    private Length[]? Dashes(SheetBorder border)
     {
-        Length unit = width > Length.Zero ? width : Length.FromTwips(1);
-
-        return border.Pattern switch
+        double[]? units = border.Pattern switch
         {
-            SheetBorderPattern.Dotted => [unit, unit],
-            SheetBorderPattern.Dashed => [unit * 4, unit * 2],
-            SheetBorderPattern.FineDashed => [unit * 3, unit * 3],
-            SheetBorderPattern.DashDot => [unit * 4, unit * 2, unit, unit * 2],
-            SheetBorderPattern.DashDotDot => [unit * 4, unit * 2, unit, unit * 2, unit, unit * 2],
+            SheetBorderPattern.Dotted => [1, 2],
+            SheetBorderPattern.Dashed => [16, 5],
+            SheetBorderPattern.FineDashed => [6, 2],
+            SheetBorderPattern.DashDot => [16, 5, 5, 5],
+            SheetBorderPattern.DashDotDot => [16, 5, 5, 5, 5, 5],
             _ => null,
         };
+
+        if (units is null) return null;
+
+        Length[] dashes = new Length[units.Length];
+        for (int at = 0; at < units.Length; at++) dashes[at] = DashUnit * units[at] * _scale;
+        return dashes;
     }
 
     private static void Rule(Length x1, Length y1, Length x2, Length y2, IDrawingSink sink)

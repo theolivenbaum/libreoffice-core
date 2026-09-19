@@ -265,7 +265,8 @@ public class PptHyperlinkFieldTests
     }
 
     /// <summary>A <c>Document</c> container holding <paramref name="payload"/>, and its buffer.</summary>
-    private static (DffRecordBuffer Stream, DffRecordHeader Document) Document(
+    /// <remarks>Shared with <see cref="PptHyperlinkBlobTests"/>, which caps the same list.</remarks>
+    internal static (DffRecordBuffer Stream, DffRecordHeader Document) Document(
         IEnumerable<byte> payload)
     {
         DffRecordBuffer buffer = new([.. Container(PptRecordTypes.Document, payload)]);
@@ -274,7 +275,7 @@ public class PptHyperlinkFieldTests
     }
 
     /// <summary>An <c>ExObjList</c> declaring one <c>ExHyperlink</c> per identifier.</summary>
-    private static List<byte> ExObjList(params uint[] ids)
+    internal static List<byte> ExObjList(params uint[] ids)
     {
         List<byte> links = [];
         foreach (uint id in ids)

@@ -23,8 +23,16 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// The workbook's own default font, which is what a rich-text run's unstated properties fall back
 /// to. See <see cref="Apply"/>.
 /// </param>
+/// <param name="StyleDefault">
+/// The <c>Normal</c> cell style's own format — Calc's <c>Default</c> cell style. What an emptied
+/// pivot cell falls back to, and what a cell that states no <c>s</c> in a row and column that
+/// state none resolves to. See <see cref="XlsxCellFormats.NormalStyleXf"/>.
+/// </param>
 internal sealed record XlsxCellFormatTable(
-    IReadOnlyList<SheetCellFormat> Formats, XlsxPalette Palette, SheetCellFormat DefaultFont)
+    IReadOnlyList<SheetCellFormat> Formats,
+    XlsxPalette Palette,
+    SheetCellFormat DefaultFont,
+    SheetCellFormat StyleDefault)
 {
     /// <summary>
     /// Builds a rich-text run's format from what its <c>rPr</c> states.
@@ -127,7 +135,8 @@ internal static class XlsxCellFormats
         if (styleSheet is null)
         {
             return new XlsxCellFormatTable(
-                [SheetCellFormat.Default], XlsxPalette.Read(null, theme), SheetCellFormat.Default);
+                [SheetCellFormat.Default], XlsxPalette.Read(null, theme), SheetCellFormat.Default,
+                SheetCellFormat.Default);
         }
 
         XlsxPalette palette = XlsxPalette.Read(styleSheet, theme);
@@ -167,8 +176,67 @@ internal static class XlsxCellFormats
             }
             : SheetCellFormat.Default;
 
+        // The `Normal` cell style's own format, which is a different question from `cellXfs[0]`
+        // and is the one an emptied cell answers. Its number format is `styles.Default`, which
+        // `FormatFor` returns for any index outside `cellXfs` — hence the -1.
+        int normal = NormalStyleXf(styleSheet);
+        SheetCellFormat styleDefault =
+            normal >= 0 && normal < styleXfs.Count
+                ? Resolve(styleXfs[normal], null, fonts, styles, indentUnit, -1)
+                : formats.Count > 0 ? formats[0] : SheetCellFormat.Default;
+
         return new XlsxCellFormatTable(
-            formats.Count == 0 ? [SheetCellFormat.Default] : formats, palette, defaultFont);
+            formats.Count == 0 ? [SheetCellFormat.Default] : formats, palette, defaultFont,
+            styleDefault);
+    }
+
+    /// <summary>
+    /// Which <c>cellStyleXfs</c> entry is the <c>Normal</c> cell style's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Calc's <c>Default</c> cell style is this entry and not <c>cellXfs[0]</c>, and a
+    /// probe workbook says so outright.</strong> The two are the same in every workbook of the
+    /// corpus, so nothing real can tell them apart;
+    /// <c>dotnet/probes/pivot-fmt-r110/make-default-fixture.py</c> writes one that states
+    /// Liberation Sans 11 black in the <c>Normal</c> <c>cellStyleXf</c>, Liberation Serif 18 red
+    /// in <c>cellXfs[0]</c> and Liberation Mono 8 bold green on a yellow fill in the cell format
+    /// its pivot's own cells carry. In 26.2.4.2's <c>.fods</c> of it the emptied pivot cells come
+    /// back Liberation Sans 11 black — the <c>Normal</c> style — while a cell of the control
+    /// sheet stating <c>s="0"</c> comes back Liberation Serif 18 red.
+    /// </para>
+    /// <para>
+    /// The same rule, measured the same way, decides which number format an unstated cell takes
+    /// (<c>XlsxStyles.DefaultFormatId</c>, <c>probes/numfmt-r68</c>) and — since round 111 — which
+    /// font and alignment it takes (<see cref="XlsxSheetFormats"/>, <c>probes/sheet-default-r111</c>).
+    /// The three had to agree: a tree where a cell's number format came from the <c>Normal</c>
+    /// style and its font from <c>cellXfs[0]</c> would be wrong on a workbook separating them in a
+    /// way neither reading explains.
+    /// </para>
+    /// <para>
+    /// <strong>The corpus can separate them, unlike the pivot half.</strong> Of the 243
+    /// <c>.xlsx</c>/<c>.xlsm</c> of the sheets track carrying both tables, six state different
+    /// content in the two and three still differ once the <c>apply…</c> flags and the schema's own
+    /// alignment defaults are folded out: <c>jobs-bulletin-51-22-december-2025.xlsx</c> (a font
+    /// declaring no generic class against one declaring <c>swiss</c>),
+    /// <c>sectors-defense-and-aerospace.xlsx</c> and <c>Published_Issuances_2024.xlsx</c> (an
+    /// <c>&lt;alignment&gt;</c> on the <c>cellXfs</c> side only). 26.2.4.2's own <c>.fods</c> of
+    /// all three builds its <c>Default</c> cell style out of the <c>Normal</c> entry.
+    /// </para>
+    /// </remarks>
+    /// <param name="styleSheet">The <c>styleSheet</c> root.</param>
+    /// <returns>The index, or 0 when the workbook names no <c>Normal</c> style.</returns>
+    private static int NormalStyleXf(XElement styleSheet)
+    {
+        // `builtinId="0"` is the Normal style; a workbook that names none falls back to the first
+        // entry, which is where every producer writes it.
+        foreach (XElement style in Xlsx.Children(Xlsx.Child(styleSheet, "cellStyles"), "cellStyle"))
+        {
+            if (Xlsx.Integer(style, "builtinId") != 0) continue;
+            return Xlsx.Integer(style, "xfId") ?? 0;
+        }
+
+        return 0;
     }
 
     /// <inheritdoc cref="XlsxCellFormatTable.Apply"/>

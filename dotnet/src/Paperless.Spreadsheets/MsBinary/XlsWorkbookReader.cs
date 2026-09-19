@@ -86,6 +86,9 @@ internal sealed class XlsWorkbookReader
     private readonly Dictionary<int, SheetRange> _repeatRows = [];
     private readonly XlsDecorationTable _decoration = new();
     private XlsSheetDecoration _sheetDecoration = new();
+
+    /// <summary>The sheet's <c>CONDFMT</c>/<c>CF</c> rules, rebuilt for each sheet.</summary>
+    private XlsConditionalFormats _conditionalFormats = new();
     private XlsSheetPrintState _page = new();
     private XlsDrawingCollector _drawings = new([]);
 
@@ -291,7 +294,8 @@ internal sealed class XlsWorkbookReader
                 RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
             };
             _sheetDecoration = new XlsSheetDecoration();
-            _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+            _conditionalFormats = new XlsConditionalFormats();
+            _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
             _inDrawingBlock = false;
             _rowFormats.Clear();
             _columnFormats.Clear();
@@ -1018,7 +1022,8 @@ internal sealed class XlsWorkbookReader
             RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
         };
         _sheetDecoration = new XlsSheetDecoration();
-        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        _conditionalFormats = new XlsConditionalFormats();
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
         _inDrawingBlock = false;
         XlsChartBuilder chart = new();
 
@@ -1239,7 +1244,8 @@ internal sealed class XlsWorkbookReader
             RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
         };
         _sheetDecoration = new XlsSheetDecoration();
-        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        _conditionalFormats = new XlsConditionalFormats();
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
         _inDrawingBlock = false;
         _rowFormats.Clear();
         _columnFormats.Clear();
@@ -1291,6 +1297,16 @@ internal sealed class XlsWorkbookReader
         SheetFormatting formatting = _sheetDecoration.Resolve(_decoration);
         XlsMergedBorders.Apply(formatting, builder.StatedMerges);
 
+        // After the cells and after the stated decoration, because a rule is evaluated against
+        // the sheet's values and its fill is laid over the cell's own. The font half comes back
+        // as a differential overlay on the text formats, exactly as the OOXML path does it.
+        SheetCellFormats formats = BuildFormats(builder);
+        if (!_conditionalFormats.IsEmpty)
+        {
+            formats = formats.WithConditionalText(
+                _conditionalFormats.Apply(formatting, builder.ConditionCells()));
+        }
+
         _layouts.Add(new SheetLayout
         {
             Name = sheet.Name,
@@ -1303,7 +1319,7 @@ internal sealed class XlsWorkbookReader
             StatedMerges = builder.StatedMerges,
             HyperlinkRanges = builder.HyperlinkRanges,
             Formatting = formatting,
-            Formats = BuildFormats(builder),
+            Formats = formats,
             RichText = BuildRichText(),
             Drawings = _drawings.IsEmpty
                 ? SheetDrawings.Empty
@@ -1410,7 +1426,8 @@ internal sealed class XlsWorkbookReader
         };
         _page.UseDefaultPageStyle();
         _sheetDecoration = new XlsSheetDecoration();
-        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        _conditionalFormats = new XlsConditionalFormats();
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips, _cellFormats);
         _inDrawingBlock = false;
         _rowFormats.Clear();
         _columnFormats.Clear();
@@ -1743,6 +1760,17 @@ internal sealed class XlsWorkbookReader
                     ReadMergedCells(builder);
                     break;
 
+                // A conditional format's header and its rules. Read here rather than skipped,
+                // because a rule states a fill and a font no cell record carries — and reading
+                // the header alone, which a previous round did, cannot move a pixel.
+                case BiffRecords.CondFmt when _stream.Version == BiffVersion.Biff8:
+                    _conditionalFormats.ReadCondfmt(_stream);
+                    break;
+
+                case BiffRecords.Cf when _stream.Version == BiffVersion.Biff8:
+                    _conditionalFormats.ReadCf(_stream, _cellFormats);
+                    break;
+
                 // The drawing layer, which is three record kinds and one assembly step; see
                 // XlsDrawingCollector. Kept in the sheet loop rather than skipped, because a
                 // text box is the only content on a sheet that no walk of the cells can find.
@@ -1822,6 +1850,8 @@ internal sealed class XlsWorkbookReader
     private void ReadEmbeddedChart()
     {
         XlsChartBuilder chart = new();
+        XlsDrawingCollector overlay = new(_diagnostics, Blips, _cellFormats);
+        bool inDrawing = false;
         int depth = 0;
 
         while (_stream.MoveNext())
@@ -1836,10 +1866,40 @@ internal sealed class XlsWorkbookReader
                 continue;
             }
 
-            if (depth == 0 && BiffChartRecords.IsChartRecord(id)) chart.Read(id, _stream);
+            if (depth > 0) continue;
+
+            inDrawing = InDrawingBlock(id, inDrawing);
+
+            switch (id)
+            {
+                // The chart's own drawing layer. Collected apart from the sheet's and handed to
+                // the chart object, because these shapes are anchored inside the chart's
+                // rectangle rather than against the sheet's columns — see
+                // XlsDrawingCollector.AttachChartDrawing.
+                case BiffRecords.MsoDrawing or BiffRecords.MsoDrawingSelection:
+                    overlay.AddDrawing(_stream.ReadBytes(_stream.RecordLeft));
+                    break;
+
+                case BiffRecords.Continue when inDrawing:
+                    overlay.AddDrawing(_stream.ReadBytes(_stream.RecordLeft));
+                    break;
+
+                case BiffRecords.Obj:
+                    overlay.ReadObject(_stream);
+                    break;
+
+                case BiffRecords.Txo:
+                    overlay.ReadText(_stream);
+                    break;
+
+                default:
+                    if (BiffChartRecords.IsChartRecord(id)) chart.Read(id, _stream);
+                    break;
+            }
         }
 
         _drawings.AttachChart(chart.Build(_chartData, _externSheets, _sheetIndex, _cellFormats, NumberFormatAt, DateSystem));
+        _drawings.AttachChartDrawing(overlay);
     }
 
     /// <summary>Joins the sheet's <c>NOTE</c> records to the comment objects they name.</summary>
@@ -2508,6 +2568,40 @@ internal sealed class XlsWorkbookReader
             {
                 foreach ((int column, Cell cell) in cells) yield return (row, column, cell.Xf);
             }
+        }
+
+        /// <summary>
+        /// The sheet's values in the shape a conditional format is evaluated against.
+        /// </summary>
+        /// <remarks>
+        /// A boolean is a number, which is what <c>lcl_GetCellContent</c> makes of one
+        /// (<c>sc/source/core/data/conditio.cxx</c>), and an error cell contributes nothing —
+        /// the same answer the OOXML reader gives a <c>t="e"</c> cell. A <c>BLANK</c> or
+        /// <c>MULBLANK</c> record widens the extent without stating a value, which matters
+        /// because a rule's range is clamped to that extent before it is walked: a format over a
+        /// column of formatted-but-empty cells would otherwise be clamped away entirely.
+        /// </remarks>
+        public Layout.SheetConditions.Sheet ConditionCells()
+        {
+            Layout.SheetConditions.Sheet sheet = new();
+
+            foreach ((int row, SortedDictionary<int, Cell> cells) in _rows)
+            {
+                foreach ((int column, Cell cell) in cells)
+                {
+                    sheet.Set(row, column, cell switch
+                    {
+                        { Error: not null } => Layout.SheetConditions.Value.Blank,
+                        { Number: { } number } => Layout.SheetConditions.Value.OfNumber(number),
+                        { Boolean: { } boolean } =>
+                            Layout.SheetConditions.Value.OfNumber(boolean ? 1 : 0),
+                        { Text: { } text } => Layout.SheetConditions.Value.OfText(text),
+                        _ => Layout.SheetConditions.Value.Blank,
+                    });
+                }
+            }
+
+            return sheet;
         }
 
         /// <summary>Records what DIMENSIONS says the sheet's used range is.</summary>

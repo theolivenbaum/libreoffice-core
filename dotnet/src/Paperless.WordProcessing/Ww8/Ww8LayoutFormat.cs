@@ -2,6 +2,7 @@ using System.Globalization;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Text.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Ww8;
 
@@ -273,12 +274,13 @@ public readonly record struct Ww8LayoutFormat
     /// </summary>
     /// <remarks>
     /// Not a toggle and not a boolean: the operand is a <c>kul</c> naming the line's <em>style</em>, of
-    /// which nought is "none" and 255 is "none, and cancel whatever the style said". Every other value
-    /// is some kind of line, and all of them are drawn as one — <c>SwWW8ImplReader::Read_Underline</c>
-    /// (<c>sw/source/filter/ww8/ww8par6.cxx</c>) maps eleven <c>kul</c> values onto seven
-    /// <c>FontLineStyle</c>s, and nothing below this models more than one.
+    /// which nought is "none" and 255 is "none, and cancel whatever the style said".
+    /// <c>SwWW8ImplReader::Read_Underline</c> (<c>sw/source/filter/ww8/ww8par6.cxx</c>:3600-3620)
+    /// maps seventeen <c>kul</c> values onto nine <c>FontLineStyle</c>s, and the only distinction
+    /// this engine keeps is how many lines are drawn: operands <b>3</b> and <b>43</b> are
+    /// <c>LINESTYLE_DOUBLE</c> and <c>LINESTYLE_DOUBLEWAVE</c> and draw two.
     /// </remarks>
-    public bool? IsUnderlined { get; init; }
+    public TextUnderline? Underline { get; init; }
 
     /// <summary>
     /// True when <c>sprmCFStrike</c> or <c>sprmCFDStrike</c> draws a rule through the run.
@@ -323,6 +325,36 @@ public readonly record struct Ww8LayoutFormat
     /// </para>
     /// </remarks>
     public int? CharacterSpacing { get; init; }
+
+    /// <summary>
+    /// <c>sprmCCharScale</c>: the character width, as a percentage, which squeezes the run's glyphs
+    /// across without changing the line's height.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// [src] <c>sprmChr&lt;0x52, 0, SPRA::operand_2b_2&gt;</c> (<c>sw/source/filter/ww8/sprmids.hxx</c>:335) —
+    /// a <b>two-byte unsigned</b> operand — dispatched to <c>SwWW8ImplReader::Read_ScaleWidth</c>
+    /// (<c>ww8par6.cxx</c>:4985-4997, table row at <c>:6131</c>), which builds
+    /// <c>SvxCharScaleWidthItem(nVal, RES_CHRATR_SCALEW)</c>: the same item <c>w:w</c>,
+    /// <c>\charscalex</c> and <c>style:text-scale</c> all land in, so
+    /// <see cref="Paperless.Text.Layout.TextWidthScale"/>'s twip truncation applies here unchanged.
+    /// </para>
+    /// <para>
+    /// <b>Out of range is 100, not the stated value and not "ignore the sprm"</b> —
+    /// <c>if (nVal &lt; 1 || nVal &gt; 600) nVal = 100;</c> — which is the DOCX filter's rule exactly
+    /// (<c>DomainMapper.cxx</c>:2485-2497, <em>"ST_TextScale must fall between 1% and 600% according
+    /// to spec, otherwise resets to 100% according to experience"</em>). A one-byte operand is not a
+    /// value at all: it pops the attribute off the control stack and <em>ends</em> the scaled stretch.
+    /// </para>
+    /// <para>
+    /// [bin] Measured at 26.2.4.2 on authored <c>.doc</c>, the sprm verified present in the CHPX
+    /// before each render and the width read from a right-aligned line's own origin: 60 → 0.59974,
+    /// 99 → <b>0.98665</b>, 130 → 1.29981, 600 → 6.00621, and 601, 0, 900 and 65535 all → 1.00000.
+    /// Identical to five places to the RTF and ODF arms, because it is one item in VCL.
+    /// <c>probes/charscale-r149/results.md</c> §A.
+    /// </para>
+    /// </remarks>
+    public int? CharacterScale { get; init; }
 
     /// <summary>The Windows language id, from <c>sprmCRgLid0</c>.</summary>
     public int? LanguageId { get; init; }

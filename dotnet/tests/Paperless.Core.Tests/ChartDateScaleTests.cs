@@ -211,6 +211,53 @@ public sealed class ChartDateScaleTests
         axis.Ticks.Count.ShouldBe(5);
     }
 
+    /// <summary>
+    /// <c>055_Project_timeline_with_milestones</c>' axis is fifteen ticks ten days apart, and its
+    /// gate shortfall is not a scaling question at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The register carried this document for two rounds as a date axis whose <em>range and
+    /// step</em> differ from the reference's — 26.2.4.2 draws 38 labels at 30-day steps over
+    /// three years where this tree draws fifteen at ten days. It is neither. Its DATE column is
+    /// thirteen volatile <c>DATE(YEAR(TODAY()),m,d)</c>, and the reference recalculates them on
+    /// load while we render the values the file was saved with.
+    /// </para>
+    /// <para>
+    /// <strong>Measured by freezing them.</strong> With the <c>&lt;f&gt;</c> elements of C20:C32
+    /// alone removed — at the cached 2023 serials <em>and</em> at the 2026 serials the reference
+    /// itself recalculates to, so that the freeze and not the year is the variable — 26.2.4.2
+    /// draws exactly the fifteen upright labels below, <c>5 Apr</c> to <c>23 Aug</c>, and so does
+    /// this tree. `probes/chart-axis-r112` §1.
+    /// </para>
+    /// <para>
+    /// So this asserts the *reference's own answer for the data it is given*, which is what a
+    /// scaling test can assert about a volatile document. The 38-label axis the corpus reference
+    /// draws is the union of the import-time cache and the recalculated cells and cannot be
+    /// reproduced without evaluating <c>TODAY()</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheProjectTimelineAxisIsFifteenTicksTenDaysApart()
+    {
+        double?[] dates =
+        [
+            45021, 45040, 45040, 45047, 45061, 45061, 45092,
+            45107, 45122, 45137, 45149, 45161, 45169, null, null, null, null,
+        ];
+
+        ChartDateAxis axis = ChartDateScale.Resolve(
+            dates,
+            NumberFormatCode.Parse("[$-409]d mmm;@"),
+            statedInterval: new ChartTimeInterval(10, ChartTimeUnit.Day),
+            statedResolution: ChartTimeUnit.Day)!;
+
+        axis.MajorInterval.ShouldBe(new ChartTimeInterval(10, ChartTimeUnit.Day));
+        axis.Ticks.Count.ShouldBe(15);
+        axis.LabelOf(axis.Ticks[0]).ShouldBe("5 Apr");
+        axis.LabelOf(axis.Ticks[^1]).ShouldBe("23 Aug");
+    }
+
     /// <summary>A category with no value has nowhere to be, and says so.</summary>
     [Fact]
     public void ACategoryWithNoValueHasNoFraction()

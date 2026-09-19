@@ -131,8 +131,40 @@ public enum MetricUnit
 /// <see cref="LineMetrics.ScaledLineHeight"/> is EditEngine's. See <see cref="EastAsianScaled"/>.
 /// </para>
 /// </param>
+/// <param name="PageScale">
+/// The page transform the device's map mode already carries, as a plain multiplier; 1.0 for a page
+/// drawn at its own size.
+/// <para>
+/// <b>A scale in the map mode moves the quantisation to the far side of the multiply, and that is
+/// the whole of it.</b> A sheet printed at a zoom, a slide scaled onto a page and a shrunk cell are
+/// all drawn through a scaled map mode, so <c>OutputDevice::ImplLogicHeightToDevicePixel</c> takes
+/// the scale <em>into</em> the device pixel count and <c>DevicePixelToLogicHeight</c> takes it back
+/// <em>out</em> again — and the <c>llround</c> at the end of that second conversion
+/// (<c>vcl/source/outdev/CoordinateMapper.cxx</c>:279) therefore lands on a whole logical unit of
+/// the <em>unscaled</em> page, which is then multiplied by the scale on its way to the paper. A
+/// renderer that scales first and quantises afterwards lands on a whole unit of the scaled page
+/// instead, which is a different number.
+/// </para>
+/// <para>
+/// Only <see cref="ToLength"/> reads it, because that is the only conversion that crosses the map
+/// mode in the outward direction. <see cref="ToPixelEm"/> needs no correction: the em it is handed
+/// is already the drawn size, so the scale is inside it — measured on the witness below, where the
+/// reference's own device pixel count and this tree's agree at 60 either way.
+/// </para>
+/// <para>
+/// <b>Measured.</b> <c>RMP 2011-2014 and Inventory.xls</c> prints at Calc's own 60% and states a
+/// 10 pt Arial, so the device sets 60 pixels and <c>ImplInitTextLineSize</c>'s descent branch
+/// answers 3 pixels of thickness at 7 of depth. Quantising after the scale gives
+/// <c>round(3 × 2540/720) = 11</c> hundredths of a millimetre — <b>0.3118 pt</b>, which is what
+/// this tree drew — and before it gives <c>round(3 × 2540/720 / 0.6) × 0.6 = 18 × 0.6 = 10.8</c>,
+/// which is <b>0.30614 pt</b> and is written <c>0.306</c>. 26.2.4.2 draws 0.306. The depth is the
+/// same arithmetic on 7 pixels: 25 hundredths against <c>41 × 0.6 = 24.6</c>, 0.7086 pt against
+/// 0.69732, and the reference draws 0.697. <c>probes/rulescale-r132/</c>.
+/// </para>
+/// </param>
 public readonly record struct MetricGrid(
-    int Dpi, bool QuantisesAdvances, MetricUnit Unit, bool ScalesEastAsianFaces = false)
+    int Dpi, bool QuantisesAdvances, MetricUnit Unit, bool ScalesEastAsianFaces = false,
+    double PageScale = 1.0)
 {
     /// <summary>A grid at a resolution in twips, quantising advances as a real device does.</summary>
     public MetricGrid(int dpi) : this(dpi, true, MetricUnit.Twip) { }
@@ -349,6 +381,72 @@ public readonly record struct MetricGrid(
     /// </remarks>
     public static MetricGrid Chart { get; } = new(96, false, MetricUnit.Mm100);
 
+    /// <summary>
+    /// The device every underline and strikethrough is measured on: <b>720 dpi</b>, in the map
+    /// unit of the application whose page is being written — 1/100 mm for Calc and Impress, and
+    /// <see cref="WriterTextLine"/>'s twip for Writer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same numbers as <see cref="Spreadsheet"/> and a different fact, which is why it is
+    /// named separately. A rule's thickness is not decided where the text is laid out. It is
+    /// decided at PDF-writing time, twice over:
+    /// </para>
+    /// <para>
+    /// <b>The resolution is the PDF writer's own reference device.</b>
+    /// <c>PDFWriterImpl</c> is a <c>VirtualDevice</c> and its constructor asks for
+    /// <c>RefDevMode::PDF1</c> = <b>720 dpi</b> (<c>vcl/source/pdf/pdfwriter_impl.cxx</c>:424-428,
+    /// <c>vcl/source/gdi/virdev.cxx</c>:409-411). <c>FontMetricData::ImplInitTextLineSize</c>
+    /// answers in that device's whole pixels — every thickness on both of its branches is a
+    /// <c>tools::Long</c> — and <c>PDFWriterImpl::drawStraightTextLine</c> reads it from there,
+    /// noting in its own first line that "units in pFontInstance are ref device pixel".
+    /// </para>
+    /// <para>
+    /// <b>The thickness is then rounded to a whole LOGICAL unit</b>, because
+    /// <c>drawStraightTextLine</c> runs it through <c>HCONV</c> =
+    /// <c>DevicePixelToLogicHeight</c> = <c>CoordinateMapper::ViewToLogicDistanceY</c>, an
+    /// <c>llround</c> (<c>vcl/source/outdev/CoordinateMapper.cxx</c>:278-283), and the logical
+    /// unit is the one the graphics state is in when the metafile is replayed.
+    /// </para>
+    /// <para>
+    /// <b>Which unit that is has to be measured, and reading the source alone gets it wrong.</b>
+    /// <c>PDFExport::ExportSelection</c> records every page with
+    /// <c>const MapMode aMapMode(MapUnit::Map100thMM)</c>
+    /// (<c>filter/source/pdf/pdfexport.cxx</c>:168-179, 1305-1333), which reads as *1/100 mm for
+    /// every module* — but the recording device's map mode is then whatever the application sets
+    /// while it paints, and <b>Writer paints in twips</b>. Measured on 810 rules over six faces,
+    /// fifteen sizes and three kinds authored identically as <c>.fodt</c>, <c>.fods</c> and
+    /// <c>.fodp</c>: the Calc and Impress renderings are a whole hundredth of a millimetre on
+    /// 270 of 270 each, the Writer one is a whole twip on 270 of 270 and a whole hundredth of a
+    /// millimetre on <b>0</b>. It is the document's application and not the object: a rule inside
+    /// a Writer text frame and inside a Writer draw object are both twips.
+    /// <c>probes/quantise-r120/</c>.
+    /// </para>
+    /// <para>
+    /// A twip is exactly two of these pixels, so a Writer rule is a whole tenth of a point and
+    /// carries no rounding at all; on Calc and Impress the only widths the reference can draw are
+    /// 18, 21, 25, 28, 32, … hundredths of a millimetre — <c>llround(px × 2540/720)</c>. That is
+    /// the whole of O64: seven pairs measured over four spreadsheets came out 18, 21, 18, 21, 49,
+    /// 28 and 14 hundredths to four decimal places, which is 5, 6, 5, 6, 14, 8 and 4 pixels. The
+    /// last step of the chain shows in the same numbers — <c>PDFPage::appendMappedLength</c>
+    /// writes thousandths of a point (<c>pdfwriter_utils.hxx</c>:40, <c>nLog10Divisor = 3</c>),
+    /// and those five are 0.51, 0.595, 1.389, 0.794 and 0.397 pt rounded there, which is exactly
+    /// what was read off the reference's own PDFs.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid TextLine { get; } = new(720, false, MetricUnit.Mm100);
+
+    /// <summary>
+    /// The same device with Writer's own map unit: <b>720 dpi in twips</b>, so a rule is a whole
+    /// tenth of a point.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="TextLine"/>, which carries the chain and the measurement. This is the grid
+    /// for anything drawn on a word-processing page, a Writer text frame and a Writer draw object
+    /// included — the unit belongs to the application, not to the object.
+    /// </remarks>
+    public static MetricGrid WriterTextLine { get; } = new(720, false, MetricUnit.Twip);
+
     /// <summary>Logical units to the inch, for this grid's map unit.</summary>
     private int UnitsPerInch => Unit == MetricUnit.Mm100 ? 2540 : 1440;
 
@@ -375,19 +473,67 @@ public readonly record struct MetricGrid(
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return 0;
 
-        double em = Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
+        double em = ToPixelEm(emSize);
         return (long)Math.Round(designUnits * em / unitsPerEm, MidpointRounding.AwayFromZero);
     }
 
-    /// <summary>Whole device pixels back in whole twips.</summary>
+    /// <summary>
+    /// The em itself in whole device pixels — the size the device can actually instantiate the
+    /// font at.
+    /// </summary>
     /// <remarks>
+    /// <c>LogicalFontInstance::GetScale</c> divides <c>m_aFontSelData.mnHeight</c> by the units per
+    /// em, and that height is already whole device pixels: <c>OutputDevice::ImplNewFont</c> sets it
+    /// through <c>ImplLogicHeightToDevicePixel</c>. Every other rounding on this grid is downstream
+    /// of it, which is why it is one method rather than a line repeated in four.
+    /// </remarks>
+    public long ToPixelEm(Length emSize)
+        => Dpi <= 0
+            ? 0
+            : (long)Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
+
+    /// <summary>Whole device pixels back in whole logical units of this grid's map mode.</summary>
+    /// <remarks>
+    /// <para>
     /// <c>CoordinateMapper::ViewToLogicDistanceY</c> is an <c>llround</c>
     /// (<c>vcl/source/outdev/CoordinateMapper.cxx</c>:279), which is again half away from zero.
+    /// </para>
+    /// <para>
+    /// <b>And the map mode carries the page transform, so the rounding happens on the unscaled
+    /// page.</b> See <see cref="PageScale"/>: the divide and the multiply do not cancel, because
+    /// there is a rounding between them.
+    /// </para>
     /// </remarks>
     public Length ToLength(long pixels)
-        => Dpi <= 0
-            ? Length.Zero
-            : FromLogical((long)Math.Round(pixels * UnitsPerPixel, MidpointRounding.AwayFromZero));
+    {
+        if (Dpi <= 0) return Length.Zero;
+
+        // The unscaled page is the early return and it is the ORIGINAL EXPRESSION, character for
+        // character, rather than the scaled one with a 1.0 in it. Every grid but Calc's zoomed one
+        // takes this branch, so the identity is the code's and not a claim about what dividing a
+        // double by one does. See `PageScale`.
+        double scale = double.IsFinite(PageScale) && PageScale > 0.0 ? PageScale : 1.0;
+
+        if (scale == 1.0)
+        {
+            return FromLogical(
+                (long)Math.Round(pixels * UnitsPerPixel, MidpointRounding.AwayFromZero));
+        }
+
+        return FromLogical((long)Math.Round(
+            pixels * UnitsPerPixel / scale, MidpointRounding.AwayFromZero)) * scale;
+    }
+
+    /// <summary>The same grid with a page transform in its map mode.</summary>
+    /// <remarks>
+    /// See <see cref="PageScale"/>. A scale of one, or anything that is not a positive finite
+    /// number, gives the grid back unchanged rather than a grid that quietly draws nothing.
+    /// </remarks>
+    /// <param name="scale">The multiplier the whole page is drawn through.</param>
+    public MetricGrid Scaled(double scale)
+        => !double.IsFinite(scale) || scale <= 0.0 || scale == 1.0
+            ? this
+            : this with { PageScale = scale };
 
     /// <summary>
     /// An advance width as the device measures it: the whole run's advance in device pixels,
@@ -426,7 +572,7 @@ public readonly record struct MetricGrid(
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return Length.Zero;
 
-        double em = Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
+        double em = ToPixelEm(emSize);
         return ToLength((long)Math.Floor(designUnits * em / unitsPerEm));
     }
 
@@ -495,7 +641,7 @@ public readonly record struct MetricGrid(
     public Length ToEmSize(Length emSize)
         => Dpi <= 0 || emSize <= Length.Zero
             ? emSize
-            : ToLength((long)Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero));
+            : ToLength(ToPixelEm(emSize));
 }
 
 /// <summary>
@@ -967,6 +1113,290 @@ public static class LineSpacing
             thickness,
             ((line.Ascent - internalLeading) / 3) + half,
             thickness);
+    }
+
+    /// <summary>
+    /// The thickness the reference actually draws each kind of rule at, already quantised onto the
+    /// device that draws it.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="Length"/> rather than a design-unit count, because the quantisation is the
+    /// answer: see <see cref="MetricGrid.TextLine"/>. Every value is a whole hundredth of a
+    /// millimetre.
+    /// </remarks>
+    /// <param name="Underline">One line under the text.</param>
+    /// <param name="DoubleUnderline">
+    /// Each of the two lines of a double underline, which is <em>thinner</em> than a single one on
+    /// both of the reference's branches and was drawn at the single thickness here.
+    /// </param>
+    /// <param name="Strikeout">The line through the text.</param>
+    /// <param name="BoldUnderline">
+    /// The single line of a <em>bold</em> underline, which is about twice an ordinary one:
+    /// <c>ceil(2 × underlineThickness × scale)</c> on the HarfBuzz branch and
+    /// <c>((descent × 50) + 50) / 100</c> on the descent one, with a guard bumping it by one where
+    /// that comes out equal to the single (<c>fontmetric.cxx</c>:289-291).
+    /// </param>
+    /// <param name="BoldUnderlineOffset">Where its top edge sits, below the baseline.</param>
+    /// <param name="UnderlineOffset">
+    /// How far below the baseline the <em>top edge</em> of a single underline sits.
+    /// <para>
+    /// The same device chain as the thickness beside it, and for the same reason: the offset is a
+    /// whole number of the writer's 720 dpi pixels rounded to a whole logical unit, so no fraction
+    /// of the em reproduces it. This tree took it from the design units until round 123 measured
+    /// the difference — 0.063 pt on average and 0.139 at worst over 84 authored rules, against the
+    /// 0.02 pt figure on which round 120 declined to touch it.
+    /// </para>
+    /// </param>
+    /// <param name="StrikeoutOffset">
+    /// The same for the line through the text, and <em>negative</em>: a strikeout sits above the
+    /// baseline.
+    /// </param>
+    /// <param name="DoubleUnderlineFirst">
+    /// How far below the baseline the <em>top edge</em> of a double underline's first line sits.
+    /// <para>
+    /// A double underline is the one rule whose position cannot be taken from the design units the
+    /// other two still come from, and it is not a rounding difference: the two lines straddle where
+    /// a single one would sit, their separation is floored on the device rather than scaled with
+    /// the em, and the writer adds a whole further thickness to the second. See
+    /// <see cref="DoubleUnderlineSecond"/> for the arithmetic and the measurement.
+    /// </para>
+    /// </param>
+    /// <param name="DoubleUnderlineSecond">
+    /// The same for its second line — <em>three</em> thicknesses below the first where the gap is
+    /// not floored, and not the two a reader of the metric alone would expect.
+    /// <para>
+    /// <c>ImplInitTextLineSize</c> puts the two lines' tops <c>mnDUnderlineSize × 2</c> apart on the
+    /// HarfBuzz branch (<c>fontmetric.cxx</c>:238) and <c>n2LineDY + n2LineHeight</c> apart on the
+    /// descent one (:319), where <c>n2LineDY</c> is <c>max(n2LineHeight, 1 + DPIY/150)</c> — a floor
+    /// of <b>five pixels</b> on the PDF writer's 720 dpi device, which binds at every size where a
+    /// double underline is thinner than that. <c>drawStraightTextLine</c> then centres the first
+    /// stroke by adding half a thickness (tdf#154235, <c>pdfwriter_impl.cxx</c>:6741) and centres
+    /// the second by adding half a thickness <em>and a whole one more</em> (:6857), which is
+    /// asymmetric and is reproduced because it is what the reference draws.
+    /// </para>
+    /// </param>
+    public readonly record struct RuleWidths(
+        Length Underline,
+        Length DoubleUnderline,
+        Length Strikeout,
+        Length BoldUnderline = default,
+        Length BoldUnderlineOffset = default,
+        Length UnderlineOffset = default,
+        Length StrikeoutOffset = default,
+        Length DoubleUnderlineFirst = default,
+        Length DoubleUnderlineSecond = default);
+
+    /// <summary>
+    /// The thicknesses of a face's rules at a size, as <c>FontMetricData::ImplInitTextLineSize</c>
+    /// computes them and the PDF writer quantises them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The companion of <see cref="ResolveDecorations(OpenTypeFace, LineMetrics)"/>, which answers
+    /// the same two branches in <em>design units</em> and is what the offsets still come from. A
+    /// thickness cannot be answered that way, because the reference's is an integer count of
+    /// 720 dpi device pixels converted to a whole hundredth of a millimetre — so it is neither a
+    /// fraction of the em nor a continuous function of the size, and no design-unit value can
+    /// reproduce it. See <see cref="MetricGrid.TextLine"/> for the chain and the citations.
+    /// </para>
+    /// <para>
+    /// <b>The two branches are the same two, and the fallback is the one most of a corpus takes</b>
+    /// — <see cref="FontsWithoutUsableUnderlineMetrics"/> holds the three metric-compatible
+    /// substitutes for Arial, Times New Roman and Courier New. The HarfBuzz branch takes
+    /// <c>std::ceil</c> of the face's own <c>post</c> and <c>OS/2</c> values scaled to the device,
+    /// and a double underline is two thirds of a single one there; the fallback derives everything
+    /// from the device's rounded descent, a quarter of it for a single rule and
+    /// <c>((descent × 16) + 50) / 100</c> for each line of a double.
+    /// </para>
+    /// <para>
+    /// <b>Where this departs from the C++, deliberately and in one place.</b> HarfBuzz answers a
+    /// present-but-zero <c>post.underlineThickness</c> successfully, so the reference would take
+    /// that branch and draw nothing at all; this treats a face declaring no underline metric as one
+    /// whose tables cannot be read and sends it down the descent branch, exactly as
+    /// <see cref="ResolveDecorations(string?, PostTable, Os2Table?, LineMetrics)"/> already did.
+    /// <b>No installed face on this machine declares one</b> — 0 of 137 across
+    /// <c>/usr/share/fonts</c> and the reference's own bundle state a zero <c>underlineThickness</c>
+    /// or <c>yStrikeoutSize</c> — so the divergence is unmeasurable here and is recorded rather
+    /// than defended.
+    /// </para>
+    /// </remarks>
+    /// <param name="face">The face the rule sits under.</param>
+    /// <param name="line">Its resolved line metrics, in design units.</param>
+    /// <param name="size">The size the document asks for.</param>
+    /// <param name="grid">The device and map unit the page is written in.</param>
+    public static RuleWidths ResolveRuleWidths(
+        OpenTypeFace face, LineMetrics line, Length size, MetricGrid grid)
+    {
+        ArgumentNullException.ThrowIfNull(face);
+
+        return ResolveRuleWidths(face.FamilyName, face.Post, face.Os2, line, size, grid);
+    }
+
+    /// <summary>The same, from the five things the answer depends on.</summary>
+    /// <param name="family">The face's family name, as the blacklist spells it.</param>
+    /// <param name="post">Its <c>post</c> table.</param>
+    /// <param name="os2">Its <c>OS/2</c> table, or null when it has none.</param>
+    /// <param name="line">Its resolved line metrics, in design units.</param>
+    /// <param name="size">The size the document asks for.</param>
+    /// <param name="grid">
+    /// <see cref="MetricGrid.TextLine"/> for a spreadsheet or a presentation and
+    /// <see cref="MetricGrid.WriterTextLine"/> for a word-processing page: same device, different
+    /// map unit, and the difference is measured rather than read.
+    /// </param>
+    public static RuleWidths ResolveRuleWidths(
+        string? family, PostTable post, Os2Table? os2, LineMetrics line, Length size,
+        MetricGrid grid)
+    {
+        int unitsPerEm = line.UnitsPerEm > 0 ? line.UnitsPerEm : 1000;
+        long em = grid.ToPixelEm(size);
+        if (em <= 0) return default;
+
+        bool blacklisted = family is not null
+                           && Array.IndexOf(FontsWithoutUsableUnderlineMetrics, family) >= 0;
+
+        // Both tables have to be readable for the metric branch: the C++ bails to the descent as
+        // soon as any one of its four HarfBuzz queries fails, and a query fails when the table is
+        // absent. A `post` reporting nothing at all is how this reader represents an absent one.
+        bool declares = os2 is { StrikeoutSize: > 0 } && post.UnderlineThickness > 0;
+
+        if (!blacklisted && declares)
+        {
+            double scale = (double)em / unitsPerEm;
+            double single = post.UnderlineThickness * scale;
+
+            // `nBSize = nSize * 2; n2Size = nBSize / 3`, so two thirds and not a half.
+            long doubleSize = (long)Math.Ceiling(single * 2.0 / 3.0);
+
+            // `mnBUnderlineOffset = ceil(nOffset - nSize/2)` and the double underline's first
+            // line sits there, `mnDUnderlineOffset1 = mnBUnderlineOffset` (fontmetric.cxx:234-238).
+            // The face states the underline's position as negative below the baseline and VCL
+            // negates it, so this is positive downwards.
+            long first = (long)Math.Ceiling((-post.UnderlinePosition * scale) - (single / 2.0));
+
+            long singleSize = (long)Math.Ceiling(single);
+            long strikeSize = (long)Math.Ceiling(os2!.Value.StrikeoutSize * scale);
+
+            // `mnBUnderlineSize = ceil(nBSize)` with `nBSize = nSize * 2`, and a bold underline
+            // shares the double's own offset — both are `mnBUnderlineOffset` (fontmetric.cxx:232-237).
+            long boldSize = (long)Math.Ceiling(single * 2.0);
+
+            return DoublePositions(
+                new RuleWidths(
+                    grid.ToLength(singleSize),
+                    grid.ToLength(doubleSize),
+                    grid.ToLength(strikeSize),
+                    grid.ToLength(boldSize),
+                    Stroked(boldSize, first, grid),
+                    Stroked(singleSize, (long)Math.Ceiling(-post.UnderlinePosition * scale), grid),
+                    Stroked(
+                        strikeSize,
+                        (long)Math.Ceiling(-os2.Value.StrikeoutPosition * scale),
+                        grid)),
+                doubleSize, first, first + (doubleSize * 2), grid);
+        }
+
+        long ascent = grid.ToPixels(line.Ascent, unitsPerEm, size);
+        long rawDescent = grid.ToPixels(line.Descent, unitsPerEm, size);
+        long descent = rawDescent;
+
+        if (descent <= 0) descent = Math.Max(1, ascent / 10);
+
+        // #i55341 again, and on the device's own integers this time.
+        if (3 * descent > ascent) descent = ascent / 3;
+
+        long lineHeight = Math.Max(1, ((descent * 25) + 50) / 100);
+        long doubleHeight = Math.Max(1, ((descent * 16) + 50) / 100);
+
+        // **The two descents are different and the C++ says so.** The thicknesses above take the
+        // #i55341-clamped descent; `nUnderlineOffset` takes the raw `mnDescent`
+        // (`fontmetric.cxx`:315), so a face whose clamp fires — Liberation Mono at every size —
+        // has its rules sized off one number and placed off another.
+        long underlineOffset = (rawDescent / 2) + 1;
+
+        // `n2LineDY = max(n2LineHeight, 1 + DPIY/150)`, and on a 720 dpi device that floor is FIVE
+        // pixels (fontmetric.cxx:299-306, #117909's "add some pixels ... on higher resolution
+        // devices"). It binds wherever a double underline is thinner than five pixels, which is
+        // every Liberation face below about 12 pt.
+        long gap = Math.Max(doubleHeight, 1 + (grid.Dpi / 150));
+        long firstOffset = underlineOffset - Math.Max(1, gap / 2) - doubleHeight;
+
+        // `mnIntLeading = mnAscent + mnDescent - mnHeight`, with no clamp at zero
+        // (fontmetric.cxx:543), and a strikeout sits a third of the ascent net of it above the
+        // baseline (:313). Negative, because this axis points down.
+        long internalLeading = ascent != 0 || rawDescent != 0 ? ascent + rawDescent - em : 0;
+        long strikeoutOffset = -((ascent - internalLeading) / 3);
+
+        long halfLine = Math.Max(1, lineHeight / 2);
+
+        // `nBLineHeight = ((nDescent * 50) + 50) / 100`, and then the guard that makes this a
+        // branch rather than a doubling: **where that comes out equal to the single, it is bumped
+        // by one** (fontmetric.cxx:289-291). It bites only at a descent of one or two device
+        // pixels, where the single's own `!nLineHeight -> 1` clamp has already floored both at 1 —
+        // sub-point text on a 720 dpi device, which no corpus document reaches. It is here because
+        // it is in the source, and it is recorded as UNWITNESSED.
+        long boldHeight = ((descent * 50) + 50) / 100;
+        if (boldHeight == lineHeight) boldHeight++;
+        long halfBold = Math.Max(1, boldHeight / 2);
+
+        return DoublePositions(
+            new RuleWidths(
+                grid.ToLength(lineHeight),
+                grid.ToLength(doubleHeight),
+                grid.ToLength(lineHeight),
+                grid.ToLength(boldHeight),
+                Stroked(boldHeight, underlineOffset - halfBold, grid),
+                Stroked(lineHeight, underlineOffset - halfLine, grid),
+                Stroked(lineHeight, strikeoutOffset - halfLine, grid)),
+            doubleHeight, firstOffset, firstOffset + gap + doubleHeight, grid);
+    }
+
+    /// <summary>
+    /// Where the two lines of a double underline are actually stroked, from the metric's own two
+    /// offsets in device pixels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>PDFWriterImpl::drawStraightTextLine</c> takes both offsets as the distance to the
+    /// <em>top</em> of the line and converts them to the stroke's centre, which is what a PDF
+    /// segment states. tdf#154235 does that by adding <c>nLineHeight / 2</c> — an integer division
+    /// on the device's pixels — to each (<c>pdfwriter_impl.cxx</c>:6741, :6751-6753); the second
+    /// line then has a whole further <c>nLineHeight</c> added when it is emitted (:6857). The
+    /// asymmetry is the reference's, not a misreading: measured on 84 double rules over a Writer
+    /// and a Calc rendering it is exact on all 84, and dropping the extra thickness makes every one
+    /// of them wrong.
+    /// </para>
+    /// <para>
+    /// A rule is filled here and stroked there (C16), so each centre is turned back into a top edge
+    /// by half the drawn thickness — which is half a logical unit, not a whole one, and is why
+    /// these are <see cref="Length"/> rather than a unit count.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// Where one line's top edge lands, from the metric's own offset in device pixels.
+    /// </summary>
+    /// <remarks>
+    /// <c>drawStraightTextLine</c> takes the offset as the distance to the line's <em>top</em> and
+    /// states the stroke's <em>centre</em>, adding <c>nLineHeight / 2</c> — an integer division on
+    /// the device's pixels, so it is not half the drawn thickness — before converting
+    /// (<c>pdfwriter_impl.cxx</c>:6741, :6751-6752). This tree fills the rule rather than stroking
+    /// it (C16), so the centre is turned back into a top edge by half the drawn thickness, which
+    /// is a different number again.
+    /// </remarks>
+    private static Length Stroked(long sizePixels, long offsetPixels, MetricGrid grid)
+        => grid.ToLength(offsetPixels + (sizePixels / 2)) - (grid.ToLength(sizePixels) / 2);
+
+    private static RuleWidths DoublePositions(
+        RuleWidths widths, long sizePixels, long firstPixels, long secondPixels, MetricGrid grid)
+    {
+        long centring = sizePixels / 2;
+        Length height = grid.ToLength(sizePixels);
+        Length half = height / 2;
+
+        return widths with
+        {
+            DoubleUnderlineFirst = grid.ToLength(firstPixels + centring) - half,
+            DoubleUnderlineSecond = grid.ToLength(secondPixels + centring) + height - half,
+        };
     }
 
     /// <summary>

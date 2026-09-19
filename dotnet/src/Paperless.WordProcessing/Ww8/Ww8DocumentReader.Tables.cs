@@ -322,6 +322,24 @@ public sealed partial class Ww8DocumentReader
                     if (owner.ContinuesMergeAbove) continue;
 
                     owner.RowSpan++;
+
+                    // And the covered cell takes the MERGE MASTER's borders, discarding whatever its own
+                    // `TC` states. Nothing draws a covered cell, so this reaches one number -- the row's
+                    // height, through `PageTableRow.CoveredTopRule` -- and it is the number O105 was about.
+                    //
+                    // [bin] Measured on 26.2.4.2 by the one instrument that can separate the two readings:
+                    // its own `--convert-to fodt` of the `.doc`, which prints every cell's resolved borders.
+                    // Two one-attribute arms decide it. A master stating a 3 pt top over a covered cell
+                    // stating `nil` gives the covered cell **3 pt**, and a master stating 1 pt under a
+                    // covered cell stating 3 pt gives it **1 pt** -- the master's in both directions, and
+                    // the covered cell's own statement in neither. The controls are the same two tables
+                    // without the merge, where the lower cell keeps `none` and 3 pt respectively.
+                    // `probes/ww8covered-r156/data/master-borders.txt`.
+                    //
+                    // The ODF export names it as plainly as the numbers do: a covered cell comes out
+                    // carrying the master's own cell style (`TableN.A1`), while an unmerged lower cell
+                    // carries its own (`TableN.A2`).
+                    cell.Borders = owner.Borders;
                     break;
                 }
             }

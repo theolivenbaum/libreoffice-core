@@ -66,13 +66,14 @@ public static class SlideDrawing
         if (shape.Picture is { } picture) DrawPicture(shape, picture, sink);
         if (shape.Line is { } line) sink.StrokePath(shape.StrokeOutline, line);
 
-        if (shape.Text is not { Runs.Count: > 0 } text) return;
+        if (shape.Text is not { HasInk: true } text) return;
 
         // An upright shape's runs are already in slide coordinates, so the common case costs no
         // state-stack traffic at all — and, more usefully, its pens land in a backend's output as
         // plain numbers that compare directly against a reference renderer's.
         if (text.IsUpright)
         {
+            DrawMarkerPictures(text, sink);
             foreach (PlacedGlyphRun run in text.Runs) DrawRun(run, sink);
             return;
         }
@@ -81,11 +82,41 @@ public static class SlideDrawing
         try
         {
             sink.Transform(text.Transform);
+            DrawMarkerPictures(text, sink);
             foreach (PlacedGlyphRun run in text.Runs) DrawRun(run, sink);
         }
         finally
         {
             sink.Restore();
+        }
+    }
+
+    /// <summary>
+    /// Draws a body's picture bullets, under the text's own transform and before its glyphs.
+    /// </summary>
+    /// <remarks>
+    /// Before, because <c>Outliner::PaintBullet</c> is called from
+    /// <c>ImpEditEngine::Paint</c>'s per-paragraph loop ahead of that paragraph's portions, and
+    /// a bullet wide enough to reach under the first line would otherwise cover it. Unclipped:
+    /// the shape's own clip is a property of the shape, and a bullet is drawn in the paragraph's
+    /// coordinates exactly as its text is.
+    /// </remarks>
+    private static void DrawMarkerPictures(PlacedText text, IDrawingSink sink)
+    {
+        if (text.MarkerPictures is not { Count: > 0 } pictures) return;
+
+        foreach (PlacedPicture picture in pictures)
+        {
+            if (picture.Destination.IsEmpty) continue;
+
+            if (picture.Vector is { } vector && !vector.Value.IsEmpty)
+            {
+                vector.Value.Draw(sink, picture.Destination);
+            }
+            else if (picture.Image is { } image)
+            {
+                sink.DrawImage(image, picture.Destination, picture.Opacity);
+            }
         }
     }
 

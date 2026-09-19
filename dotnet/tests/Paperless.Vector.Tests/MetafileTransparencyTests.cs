@@ -110,15 +110,36 @@ public class MetafileTransparencyTests
         merged.Pixels.Span[7].ShouldBe((byte)0);
     }
 
+    /// <summary>
+    /// An unpaired <c>SRCAND</c> is the picture masking itself, not an idiom missing its partner.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This test asserted the opposite until round 94 — <c>IsDecoded</c> false and a
+    /// <c>PL6033</c> diagnostic — under the name
+    /// <c>AnUnpairedMaskIsStillDrawnRatherThanSwallowed</c>. Its premise was right and its
+    /// expectation was not: a producer whose artwork is black on white writes **one** blit,
+    /// because ANDing with white leaves the destination alone, and LibreOffice resolves that in
+    /// the same function as the pair (<c>emfio/source/reader/mtftools.cxx</c>:2691-2708, case
+    /// <c>0x8</c>, <c>Bitmap aBmpEx(aBitmap, aMask)</c> with the bitmap as its own mask).
+    /// </para>
+    /// <para>
+    /// Measured on <c>slides/done-013/ppt/FAA_Form_337.ppt</c>, whose Department of Transportation
+    /// logo is one <c>META_DIBSTRETCHBLT</c> of a 199 × 144 monochrome DIB at <c>SRCAND</c> and
+    /// nothing else: 26.2.4.2's PDF carries an all-black image with an <c>/SMask</c> whose 8357
+    /// opaque pixels are exactly the DIB's black ones, and this tree drew a white panel over the
+    /// slide. Pages 2 and 67 go from 2.73 % of unsigned ink to 0.07 %.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void AnUnpairedMaskIsStillDrawnRatherThanSwallowed()
+    public void AnUnpairedAndBlitIsItsOwnTransparencyMask()
     {
         const uint SourceAnd = 0x008800C6;
 
-        byte[] mask = Dib24(1, 1, [(0xFF, 0xFF, 0xFF)]);
+        byte[] artwork = Dib24(2, 1, [(0xFF, 0xFF, 0xFF), (0x00, 0x00, 0x00)]);
 
         VectorImage image = VectorImages.Decode(new WmfBuilder()
-            .Raw(WmfFunction.StretchDib, StretchDib(mask, 1, 1, SourceAnd))
+            .Raw(WmfFunction.StretchDib, StretchDib(artwork, 2, 1, SourceAnd))
             .Build());
 
         Recorder recorder = new();
@@ -126,9 +147,53 @@ public class MetafileTransparencyTests
             Core.Geometry.DocPoint.Origin, image.IntrinsicSize));
 
         // Deferring a blit must not lose it: the record stream ends and the pending one is drawn.
+        RasterImage drawn = recorder.Images.ShouldHaveSingleItem().Image;
+
+        drawn.IsDecoded.ShouldBeTrue();
+        drawn.Pixels.Span[3].ShouldBe((byte)0);         // white AND destination: the page shows
+        drawn.Pixels.Span[7].ShouldBe((byte)255);       // black AND destination: opaque black
+        image.Diagnostics.ShouldNotContain(d => d.Code == "PL6033");
+    }
+
+    /// <summary>
+    /// The self-mask is decided by the operation's low nibble, and an operation that needs the
+    /// destination back is still only warned about.
+    /// </summary>
+    /// <remarks>
+    /// <c>SRCINVERT</c> reduces to nibble <c>0x6</c>, which <c>ResolveBitmapActions</c> draws with
+    /// an XOR pen rather than as a mask — nothing a display list can express — so it must keep
+    /// the opaque fallback and the diagnostic. Without this control the nibble test would be
+    /// free to widen until it swallowed operations it cannot reproduce.
+    /// </remarks>
+    [Fact]
+    public void AnOperationThatIsNotTheSelfMaskKeepsItsWarning()
+    {
+        const uint SourceInvert = 0x00660046;
+
+        byte[] artwork = Dib24(2, 1, [(0xFF, 0xFF, 0xFF), (0x00, 0x00, 0x00)]);
+
+        VectorImage image = VectorImages.Decode(new WmfBuilder()
+            .Raw(WmfFunction.StretchDib, StretchDib(artwork, 2, 1, SourceInvert))
+            .Build());
+
+        Recorder recorder = new();
+        image.Draw(recorder, new Core.Geometry.DocRect(
+            Core.Geometry.DocPoint.Origin, image.IntrinsicSize));
+
         recorder.Images.ShouldHaveSingleItem().Image.IsDecoded.ShouldBeFalse();
         image.Diagnostics.ShouldContain(d => d.Code == "PL6033");
     }
+
+    /// <summary>The nibble is what carries the rule, not the named operation.</summary>
+    [Theory]
+    [InlineData(0x008800C6u, true)]     // SRCAND
+    [InlineData(0x00B8074Au, true)]     // PSDPxax, the same nibble with a pattern in it
+    [InlineData(0x00CC0020u, false)]    // SRCCOPY
+    [InlineData(0x00EE0086u, false)]    // SRCPAINT
+    [InlineData(0x00660046u, false)]    // SRCINVERT
+    [InlineData(0x00AA0029u, false)]    // DSTCOPY
+    public void TheSelfMaskIsTheLowNibbleOfTheOperationsMiddleByte(uint operation, bool expected)
+        => RasterOperations.IsSelfMasked(operation).ShouldBe(expected);
 
     [Fact]
     public void AnOpaqueBlitStillGoesThroughUndecoded()

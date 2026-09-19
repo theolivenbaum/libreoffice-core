@@ -38,6 +38,26 @@ public enum SheetAnchorKind
 }
 
 /// <summary>
+/// A bitmap fill, stated without the rectangle it will be painted against.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The one thing a <see cref="BitmapPaint"/> needs that a reader cannot supply is where the
+/// tile grid starts, which is the shape's own box and is not resolved until the page's columns
+/// are. So the reader answers the tile, its size and how opaque it is, and
+/// <see cref="SheetShapeInk"/> composes the paint.
+/// </para>
+/// <para>
+/// A <see cref="Tile"/> that is empty means the image covers the whole shape once —
+/// <c>mso_fillPicture</c> and ODF's <c>stretch</c> — rather than repeating.
+/// </para>
+/// </remarks>
+/// <param name="Image">The tile.</param>
+/// <param name="Tile">One tile's size on the page, or the default to stretch once.</param>
+/// <param name="Opacity">How opaque the fill is, from zero to one.</param>
+public sealed record SheetShapeTexture(RasterImage Image, DocSize Tile, double Opacity = 1);
+
+/// <summary>
 /// One drawing anchored on a sheet: a picture, or a chart recorded but not drawn.
 /// </summary>
 /// <remarks>
@@ -226,6 +246,17 @@ public sealed record SheetDrawing
     /// </remarks>
     public GradientDescription? Gradient { get; init; }
 
+    /// <summary>
+    /// The tile the box is filled with, or null when its fill is not a bitmap.
+    /// </summary>
+    /// <remarks>
+    /// Carried unplaced for the reason <see cref="Gradient"/> is: a <see cref="BitmapPaint"/>
+    /// states the tile's origin in page coordinates and a sheet drawing has no rectangle until
+    /// the page's own columns are known. Set only where <see cref="Fill"/> and
+    /// <see cref="Gradient"/> are not — a fill is one kind or another.
+    /// </remarks>
+    public SheetShapeTexture? Texture { get; init; }
+
     /// <summary>The colour of the box's outline, or null when it has none.</summary>
     public Colour? Stroke { get; init; }
 
@@ -321,7 +352,8 @@ public sealed record SheetDrawing
     public bool QuarterTurnedAnchor { get; init; }
 
     /// <summary>True when there is a fill or an outline to paint.</summary>
-    public bool HasInk => Fill is not null || Gradient is not null || Stroke is not null;
+    public bool HasInk
+        => Fill is not null || Gradient is not null || Texture is not null || Stroke is not null;
 
     /// <summary>
     /// The cell a shown comment's caption hangs off, or null for every other drawing.

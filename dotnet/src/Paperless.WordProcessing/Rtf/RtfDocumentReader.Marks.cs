@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Paperless.Core.Extraction;
 using Paperless.WordProcessing.Model;
@@ -68,21 +69,74 @@ public sealed partial class RtfDocumentReader
     // ------------------------------------------------------------------------- bookmarks
 
     /// <summary>
+    /// The naming the importer gives this document's bookmarks, which is not the file's own.
+    /// </summary>
+    /// <remarks>See <see cref="RtfBookmarkRotation"/>: RTF states a bookmark half's name before its
+    /// id and <c>DomainMapper_Impl::SetBookmarkName</c> expects the opposite order, so every name
+    /// after the first lands on the bookmark before it.</remarks>
+    private readonly RtfBookmarkRotation _bookmarkNames = new();
+
+    /// <summary>The depth of the group a <c>\bkmkstart</c> or <c>\bkmkend</c> opened.</summary>
+    /// <remarks>
+    /// <para>
+    /// A group nested inside a bookmark's destination inherits that destination, so without this it
+    /// closes as a second half of its own — and a spurious half is not free under the rotation: it
+    /// takes an id, and an <em>end</em> that names nothing takes <c>m_aBookmarks[""]</c>, which
+    /// <c>std::map</c> value-initialises to <b>0</b> and which therefore closes the document's first
+    /// bookmark under the wrong name. <c>RTFDocumentImpl::popState</c> guards it with
+    /// <c>if (&amp;getDestinationText() != getCurrentDestinationText()) break; // not for nested
+    /// group</c> (<c>rtfdocumentimpl.cxx</c>:2736-2740, :2751-2755).
+    /// </para>
+    /// <para>
+    /// The nested group's text is <em>not</em> dropped with it, because that same test is what says
+    /// the two share one buffer: 26.2.4.2 reads <c>{\*\bkmkend {x}A}</c> as a half named
+    /// <c>xA</c>, which is why <see cref="_bookmarkName"/> is the reader's and not the group's.
+    /// </para>
+    /// </remarks>
+    private int _bookmarkDepth = -1;
+
+    /// <summary>The name the current bookmark destination has collected, nested groups included.</summary>
+    private readonly StringBuilder _bookmarkName = new();
+
+    /// <summary>Opens a bookmark half's name, which the group that carries it will close.</summary>
+    private void BeginBookmarkName()
+    {
+        _bookmarkDepth = _groupDepth;
+        _bookmarkName.Clear();
+    }
+
+    /// <summary>Adds a stretch of a bookmark's name, from that group or from one inside it.</summary>
+    private void AppendBookmarkName(string text) => _bookmarkName.Append(text);
+
+    /// <summary>
     /// Records a bookmark half, whose name is the destination's own text.
     /// </summary>
     /// <remarks>
-    /// RTF pairs the two halves <em>by name</em>, not by an id — <c>{\*\bkmkstart foo}</c> and
-    /// <c>{\*\bkmkend foo}</c> — which is the one place among the four formats where the name is
-    /// also the key. So a document that reuses a name has bookmarks that cannot be told apart, and
-    /// this pairs the end with the most recent unclosed start of that name.
+    /// <para>
+    /// RTF pairs the two halves <em>by name</em> — <c>{\*\bkmkstart foo}</c> and
+    /// <c>{\*\bkmkend foo}</c> — but the importer does not: it turns each name into an id as the
+    /// destination closes and pairs the halves by <em>that</em>, so the key here is the id and the
+    /// name a bookmark ends up with is settled only when it closes.
+    /// </para>
+    /// <para>
+    /// Which matters because the name it settles on is usually another bookmark's. The rotation is
+    /// the reference's own and is reproduced rather than corrected, because a <c>REF</c> field
+    /// expands from whichever bookmark holds its name — see <see cref="RtfReferenceFields"/>.
+    /// </para>
     /// </remarks>
-    private void RecordBookmark(GroupState state, bool start)
+    private void RecordBookmark(bool start)
     {
-        string name = state.Collected.ToString().Trim();
-        if (name.Length == 0) return;
+        if (_groupDepth != _bookmarkDepth) return;
+        _bookmarkDepth = -1;
 
-        if (start) _marks.OpenBookmark(name, name, Here());
-        else _marks.CloseBookmark(name, Here());
+        string name = _bookmarkName.ToString().Trim();
+        _bookmarkName.Clear();
+
+        RtfBookmarkRotation.Half half = _bookmarkNames.Take(name, start);
+        string key = half.Id.ToString(CultureInfo.InvariantCulture);
+
+        if (half.Opens) _marks.OpenBookmark(key, half.Name, Here());
+        else _marks.CloseBookmark(key, Here(), half.Name);
     }
 
     // --------------------------------------------------------------------- tracked changes
@@ -171,13 +225,69 @@ public sealed partial class RtfDocumentReader
 
     // ---------------------------------------------------------------------------- fields
 
-    /// <summary>Notes where a field's cached result begins.</summary>
+    /// <summary>
+    /// What this field's <c>\fldrslt</c> is to draw instead of the result the producer cached, or
+    /// null when it is to draw the cache.
+    /// </summary>
+    /// <remarks>Only ever set on the second read of a document that states a <c>REF</c> — see
+    /// <see cref="ReferenceExpansions"/>.</remarks>
+    private string? _referenceExpansion;
+
+    /// <summary>Whether the expansion has already replaced a stretch of the cached result.</summary>
+    private bool _referenceDrawn;
+
+    /// <summary>
+    /// The text each <c>REF</c> field is to draw, by the bookmark it names, or null to draw every
+    /// field's cached result.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer recomputes a <c>REF</c> from its bookmark when the document is loaded, so the string
+    /// the producing application cached is not what the reference draws — and the RTF import's own
+    /// bookmark naming (<see cref="RtfBookmarkRotation"/>) routinely makes it a different string.
+    /// </para>
+    /// <para>
+    /// Supplied by the caller rather than computed here because a <c>REF</c> may name a bookmark the
+    /// walk has not reached: <see cref="RtfReader"/> reads such a document twice, computes the
+    /// expansions from the first read's marks, and hands them to the second. A document stating no
+    /// <c>REF</c> is read once, which is all but a handful of them.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyDictionary<string, string>? ReferenceExpansions { get; init; }
+
+    /// <summary>Notes where a field's cached result begins, and what is to be drawn in its place.</summary>
     private void BeginFieldResult()
     {
         _fieldResultDepth = _groupDepth;
         _fieldResultOffset = OffsetIn(CurrentFlow);
         _fieldResultLayoutOffset = CurrentFlow.LayoutLength;
         _fieldResultStart = Here();
+
+        _referenceDrawn = false;
+        _referenceExpansion = null;
+        if (ReferenceExpansions is { } expansions
+            && FieldInstructions.ReferenceBookmark(_fieldInstruction) is { } bookmark
+            && expansions.TryGetValue(bookmark, out string? expansion))
+        {
+            _referenceExpansion = expansion;
+        }
+    }
+
+    /// <summary>
+    /// The text to append for a stretch of a field result, which is the expansion for the first
+    /// stretch of a substituted one and nothing for the rest of it.
+    /// </summary>
+    /// <remarks>
+    /// The whole cached result is one field portion in Writer, however many runs the file breaks it
+    /// into, so the expansion replaces the lot and takes the formatting of the first of them.
+    /// </remarks>
+    private string SubstitutedFieldText(string text)
+    {
+        if (_referenceExpansion is not { } expansion) return text;
+        if (_referenceDrawn) return string.Empty;
+
+        _referenceDrawn = true;
+        return expansion;
     }
 
     /// <summary>Records the field once its <c>\fldrslt</c> group has closed.</summary>
@@ -187,8 +297,17 @@ public sealed partial class RtfDocumentReader
     /// — see <see cref="Layout.PageFields"/>. Everything else keeps the cache, which is what a reference
     /// renderer draws.
     /// </remarks>
-    private void EndFieldResult()
+    private void EndFieldResult(GroupState state)
     {
+        // A field whose cached result is empty still draws its expansion, so the substitution cannot
+        // wait for text that never comes.
+        if (_referenceExpansion is { Length: > 0 } expansion && !_referenceDrawn && !state.Hidden)
+        {
+            _referenceDrawn = true;
+            NoteBodyContent();
+            AppendToParagraph(state, expansion);
+        }
+
         if (FieldInstructions.PageFieldOf(_fieldInstruction) is { } page)
         {
             // A negative length is the one case to drop: a `\par` inside the result group flushed the
@@ -212,5 +331,7 @@ public sealed partial class RtfDocumentReader
         _fieldResultDepth = -1;
         _fieldResultStart = null;
         _fieldInstruction = null;
+        _referenceExpansion = null;
+        _referenceDrawn = false;
     }
 }

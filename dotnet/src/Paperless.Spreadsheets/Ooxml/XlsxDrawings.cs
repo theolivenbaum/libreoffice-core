@@ -228,12 +228,28 @@ internal static class XlsxDrawings
             XElement? data =
                 Child(Child(frame, MainNamespace, "graphic"), MainNamespace, "graphicData");
 
-            if (Attribute(data, "uri") != ChartUri) return drawing;
+            string? uri = Attribute(data, "uri");
+
+            // The extended ("chartex") vocabulary is a second chart payload with a second
+            // namespace, and 26.2.4.2 draws it — see `DrawingChartex`. Reaching it at all needs
+            // `OoxmlXml.ResolveAlternateContent` to have preferred the `cx1` choice, which it
+            // does, and which is now worth doing for the chart rather than for the absence of
+            // the fallback's advisory sentence.
+            if (uri == DrawingChartex.ChartUri)
+            {
+                return drawing with
+                {
+                    IsChart = true,
+                    Chart = ExtendedPlot(data, package, images, theme, styles, ranges),
+                };
+            }
+
+            if (uri != ChartUri) return drawing;
 
             return drawing with
             {
                 IsChart = true,
-                Chart = Plot(data, package, images, theme, ranges),
+                Chart = Plot(data, package, images, theme, styles, ranges),
             };
         }
 
@@ -283,14 +299,35 @@ internal static class XlsxDrawings
             }
         }
 
+        // A shape's own interior can be a bitmap rather than a colour: `a:blipFill` inside
+        // `xdr:sp/xdr:spPr`, which is a *fill*, not an `xdr:pic`. It is drawn here rather than in
+        // `XlsxShapeInk` because the picture below already does every part of the work — the blip
+        // choice, `a:alphaModFix`, `a:srcRect` — and because `Ink` carries colours, so teaching it
+        // a bitmap would mean a second image path. `PptxSlideLayout` and `DocxPictures` resolve the
+        // same element; only the spreadsheet reader had the hole, and the ten corpus shapes were
+        // drawn with no interior at all.
+        //
+        // **Only `a:stretch`.** A stretched bitmap fills the shape's rectangle, which is exactly
+        // what the picture path draws, so the two are the same operation. `a:tile` is a repeat at
+        // the blip's own size with its own offsets and is a different geometry; it is left
+        // unfilled, as before, rather than drawn stretched — a tile painted stretched would be a
+        // confident wrong answer where today there is an absent one. No corpus shape tiles: all
+        // ten are `prstGeom` `rect`, `a:stretch`, unrotated, and nine of ten also state `a:srcRect`.
+        XElement? shapeFill = picture is not null || shape is null
+            ? null
+            : Child(Child(shape, DrawingNamespace, "spPr"), MainNamespace, "blipFill");
+
+        if (shapeFill is not null && Child(shapeFill, MainNamespace, "stretch") is null)
+            shapeFill = null;
+
         // A shape carries no image and no chart, so it reaches the print area and stops there.
-        if (picture is null) return drawing;
+        if (picture is null && shapeFill is null) return drawing;
 
         // `BlipReference.Choose` rather than `r:embed` read straight off the blip: since Office 2016
         // one `a:blip` may name an SVG in an `asvg:svgBlip` extension beside the raster, and the
         // vector is the one to draw. The raster is kept beside it, so a decode that comes back empty
         // still leaves the picture the file put there for exactly that.
-        XElement? blipFill = Child(picture, DrawingNamespace, "blipFill");
+        XElement? blipFill = shapeFill ?? Child(picture, DrawingNamespace, "blipFill");
         XElement? blip = Child(blipFill, MainNamespace, "blip");
         BlipReference.Choice choice = BlipReference.Choose(blip);
 
@@ -362,6 +399,7 @@ internal static class XlsxDrawings
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> parts,
         DrawingTheme? theme,
+        DrawingStyleMatrix? styles,
         XlsxChartRanges? ranges)
     {
         string? id = Attribute(
@@ -383,10 +421,41 @@ internal static class XlsxDrawings
             // resolver is bound here, once the chart's own c:plotVisOnly is in hand. See
             // XlsxChartHiddenCells.
             : DrawingChartPlot.Read(
-                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null,
+                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles,
                 ranges?.Resolver(DrawingChart.PlotsVisibleCellsOnly(
                     chartSpace, OoxmlMetadata.IsOffice2007(package))),
                 automaticChartAreaLine: true);
+    }
+
+    /// <summary>The chartex chart a <c>cx:chart</c> graphic frame names, or null.</summary>
+    /// <remarks>
+    /// The same shape as <see cref="Plot"/> and a different namespace at every step: the
+    /// relationship id is on <c>cx:chart</c> rather than on <c>c:chart</c>, and the part's root is
+    /// <c>cx:chartSpace</c>. The resolver is bound unconditionally — chartex has no
+    /// <c>c:plotVisOnly</c>, and `plotVisibleOnly`'s own default is what a chart written by Excel
+    /// 2010 or later means.
+    /// </remarks>
+    private static ChartPlot? ExtendedPlot(
+        XElement? data,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> parts,
+        DrawingTheme? theme,
+        DrawingStyleMatrix? styles,
+        XlsxChartRanges? ranges)
+    {
+        string? id = Attribute(
+            Child(data, OoxmlNamespaces.ExtendedChart, "chart"),
+            XName.Get("id", RelationshipNamespace));
+
+        if (id is null || !parts.TryGetValue(id, out OpcXml.Relationship chart)) return null;
+        if (chart.IsExternal || package.GetPart(chart.Target) is not { } chartPart) return null;
+
+        XElement? chartSpace;
+        using (Stream content = chartPart.Open()) chartSpace = OoxmlXml.TryLoad(content, out _);
+
+        return chartSpace is null
+            ? null
+            : DrawingChartex.Read(chartSpace, theme, styles, ranges?.Resolver(true));
     }
 
     /// <summary>

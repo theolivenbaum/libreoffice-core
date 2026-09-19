@@ -88,7 +88,8 @@ public static class PptReader
             new PptContentBuilder(stream, persist, diagnostics).Build(content);
             return new PptDocument(
                 format, file, content, diagnostics, stream, persist,
-                ReadStream(file, PicturesStreamName) ?? []);
+                ReadStream(file, PicturesStreamName) ?? [],
+                ReadStream(file, OlePropertySetReader.DocumentSummaryInformationStreamName) ?? []);
         }
         catch
         {
@@ -140,6 +141,7 @@ public sealed class PptDocument : IPaginatedDocument
     private readonly DffRecordBuffer _stream;
     private readonly PptPersistDirectory _persist;
     private readonly byte[] _pictures;
+    private readonly byte[] _summary;
 
     internal PptDocument(
         DocumentFormat format,
@@ -148,7 +150,8 @@ public sealed class PptDocument : IPaginatedDocument
         IReadOnlyList<Diagnostic> diagnostics,
         DffRecordBuffer stream,
         PptPersistDirectory persist,
-        byte[] pictures)
+        byte[] pictures,
+        byte[] summary)
     {
         Format = format;
         _file = file;
@@ -157,6 +160,7 @@ public sealed class PptDocument : IPaginatedDocument
         _stream = stream;
         _persist = persist;
         _pictures = pictures;
+        _summary = summary;
     }
 
     /// <inheritdoc/>
@@ -208,7 +212,7 @@ public sealed class PptDocument : IPaginatedDocument
     {
         List<Diagnostic> diagnostics = [];
         List<LaidOutSlide> slides =
-            new PptSlideLayout(_stream, _persist, new SlideFonts(), diagnostics, _pictures)
+            new PptSlideLayout(_stream, _persist, new SlideFonts(), diagnostics, _pictures, _summary)
                 .Layout();
 
         int limit = options?.MaxPages ?? 0;

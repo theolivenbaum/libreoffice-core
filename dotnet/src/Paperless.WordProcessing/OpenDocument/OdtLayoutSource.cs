@@ -132,6 +132,7 @@ public sealed partial class OdtLayoutSource
         _shrinksJustifiedBlanks = ShrinksJustifiedBlanks(settings);
         _breaksWrappedTables = BreaksWrappedTables(settings);
         _tabsRelativeToIndent = TabsRelativeToIndent(settings);
+        _rowHeightsIncludeInsets = RowHeightsIncludeInsets(settings);
     }
 
     /// <summary>
@@ -164,6 +165,12 @@ public sealed partial class OdtLayoutSource
     /// the setting is document-wide.
     /// </remarks>
     private readonly bool _tabsRelativeToIndent;
+
+    /// <summary>
+    /// Whether a row's declared height carries its insets and its own top rule.
+    /// </summary>
+    /// <remarks>See <see cref="RowHeightsIncludeInsets"/>, which has the measurement.</remarks>
+    private readonly bool _rowHeightsIncludeInsets;
 
     /// <summary>
     /// Whether two consecutive paragraphs' spacings add rather than the larger one winning, as the
@@ -239,6 +246,36 @@ public sealed partial class OdtLayoutSource
     /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
     internal static bool FliesMayOverlapTheBottomMargin(XElement? settings)
         => Setting(settings, "TabOverMargin") == "true";
+
+    /// <summary>
+    /// Whether a row's declared height is raised by its insets and its own top rule, as the settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>DocumentSettingId::MIN_ROW_HEIGHT_INCL_BORDER</c>, which ODF spells
+    /// <c>MinRowHeightInclBorder</c> (<c>sw/source/uibase/uno/SwXDocumentSettings.cxx</c>:288). It is read
+    /// twice by the row's own formatting — <c>lcl_CalcMinRowHeight</c>
+    /// (<c>sw/source/core/layout/tabfrm.cxx</c>:5061 for an <c>exact</c> row and :5074-5090 for an
+    /// <c>atLeast</c> one) — and it is what <see cref="Layout.PageTable.MinHeightIncludesInsets"/> gates.
+    /// </para>
+    /// <para>
+    /// <b>It is a document setting and not a property of the filter, which is what this reader had wrong.</b>
+    /// The only filter that sets it is WW8's (<c>sw/source/filter/ww8/ww8par.cxx</c>:1966), and
+    /// LibreOffice's ODF <em>export</em> then writes the resulting state into <c>settings.xml</c> — so every
+    /// <c>.odt</c> it wrote from a Word-family document carries <c>true</c>, and **all 337 of the converted
+    /// corpus state it**. Absent means <em>false</em>: <c>mbMinRowHeightInclBorder(false)</c>,
+    /// <c>sw/source/core/doc/DocumentSettingManager.cxx</c>:113 — Writer's own answer, which is why an
+    /// unread setting is a missing charge rather than a spurious one.
+    /// </para>
+    /// <para>
+    /// [bin] Measured on 26.2.4.2 over the eighteen arms of <c>probes/vmergetop-r154/</c>'s fixture 7
+    /// converted to <c>.odt</c> by the reference itself: <b>ten differed before this was read and two after</b>,
+    /// and five of the ten held no merged cell at all. <c>probes/odtrowheight-r155/</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool RowHeightsIncludeInsets(XElement? settings)
+        => Setting(settings, "MinRowHeightInclBorder") == "true";
 
     /// <summary>
     /// Whether a fly holding a table may be broken across pages at all, as the settings say.
@@ -688,6 +725,20 @@ public sealed partial class OdtLayoutSource
                 continue;
             }
 
+            if (_isBody
+                && ns == OdfNamespaces.Text
+                && (name == "section" || IsIndex(name))
+                && _columnGeometry is { } enclosing)
+            {
+                // A section inside a section leaves the enclosing one's columns and splits it — see
+                // OdfSectionGeometry.Nested. An ODF index is a section like any other, which is why
+                // this arm names ODF's seven index elements beside `section`.
+                EnterNestedSection(child, enclosing);
+                Walk(child, into, depth + 1);
+                LeaveNestedSection(enclosing);
+                continue;
+            }
+
             if (ns == OdfNamespaces.Text
                 && name is "section" or "index-body"
                     or "table-of-content" or "alphabetical-index" or "illustration-index"
@@ -888,15 +939,16 @@ public sealed partial class OdtLayoutSource
     /// <remarks>
     /// <para>
     /// Answers null — and the walk then treats the element as transparent, exactly as it always has —
-    /// for a section that states one column and no indents, for one nested inside another, and for one
-    /// outside the body. A section in a header, a footer or a table cell is not laid out as its own
-    /// frame here: the flow it belongs to has no page geometry of its own to change.
+    /// for a section that states one column and no indents, and for one outside the body. A section in a
+    /// header, a footer or a table cell is not laid out as its own frame here: the flow it belongs to has
+    /// no page geometry of its own to change.
     /// </para>
     /// <para>
-    /// Nesting is refused rather than composed because composing it would need the parent section's
-    /// area as the origin of the child's indents, and nothing in the converted corpus exercises it:
-    /// of 139 <c>text:section</c> elements in 49 of the 338 converted <c>.odt</c>, <b>none</b> is
-    /// inside another and none is inside a table.
+    /// A section met while one is already open is a <em>nested</em> section and goes through
+    /// <see cref="EnterNestedSection"/> instead, which is a different rule rather than a refusal: it
+    /// leaves the enclosing section's columns and splits it. Of 139 <c>text:section</c> elements in 49 of
+    /// the 338 converted <c>.odt</c>, none is inside another and none is inside a table — but an ODF
+    /// <em>index</em> is a section too, and one of those is inside a columned section.
     /// </para>
     /// </remarks>
     /// <param name="section">The <c>text:section</c> element.</param>
@@ -911,6 +963,56 @@ public sealed partial class OdtLayoutSource
         _columnGeometry = geometry;
         _sectionIndex = AllocateColumnSection(geometry);
         return true;
+    }
+
+    /// <summary>
+    /// Whether an element name is one of ODF's seven indexes, each of which is a section in Writer.
+    /// </summary>
+    /// <remarks>
+    /// A <c>text:table-of-content</c> and its six siblings each import as a <c>SwSectionNode</c> — a
+    /// <c>SwTOXBaseSection</c> is a <c>SwSection</c> — so the nesting rule
+    /// <see cref="OdfSectionGeometry.Nested"/> describes reaches them exactly as it reaches a
+    /// <c>text:section</c>. Counting <c>text:section</c> alone is what answers "nothing in the corpus is
+    /// nested"; counting the indexes too finds the one document that is.
+    /// </remarks>
+    /// <param name="name">The element's local name, in the text namespace.</param>
+    private static bool IsIndex(string name)
+        => name is "table-of-content" or "alphabetical-index" or "illustration-index"
+            or "table-index" or "object-index" or "user-index" or "bibliography";
+
+    /// <summary>
+    /// Opens a section nested inside one that is already open.
+    /// </summary>
+    /// <remarks>
+    /// The nested section is a frame of its own beside the parent rather than inside its columns, so it
+    /// gets a section of its own here — one column unless it states more, at the parent's own indents
+    /// unless it states its own. See <see cref="OdfSectionGeometry.Nested"/> for the three seats.
+    /// </remarks>
+    /// <param name="section">The nested <c>text:section</c> or index element.</param>
+    /// <param name="enclosing">The geometry of the section it is nested in.</param>
+    private void EnterNestedSection(XElement section, OdfSectionGeometry enclosing)
+    {
+        string? styleName = section.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value;
+        OdfSectionGeometry nested = OdfSectionGeometry.Nested(_styles, styleName, enclosing);
+
+        _columnGeometry = nested;
+        _sectionIndex = AllocateColumnSection(nested);
+    }
+
+    /// <summary>
+    /// Closes a nested section, putting the flow back into a fresh frame of the enclosing one.
+    /// </summary>
+    /// <remarks>
+    /// A fresh one rather than the frame the nested section interrupted, because that is what Writer
+    /// does: <c>SwSectionFrame::SplitSect</c> moves everything after the nested section into a second
+    /// frame of the parent's format (<c>sw/source/core/layout/frmtool.cxx</c>:1954-1960), which balances
+    /// its own columns and starts where the nested section left off.
+    /// </remarks>
+    /// <param name="enclosing">The geometry of the section the nested one interrupted.</param>
+    private void LeaveNestedSection(OdfSectionGeometry enclosing)
+    {
+        _columnGeometry = enclosing;
+        _sectionIndex = AllocateColumnSection(enclosing);
     }
 
     /// <summary>
@@ -1047,6 +1149,7 @@ public sealed partial class OdtLayoutSource
             Label = label,
             EmSize = text.Size,
             Language = text.Language,
+            WidthPerCent = text.WidthPerCent,
             Shaping = new ShapingOptions(
                 Language: text.Language, DisableKerning: !text.AutoKerning),
             BlanksAreTransparentToHeight = _blanksAreTransparentToHeight,
@@ -1206,12 +1309,18 @@ public sealed partial class OdtLayoutSource
                 || style.Highlight is { A: not 0 }
                 // And so do the two rules, for the same reason: neither changes a width, so a paragraph
                 // underlined end to end is uniform by every measurement test and would be drawn plain.
-                || style.IsUnderlined
+                || style.Underline != TextUnderline.None
                 || style.IsStruckThrough
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
                 || style.AutoKerning != paragraph.AutoKerning
+                // And a character width, for the same reason and more strongly: it multiplies every
+                // advance in the run, so a run scaled inside an unscaled paragraph that was folded away
+                // would be measured and broken at the paragraph's own width. Round 143 established on
+                // the DOCX side that the measurement fallbacks rebuild a run from the paragraph and
+                // carry no scale, so the fold is where it is lost.
+                || style.WidthPerCent != paragraph.WidthPerCent
                 // And a synthetic oblique, which is drawing-only in the same way and was the one
                 // missing from this list: an italic run whose family has no italic installed resolves to
                 // the *same* face as its upright neighbour, so nothing above can see it and the fold
@@ -1232,8 +1341,9 @@ public sealed partial class OdtLayoutSource
                 rise,
                 style.CaseMap,
                 Highlight: style.Highlight ?? default,
-                IsUnderlined: style.IsUnderlined,
-                IsStruckThrough: style.IsStruckThrough));
+                Underline: style.Underline,
+                IsStruckThrough: style.IsStruckThrough,
+                WidthPerCent: style.WidthPerCent));
         }
 
         return varies ? runs : [];

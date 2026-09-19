@@ -30,6 +30,16 @@ internal static class BiffChartRecords
     public const ushort LabelRange = 0x1020;
     public const ushort DateRange = 0x1062;
     public const ushort AxisLine = 0x1021;
+
+    /// <summary>
+    /// <c>CHTICK</c> — an axis' tick marks, its label position and their colour.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_ID_CHTICK</c>. <c>XclImpChTick::ReadChTick</c>
+    /// (<c>sc/source/filter/excel/xichart.cxx</c>:3194-3218, this tree) reads the major and minor
+    /// tick types and the label position as three bytes.
+    /// </remarks>
+    public const ushort Tick = 0x101E;
     public const ushort DefaultText = 0x1024;
     public const ushort Text = 0x1025;
     public const ushort Font = 0x1026;
@@ -40,6 +50,17 @@ internal static class BiffChartRecords
     public const ushort RadarLine = 0x103E;
     public const ushort RadarArea = 0x1040;
     public const ushort AxesSet = 0x1041;
+
+    /// <summary>
+    /// <c>CHFRAMEPOS</c> — a frame's position and size, in the units of its parent.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_ID_CHFRAMEPOS</c>, <c>sc/source/filter/inc/xlchart.hxx</c>:641. Read by
+    /// <c>XclImpChFramePos::ReadChFramePos</c> (<c>xichart.cxx</c>:441-452): two 16-bit modes and
+    /// then four 16-bit values each padded to 32 bits, whose upper halves the spec says may hold
+    /// garbage.
+    /// </remarks>
+    public const ushort FramePos = 0x104F;
 
     /// <summary>
     /// <c>CHPROPERTIES</c>, whose empty mode decides what a blank cell plots as.
@@ -116,9 +137,50 @@ internal sealed class XlsChartBuilder
     private string? _pendingText;
     private int _pendingLink = -1;
 
+    private (int X, int Y, int Width, int Height)? _outerPlotArea;
+    private bool _manualPlotArea;
+
     private int _axis = -1;
     private bool _valueGrid;
     private bool _categoryGrid;
+
+    /// <summary>
+    /// What each axis' <c>CHTICK</c> says its major tick marks are, by axes set and axis.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclChTick</c>'s own constructor defaults <c>mnMajor</c> to
+    /// <c>EXC_CHTICK_INSIDE | EXC_CHTICK_OUTSIDE</c> (<c>sc/source/filter/excel/xlchart.cxx</c>:304-313)
+    /// and <c>XclImpChAxis::Finalize</c> makes a default object for an axis that states no record
+    /// (<c>xichart.cxx</c>:3303-3304), so a BIFF axis with no <c>CHTICK</c> is crossed rather than
+    /// outward. Before this the reader stated nothing and every BIFF axis took
+    /// <see cref="ChartPlot"/>'s OOXML default of an outward tick.
+    /// </remarks>
+    private readonly ChartTickMark[,] _ticks =
+    {
+        { ChartTickMark.Cross, ChartTickMark.Cross },
+        { ChartTickMark.Cross, ChartTickMark.Cross },
+    };
+
+    /// <summary>Which line of the open <c>CHAXIS</c> the next <c>CHLINEFORMAT</c> describes.</summary>
+    /// <remarks>
+    /// A <c>CHAXIS</c> group states its axis line, its major grid and its minor grid as a
+    /// <c>CHAXISLINE</c> naming which one, each followed by the <c>CHLINEFORMAT</c> that formats
+    /// it (<c>XclImpChAxis::ReadSubRecord</c>, <c>xichart.cxx</c>:3266-3300). Without the pairing
+    /// a line format read inside an axis cannot be told from the next one.
+    /// </remarks>
+    private int _axisLineTarget = NoAxisLine;
+
+    /// <summary>The colour of each axes set's axis lines, by axes set and axis, or none.</summary>
+    private readonly BiffChartColour?[,] _axisLineColours = new BiffChartColour?[2, 2];
+
+    /// <summary>The colour of each axes set's major gridlines, by axes set and axis, or none.</summary>
+    private readonly BiffChartColour?[,] _gridColours = new BiffChartColour?[2, 2];
+
+    /// <summary>The width of each axes set's axis lines, beside <see cref="_axisLineColours"/>.</summary>
+    private readonly Length?[,] _axisLineWidths = new Length?[2, 2];
+
+    /// <summary>The width of each axes set's major gridlines, beside <see cref="_gridColours"/>.</summary>
+    private readonly Length?[,] _gridWidths = new Length?[2, 2];
 
     /// <summary>
     /// The <c>ifmt</c> each axes set's value axis states through its own <c>CHFORMAT</c>, or none.
@@ -388,10 +450,16 @@ internal sealed class XlsChartBuilder
 
             case BiffChartRecords.Axis:
                 _axis = stream.ReadUInt16();
+                _axisLineTarget = NoAxisLine;
                 break;
 
             case BiffChartRecords.AxisLine when Inside(BiffChartRecords.Axis):
-                if (stream.ReadUInt16() == MajorGridLine) MarkGrid();
+                _axisLineTarget = stream.ReadUInt16();
+                if (_axisLineTarget == MajorGridLine) MarkGrid();
+                break;
+
+            case BiffChartRecords.Tick when Inside(BiffChartRecords.Axis):
+                ReadTick(stream);
                 break;
 
             case BiffChartRecords.NumberFormat when Inside(BiffChartRecords.Axis) && _axis == AxisY:
@@ -411,6 +479,14 @@ internal sealed class XlsChartBuilder
                 _axesSet = stream.ReadUInt16();
                 break;
 
+            // The plot area, stated. Only the primary axes set's counts —
+            // XclImpChChart::Convert reads mxPrimAxesSet->GetPlotAreaFramePos() and no other
+            // (xichart.cxx:4031) — and only when both ends are placed in the parent's units.
+            case BiffChartRecords.FramePos
+                when InnermostIs(BiffChartRecords.AxesSet) && _axesSet == PrimaryAxesSet:
+                ReadPlotAreaPos(stream);
+                break;
+
             case BiffChartRecords.TypeGroup:
                 ReadTypeGroup(stream);
                 break;
@@ -428,9 +504,13 @@ internal sealed class XlsChartBuilder
                 break;
 
             case BiffChartRecords.Properties:
-                _visibleCellsOnly = (stream.ReadUInt16() & ShowVisibleOnly) != 0;
+            {
+                ushort flags = stream.ReadUInt16();
+                _visibleCellsOnly = (flags & ShowVisibleOnly) != 0;
+                _manualPlotArea = (flags & UseManualPlotArea) != 0;
                 _blanksAsZero = stream.ReadByte() == EmptyCellsAsZero;
                 break;
+            }
 
             case BiffChartRecords.Legend:
                 _hasLegend = true;
@@ -591,12 +671,28 @@ internal sealed class XlsChartBuilder
             SecondaryValueFormat = secondary
                 ? ValueFormatOf(SecondaryAxesSet, sourceFormats, formats)
                 : null,
-            ValueGrid = _valueGrid ? new ChartGrid(GridColour) : null,
-            CategoryGrid = _categoryGrid ? new ChartGrid(GridColour) : null,
+            ValueGrid = _valueGrid
+                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisY, fonts),
+                                _gridWidths[PrimaryAxesSet, AxisY] ?? Length.Zero)
+                : null,
+            CategoryGrid = _categoryGrid
+                ? new ChartGrid(GridLineColour(PrimaryAxesSet, AxisX, fonts),
+                                _gridWidths[PrimaryAxesSet, AxisX] ?? Length.Zero)
+                : null,
+            ValueAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisY, fonts),
+                                          _axisLineWidths[PrimaryAxesSet, AxisY] ?? Length.Zero),
+            CategoryAxisLine = new ChartGrid(AxisLineColour(PrimaryAxesSet, AxisX, fonts),
+                                             _axisLineWidths[PrimaryAxesSet, AxisX] ?? Length.Zero),
+            SecondaryAxisLine = new ChartGrid(AxisLineColour(SecondaryAxesSet, AxisY, fonts),
+                                              _axisLineWidths[SecondaryAxesSet, AxisY] ?? Length.Zero),
+            ValueTicks = _ticks[PrimaryAxesSet, AxisY],
+            CategoryTicks = _ticks[PrimaryAxesSet, AxisX],
+            SecondaryTicks = _ticks[SecondaryAxesSet, AxisY],
             Legend = _hasLegend ? ChartLegendPosition.Right : ChartLegendPosition.None,
             TextFamily = FamilyOf(fonts),
             Background = _background?.Resolve(fonts),
             PlotBackground = _plotBackground?.Resolve(fonts),
+            OuterPlotAreaUnits = _manualPlotArea ? _outerPlotArea : null,
         };
 
         // Each of the three is overridden only where the substream names a font for it, so a
@@ -794,6 +890,7 @@ internal sealed class XlsChartBuilder
                 numbers,
                 Fill: series.Fill?.Resolve(fonts),
                 Line: series.Line?.Resolve(fonts),
+                LineWidth: series.LineWidth,
                 Kind: KindOf(series.Group))
             {
                 AxisIndex = axis,
@@ -923,28 +1020,124 @@ internal sealed class XlsChartBuilder
     /// Reads one <c>CHLINEFORMAT</c>, which is what gives a series its outline.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>XclImpChLineFormat::ReadChLineFormat</c> (<c>xichart.cxx:453-465</c>): an <c>RGB</c>, a
-    /// pattern, a weight, flags, and the BIFF8 palette index. Only a series' line is taken —
-    /// the axis lines and the frames' borders already have their own rules and are drawn without
-    /// consulting the file, so reading them here would change what they look like without
-    /// completing them.
+    /// pattern, a weight, flags, and the BIFF8 palette index.
+    /// </para>
+    /// <para>
+    /// Two things take one: a series' outline, and — since the format follows the
+    /// <c>CHAXISLINE</c> that names which line of the axis it is — the axis line and the major
+    /// gridline. An <em>automatic</em> format states nothing and falls back to
+    /// <c>GetPalette().GetColor(EXC_COLOR_CHWINDOWTEXT)</c>, which
+    /// <c>sc/source/filter/excel/xlstyle.cxx</c>:150 resolves to black; only a stated one is
+    /// recorded here.
+    /// </para>
     /// </remarks>
     private void ReadLineFormat(BiffRecordReader stream)
     {
         uint rgb = stream.ReadUInt32();
         ushort pattern = stream.ReadUInt16();
-        stream.Skip(2);                              // the weight, in Excel's four steps
+        short weight = (short)stream.ReadUInt16();
         ushort flags = stream.ReadUInt16();
 
         int index = stream.Version == BiffVersion.Biff8 && stream.RecordLeft >= 2
             ? stream.ReadUInt16()
             : NoPaletteIndex;
 
-        if ((flags & AutomaticFormat) != 0 || pattern == LineNone) return;
+        int target = _axisLineTarget;
+        _axisLineTarget = NoAxisLine;
+
+        bool automatic = (flags & AutomaticFormat) != 0;
+        if (automatic || pattern == LineNone)
+        {
+            // An automatic series outline still has a width — a *single* one, where every piece
+            // of a chart's furniture is automatically a hairline. So the width is recorded for
+            // the one object type whose automatic weight is not zero and the colour is left to
+            // the series' own automatic colour, which is resolved elsewhere.
+            if (automatic && pattern != LineNone && InSeriesFormat() && _series.Count > 0)
+            {
+                _series[^1].LineWidth = WeightWidth(AutomaticSeriesWeight);
+            }
+
+            return;
+        }
+
+        if (target != NoAxisLine && Inside(BiffChartRecords.Axis) && Indexable())
+        {
+            if (target == AxisLineItself)
+            {
+                _axisLineColours[_axesSet, _axis] = new(rgb, index);
+                _axisLineWidths[_axesSet, _axis] = WeightWidth(weight);
+            }
+            else if (target == MajorGridLine)
+            {
+                _gridColours[_axesSet, _axis] = new(rgb, index);
+                _gridWidths[_axesSet, _axis] = WeightWidth(weight);
+            }
+
+            return;
+        }
+
         if (!InSeriesFormat() || _series.Count == 0) return;
 
         _series[^1].Line = new BiffChartColour(rgb, index);
+        _series[^1].LineWidth = WeightWidth(weight);
     }
+
+    /// <summary>
+    /// The width one of a BIFF chart line's four weights is drawn at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclChPropSetHelper::WriteLineProperties</c>
+    /// (<c>sc/source/filter/excel/xlchart.cxx:906-925</c>) turns the <c>CHLINEFORMAT</c> weight
+    /// straight into an API width in <strong>hundredths of a millimetre</strong>: it starts at
+    /// <c>nApiWidth = 0</c>, <em>"0 is the width of a hair line"</em>, and switches
+    /// <c>EXC_CHLINEFORMAT_SINGLE</c> to 35, <c>DOUBLE</c> to 70 and <c>TRIPLE</c> to 105.
+    /// <c>EXC_CHLINEFORMAT_HAIR</c> is −1 and every other value falls through to the hairline,
+    /// which is what an unrecognised weight should do.
+    /// </para>
+    /// <para>
+    /// So the whole of a BIFF chart's line weights is four numbers, and the same 35 hundredths of
+    /// a millimetre that O63 recorded as unexplained on the OOXML side.
+    /// </para>
+    /// </remarks>
+    private static Length WeightWidth(short weight) => weight switch
+    {
+        SingleWeight => Length.FromMm100(35),
+        DoubleWeight => Length.FromMm100(70),
+        TripleWeight => Length.FromMm100(105),
+        _ => Length.Zero,
+    };
+
+    /// <summary>Reads one <c>CHTICK</c> into the open axis' major tick mark.</summary>
+    /// <remarks>
+    /// The first byte is the major tick type and <c>lclGetApiTickmarks</c>
+    /// (<c>xichart.cxx</c>:3166-3172) reads it as two flags — <c>EXC_CHTICK_INSIDE</c> 0x01 and
+    /// <c>EXC_CHTICK_OUTSIDE</c> 0x02 — so 0 is no tick at all and 3 is a crossed one. Measured
+    /// at the reference: 26.2.4.2 resolves every one of
+    /// <c>EHEST-Pre-departure-checklist-Rev.-1-06-12-2016.xls</c>'s eighteen chart axes to
+    /// <c>chart:tick-marks-major-inner="false" chart:tick-marks-major-outer="false"</c> in its own
+    /// <c>--convert-to fods</c> output, and draws no tick mark anywhere on those charts.
+    /// </remarks>
+    private void ReadTick(BiffRecordReader stream)
+    {
+        if (stream.RecordLeft < 1 || !Indexable()) return;
+
+        byte major = stream.ReadBytes(1)[0];
+
+        _ticks[_axesSet, _axis] = (major & (TickInside | TickOutside)) switch
+        {
+            TickInside | TickOutside => ChartTickMark.Cross,
+            TickInside => ChartTickMark.Inner,
+            TickOutside => ChartTickMark.Outer,
+            _ => ChartTickMark.None,
+        };
+    }
+
+    /// <summary>Whether the open axes set and axis are both a primary or secondary X or Y.</summary>
+    private bool Indexable()
+        => _axesSet is PrimaryAxesSet or SecondaryAxesSet && _axis is AxisX or AxisY;
 
     /// <summary>
     /// Reads one <c>CHESCHERFORMAT</c>, whose fill supersedes any <c>CHAREAFORMAT</c> beside it.
@@ -1126,6 +1319,36 @@ internal sealed class XlsChartBuilder
     /// all of which fall through <c>ReadSubRecord</c> to <c>maType.ReadChType</c>
     /// (<c>:2714-2715</c>) — so <see cref="SetKind"/> files it against whichever group is open.
     /// </remarks>
+    /// <summary>Reads the primary axes set's <c>CHFRAMEPOS</c> — the outer plot rectangle.</summary>
+    /// <remarks>
+    /// <para>
+    /// The record is four 16-bit values each followed by two ignored bytes
+    /// (<c>XclImpChFramePos::ReadChFramePos</c>, <c>xichart.cxx</c>:441-452). Both position modes
+    /// have to be <c>EXC_CHFRAMEPOS_PARENT</c> or <c>XclImpChChart::Convert</c> (<c>:4035</c>)
+    /// leaves the plot area alone.
+    /// </para>
+    /// <para>
+    /// The units are 1/4000 of the frame and stay that way until layout, which is the only place
+    /// the frame is known; <see cref="ChartPlot.OuterPlotAreaUnits"/> carries the conversion.
+    /// </para>
+    /// </remarks>
+    private void ReadPlotAreaPos(BiffRecordReader stream)
+    {
+        ushort topLeft = stream.ReadUInt16();
+        ushort bottomRight = stream.ReadUInt16();
+        if (topLeft != FramePosParent || bottomRight != FramePosParent) return;
+
+        int x = stream.ReadInt16();
+        stream.Skip(2);
+        int y = stream.ReadInt16();
+        stream.Skip(2);
+        int width = stream.ReadInt16();
+        stream.Skip(2);
+        int height = stream.ReadInt16();
+
+        if (width > 0 && height > 0) _outerPlotArea = (x, y, width, height);
+    }
+
     private void ReadTypeGroup(BiffRecordReader stream)
     {
         stream.Skip(18);
@@ -1423,6 +1646,14 @@ internal sealed class XlsChartBuilder
         /// <summary>Its outline, from the <c>CHLINEFORMAT</c> beside that.</summary>
         public BiffChartColour? Line { get; set; }
 
+        /// <summary>That outline's width, from the same record's weight.</summary>
+        /// <remarks>
+        /// Separate from <see cref="Line"/> because an <em>automatic</em> outline states a weight
+        /// this reader can use and a colour it cannot — the automatic colour is the series index'
+        /// own, resolved far from here — so the two arrive by different routes.
+        /// </remarks>
+        public Length LineWidth { get; set; }
+
         public XlsChartRange? Values { get; set; }
 
         public XlsChartRange? Categories { get; set; }
@@ -1506,6 +1737,30 @@ internal sealed class XlsChartBuilder
     /// <summary>A line that draws nothing — <c>EXC_CHLINEFORMAT_NONE</c>.</summary>
     private const ushort LineNone = 5;
 
+    /// <summary><c>EXC_CHLINEFORMAT_SINGLE</c>, <c>xlchart.hxx:261</c>. Zero, not one.</summary>
+    private const short SingleWeight = 0;
+
+    /// <summary><c>EXC_CHLINEFORMAT_DOUBLE</c>, <c>xlchart.hxx:262</c>.</summary>
+    private const short DoubleWeight = 1;
+
+    /// <summary><c>EXC_CHLINEFORMAT_TRIPLE</c>, <c>xlchart.hxx:263</c>.</summary>
+    private const short TripleWeight = 2;
+
+    /// <summary>
+    /// The weight an automatic line takes when it belongs to a series.
+    /// </summary>
+    /// <remarks>
+    /// <c>spFmtInfos</c> (<c>sc/source/filter/excel/xlchart.cxx:420-440</c>) gives every object
+    /// type its own automatic weight, and <strong>all but four of the sixteen are
+    /// <c>EXC_CHLINEFORMAT_HAIR</c></strong> — the background, the plot frame, the walls, the
+    /// text, the legend, the axis line, the gridline, the connector, the hi-lo line and both drop
+    /// bars. The exceptions are <c>LINEARSERIES</c>, <c>FILLEDSERIES</c> and <c>ERRORBAR</c> at
+    /// <c>SINGLE</c> and <c>TRENDLINE</c> at <c>DOUBLE</c>. So an automatic width is a hairline
+    /// everywhere this reader models except a series, and only that one is applied here; a
+    /// trendline is not modelled at all.
+    /// </remarks>
+    private const short AutomaticSeriesWeight = SingleWeight;
+
     /// <summary>
     /// What a category axis states when it carries no <c>CHLABELRANGE</c> at all.
     /// </summary>
@@ -1534,7 +1789,31 @@ internal sealed class XlsChartBuilder
     /// <summary><c>EXC_CHPROPS_SHOWVISIBLEONLY</c>, <c>xlchart.hxx</c>:599.</summary>
     private const ushort ShowVisibleOnly = 0x0002;
 
+    /// <summary>
+    /// <c>EXC_CHPROPS_USEMANPLOTAREA</c>, <c>xlchart.hxx</c>:601 — "manual plot area layout in
+    /// CHFRAMEPOS record".
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChChart::IsManualPlotArea</c> (<c>xichart.cxx</c>:3973-3977) is this flag or
+    /// BIFF5-and-earlier, "there is no real automatic mode in BIFF5 charts". Only the flag is
+    /// modelled: every one of the corpus' sixteen BIFF chart substreams sets it, so the
+    /// generation arm has no witness to separate it from this one.
+    /// </remarks>
+    private const ushort UseManualPlotArea = 0x0010;
+
+    /// <summary><c>EXC_CHFRAMEPOS_PARENT</c>, <c>xlchart.hxx</c>:643.</summary>
+    private const ushort FramePosParent = 2;
+
+    /// <summary><c>EXC_CHAXISLINE_AXISLINE</c> and <c>_MAJORGRID</c>, <c>xlchart.hxx</c>.</summary>
+    private const ushort AxisLineItself = 0;
     private const ushort MajorGridLine = 1;
+
+    /// <summary>No <c>CHAXISLINE</c> is waiting for its format.</summary>
+    private const int NoAxisLine = -1;
+
+    /// <summary><c>EXC_CHTICK_INSIDE</c> and <c>EXC_CHTICK_OUTSIDE</c>, <c>xlchart.hxx</c>:403-404.</summary>
+    private const byte TickInside = 0x01;
+    private const byte TickOutside = 0x02;
 
     private const ushort BarHorizontal = 0x0001;
     private const ushort BarStacked = 0x0002;
@@ -1577,6 +1856,14 @@ internal sealed class XlsChartBuilder
     /// as a palette index; reading it is recorded in the module's TODO.
     /// </remarks>
     private static readonly Colour GridColour = Colour.Black;
+
+    /// <summary>The colour one axis' major gridline is stroked in.</summary>
+    private Colour GridLineColour(int axesSet, int axis, XlsCellFormats? fonts)
+        => _gridColours[axesSet, axis]?.Resolve(fonts) ?? GridColour;
+
+    /// <summary>The colour one axis' own line is stroked in.</summary>
+    private Colour AxisLineColour(int axesSet, int axis, XlsCellFormats? fonts)
+        => _axisLineColours[axesSet, axis]?.Resolve(fonts) ?? GridColour;
 
     /// <summary>The model's own defaults, for the fields a substream may state nothing about.</summary>
     private static readonly ChartPlot DefaultPlot = new();

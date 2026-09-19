@@ -43,6 +43,17 @@ public static class RtfReader
         RtfDocumentReader reader = new(data, diagnostics);
         ContentDocument content = reader.Read();
 
+        // A REF field draws its bookmark's text rather than the result the producer cached, and the
+        // bookmark may be anywhere in the document -- so a file that states one is read a second
+        // time with the expansions in hand. A token stream has nothing to revisit, and rewriting a
+        // paragraph after it has closed would rebase every offset counted against it.
+        if (RtfReferenceFields.Expansions(reader.Marks) is { Count: > 0 } expansions)
+        {
+            diagnostics.Clear();
+            reader = new RtfDocumentReader(data, diagnostics) { ReferenceExpansions = expansions };
+            content = reader.Read();
+        }
+
         return new RtfDocument(
             format, content, diagnostics, reader.Sections, reader.LayoutBlocks,
             reader.HeaderLayout, reader.FooterLayout, reader.Marks,
@@ -246,6 +257,8 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             rows.Add(new PageTableRow
             {
                 Cells = cells,
+                CoveredTopRule = row.CoveredTopRule,
+                CoveredBottomRule = row.CoveredBottomRule,
                 MinHeight = row.MinHeight,
                 HasExactHeight = row.HasExactHeight,
                 IsHeader = row.IsHeader,
@@ -407,6 +420,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Language = paragraph.Language,
                 Shaping = new Text.Shaping.ShapingOptions(
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
+                WidthPerCent = paragraph.WidthPerCent,
                 Fallback = fonts.Fallback,
                 Runs = runs,
                 Notes = NotesOf(fonts, paragraph.Notes),
@@ -687,12 +701,17 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 || run.Highlight is not null
                 // And so do the two rules, for the same reason: neither changes a width, so a paragraph
                 // underlined end to end is uniform by every measurement test and would be drawn plain.
-                || run.IsUnderlined
+                || run.Underline != TextUnderline.None
                 || run.IsStruckThrough
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
                 || run.AutoKerning != paragraph.AutoKerning
+                // And a character width, for the same reason and more strongly: it multiplies every
+                // advance in the run, so a scaled run folded into an unscaled paragraph is measured and
+                // broken at the paragraph's own width. See `RtfLayoutRun.MatchesFormatting`, which has
+                // to keep the run's boundary before this is ever asked.
+                || run.WidthPerCent != paragraph.WidthPerCent
                 // And a synthetic oblique, which is drawing-only in the same way and was the one
                 // missing from this list: an italic run whose family has no italic installed resolves to
                 // the *same* face as its upright neighbour, so nothing above can see it and the fold
@@ -714,8 +733,9 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 rise,
                 run.CaseMap,
                 Highlight: run.Highlight ?? default,
-                IsUnderlined: run.IsUnderlined,
-                IsStruckThrough: run.IsStruckThrough));
+                Underline: run.Underline,
+                IsStruckThrough: run.IsStruckThrough,
+                WidthPerCent: run.WidthPerCent));
         }
 
         return varies ? runs : [];

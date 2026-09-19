@@ -207,7 +207,7 @@ public sealed class OdfChartStyles
         if (data is not { Length: > 0 }) return null;
 
         return _dataStyles.TryGetValue(data, out XElement? format)
-            ? OdfNumberFormat.Parse(format)
+            ? OdfNumberFormat.Parse(format, name => _dataStyles.GetValueOrDefault(name))
             : null;
     }
 

@@ -271,7 +271,11 @@ public sealed class FootnoteComparisonTests : IDisposable
                 .Where(other => Math.Abs(other.Y - baseline) <= SameLine)
                 .Min(other => other.X);
 
-            Pen pen = new(start, Math.Round(size, 2), Math.Round(baseline - y, 2));
+            // The size at the resolution the reference's own writer prints one -- a whole tenth of a
+            // point -- so that the two sides are compared through the same channel. It is a no-op on
+            // the reference's half of this and a correction on ours, which states the size the layout
+            // actually used: an eleven point citation is 127 twips, 6.35 pt, and 26.2.4.2 prints 6.4.
+            Pen pen = new(start, PdfFontSizes.AsLibreOfficePrintsIt(size), Math.Round(baseline - y, 2));
             if (pens.Count > 0 && pens[^1] == pen) continue;
 
             pens.Add(pen);

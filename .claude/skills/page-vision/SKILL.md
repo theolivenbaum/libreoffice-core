@@ -17,6 +17,25 @@ Three separate failures this addresses, all of which produce a confident and use
 
 ## Delegate the reading. It is the only real control.
 
+> **In a Claude Code agent container there is usually no such reader, and this section is then
+> aspirational rather than actionable.** An agent here has no `Task`/subagent tool; the sibling
+> session `mcp__Claude_Code_Remote__create_session` spawns runs in its own container, cannot open
+> `/home/user/...` to see your PNG, and has no channel back. **Six rounds have now reached this
+> section, gone looking for the tool, and reported it missing** — the last of them after a brief
+> that instructed it to delegate two readings.
+>
+> **Check once, then stop looking.** If the tool is absent: say so in your write-up, treat every
+> reading as your own and contaminated, and corroborate anything you lean on with arithmetic that
+> does not depend on the reading — content-stream operators, drawing dumps, the gate columns, the
+> reference's own flat ODF. The round that found the Calc drawing clip did exactly that: the
+> composed pair gave direction and kind and could not decide between *displaced*, *rescaled* and
+> *clipped*; an authored probe's clip rectangle settled it. **A contaminated reading that names
+> candidate causes and then defers to an instrument is worth a great deal.** What it is not worth
+> is being quoted as though a blind reader had confirmed it.
+>
+> The parent session driving those rounds *does* have the tool, so everything below applies to it
+> — and delegating one page costs it very little.
+
 **Send the page to a fresh subagent and let it describe the page before you look at it
 yourself.** Everything else in this file is secondary to that.
 
@@ -29,6 +48,27 @@ costume of observation, and it will agree with whatever you already believed.
 A subagent that has never seen the document, has not read the round's brief, and is
 forbidden from grepping the repo is the only reader in the loop whose agreement means
 anything.
+
+**In this container a round cannot do it — only the parent session can.** Two rounds reported,
+independently, that a subagent has no subagent tool here: it can be given an image but it cannot
+spawn the reader. So the delegation this section calls the only real control is not available to
+the agent that most needs it. The working arrangement is therefore: **a round names the page and
+says which of its conclusions rest on its own reading; the parent spawns the reviewer.** Do not
+let a round spend time rediscovering this.
+
+**A worked example, because the payoff is easy to disbelieve.** `Thailand17` page 11 had been
+worked by three rounds, and the last of them had closed its character-size half exactly the same
+day — 548 alphanumerics at 11.99 pt against the reference's 548. A reviewer given the composed
+pair and nothing else, not told what to look for, reported in its first paragraph that our table's
+strokes were two to three times heavier than the reference's. Measured out of the PDFs afterwards:
+**1.0 and 2.25 pt against 0.40 and 0.95**, same item counts, both black. Nobody had measured
+stroke width because nobody had a reason to; the rounds were counting characters and row heights.
+
+The same reading also *declined* to see the thing it was sent for — it put the row-height
+difference at "under 2 % of the table's height, spread over nine rows" and called it
+"indistinguishable rather than a difference". That was the correct answer, and it is worth as much
+as the finding: it says the seat behind that page is real but sub-visual, which is a fact about
+how to spend the next round.
 
 ```bash
 export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
@@ -102,6 +142,34 @@ Put that beside the 2000 px budget and the useful conclusion is: **a full page a
 resolves text far smaller than any document actually uses.** Legibility is therefore almost
 never the reason to crop, and "I could not read it" almost always means the image was built
 wrongly rather than that the page needed more pixels.
+
+## A thin rule cannot be judged from a full page — and a false *presence* is the dangerous half
+
+The section above says to confirm a reviewer's "it is absent" against the PDF's own operators
+before believing it. The mirror case is worse and cost a reading here: **a reviewer will report a
+thin mark as *present* when it is not there at all**, and that closes an investigation instead of
+opening one.
+
+Measured, on the same block, by two fresh readers of the same quality:
+
+| | mark | reading |
+|---|---|---|
+| full page, side by side, **117 dpi** (the budget's maximum for this page) | a 0.51 pt underline = **0.83 px** | *"the blue underline … is present in both"* — **it is in neither half of ours** |
+| **600 dpi** crop of that block | the same underline = **4.25 px** | *"nothing in the top half and one solid underline in the bottom half … roughly 4–5 px thick"* — exactly right, with the right candidate causes named |
+
+The arithmetic is the px-per-em rule applied to a rule rather than a glyph. About **3 px** is
+needed to call a hairline present or absent, so
+
+    dpi ≈ 216 / width_in_points
+
+and a full page is capped at 117–170 dpi by the 2000 px budget. **Any rule thinner than roughly
+1.3 pt is therefore unjudgeable from a full-page pair.** Crop the block, or do not put the
+question to a reviewer at all — a fluent "present in both" is indistinguishable from a real one.
+
+Note the 117 dpi reader *did* warn that "all hairlines are one pixel at this scale" and that a
+small missing mark "would need a crop at several times this resolution". A reviewer that states
+its own resolution limit is telling you its presence claims are void; read that sentence before
+the findings.
 
 ## What cropping *is* for: ink finer than a glyph
 
@@ -213,6 +281,40 @@ character bullet in a substituted symbol font from an autonumber. The discipline
 the candidates the image cannot decide between* and then go and measure. A reading that
 promotes itself into a diagnosis is worse than no reading, because it is cited later as though
 it were one.
+
+### Readers who DISAGREE are doing the job — and a reader who bounds itself is worth more than one that does not
+
+Two results from a ten-reader run, both worth more than any single reading in it.
+
+**Disagreement is a finding, not noise.** Two readers, on two different dense spreadsheet
+pages, both reported a text-weight difference — and reported it in **opposite directions**:
+one said ours was darker, the other said the reference was. Three readers independently named
+*downsampling in the compositor* as a candidate cause. A property that two uncontaminated
+readers describe with opposite signs is almost certainly in the instrument, not in either
+renderer. Had one reader seen both pages, it would have reported a consistent story and been
+believed. Run them separately and let them contradict each other; that contradiction is the
+control paying out.
+
+**Ask every reader to state its own resolution limit, and to say which of its claims that
+voids.** Every reader in that run did, unprompted beyond the instruction, and it changed what
+was usable:
+
+- one computed ~115 dpi and voided its own "no header rule / no footer rule / no image border"
+  claims as unresolvable, *and then argued past the limit for the one claim that survived*: the
+  reference half plainly renders a one-pixel header rule, so the rasterization **can** show
+  hairlines there, so ~43 missing table-of-contents underlines are a real absence and not a
+  thin-line dropout. That reasoning is what made it the strongest finding of the ten;
+- one refused to state a direction at all on row heights, because two of its own measurements
+  contradicted each other and both sat inside its error bar. "No direction established" is a
+  better answer than a coin flip dressed as an observation;
+- one noted its corner estimates carried ±5-8 px because the shape's gradient faded toward the
+  background at exactly the corners it needed, and insisted the ratio be recomputed from the
+  operators before anyone used it. It was right to: the stored adjustment settled the geometry
+  exactly, and the eyeballed ratio would not have.
+
+So put both in the brief: **state your resolution limit, and say explicitly which of your own
+claims it voids.** A reader that marks half its observations unreliable has made the other half
+usable.
 
 ### `pdftotext -bbox` reports an ink box, not a baseline
 

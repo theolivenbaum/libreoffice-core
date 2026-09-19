@@ -316,6 +316,7 @@ internal static class DocxFrames
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),
+            ObjectKind = ObjectKindOf(placed, box),
             HorizontalOrigin = horigin,
             HorizontalAlignment = halign,
             HorizontalOffset = x,
@@ -395,6 +396,11 @@ internal static class DocxFrames
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),
+
+            // A group is an `SdrObjGroup`, which is a drawing object with no text box of its own, so
+            // `bConsidered` is true for it and the page capture never reaches it — see
+            // `FrameObjectKind`. Its members carry `TextWrap.Through` and are exempt by that instead.
+            ObjectKind = FrameObjectKind.Shape,
             HorizontalOrigin = horigin,
             HorizontalAlignment = halign,
             HorizontalOffset = x,
@@ -1616,6 +1622,37 @@ internal static class DocxFrames
         => width < Length.Zero
            || height < Length.Zero
            || (width <= Length.Zero && height <= Length.Zero);
+
+    /// <summary>
+    /// What Writer builds for this drawing, which is what decides whether the page capture reaches it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="FrameObjectKind"/> carries the C++ rule. The mapping is the one
+    /// <c>oox</c>/<c>writerfilter</c> makes: a <c>pic:pic</c> becomes an <c>SwFlyFrameFormat</c>
+    /// holding a graphic and an <c>a:graphicData</c> naming a chart or an embedded object becomes one
+    /// holding an OLE object, so both are flies; a <c>wps:wsp</c> is an <c>SdrObject</c>, and one
+    /// carrying a <c>wps:txbx</c> is half of a TextBox pair, which is what
+    /// <c>SwTextBoxHelper::isTextBox</c> answers to.
+    /// </para>
+    /// <para>
+    /// The fall-through is <see cref="FrameObjectKind.Fly"/> rather than
+    /// <see cref="FrameObjectKind.Shape"/>, because the one thing an anchored drawing can be that is
+    /// none of the three named elements is a top-level chart or OLE object — which states no
+    /// <c>a:graphicFrame</c> of its own at this level, only an <c>a:graphicData</c> with a chart URI.
+    /// The three <c>Unit_Circle</c> documents are exactly that, one chart each.
+    /// </para>
+    /// </remarks>
+    /// <param name="placed">The <c>wp:anchor</c> or <c>wp:inline</c>.</param>
+    /// <param name="box">Its <c>w:txbxContent</c>, already looked up by the caller, or null.</param>
+    private static FrameObjectKind ObjectKindOf(XElement placed, XElement? box)
+    {
+        if (box is not null) return FrameObjectKind.TextBoxShape;
+        if (Descendant(placed, "pic") is not null) return FrameObjectKind.Fly;
+        if (Descendant(placed, "wsp") is not null) return FrameObjectKind.Shape;
+
+        return FrameObjectKind.Fly;
+    }
 
     private static XElement? Child(XElement parent, string name)
         => parent.Elements().FirstOrDefault(child => child.Name.LocalName == name);

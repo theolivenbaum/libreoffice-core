@@ -3,6 +3,7 @@ using System.Text;
 using Paperless.Core.Globalization;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.WordProcessing.Ww8;
@@ -184,6 +185,17 @@ public sealed partial class Ww8DocumentReader
         public Length Tracking { get; init; }
 
         /// <summary>
+        /// The character width the paragraph mark's own formatting states, 100 for none.
+        /// </summary>
+        /// <remarks>
+        /// The mark's, for the same reason as <see cref="Tracking"/> above it: a paragraph set end to
+        /// end in one scaled style carries no runs at all — it is uniform by every test <c>RunsOf</c>
+        /// makes — so without this it would be measured at the face's nominal advances. [bin] 26.2.4.2
+        /// draws exactly that document at 0.59974 of its unscaled width.
+        /// </remarks>
+        public int WidthPerCent { get; init; } = 100;
+
+        /// <summary>
         /// The text frame this paragraph asks to be part of, empty when it asks for none.
         /// </summary>
         /// <remarks>
@@ -238,7 +250,10 @@ public sealed partial class Ww8DocumentReader
     /// </param>
     /// <param name="CaseMap">The case <c>sprmCFCaps</c> or <c>sprmCFSmallCaps</c> draws the run in.</param>
     /// <param name="Highlight">The band drawn behind the run, or null when it has none.</param>
-    /// <param name="IsUnderlined">True when <c>sprmCKul</c> asks for a rule under the run.</param>
+    /// <param name="Underline">
+    /// How <c>sprmCKul</c> rules the run — operands 3 and 43 with two lines, fifteen more with one,
+    /// and every other operand with none. See <see cref="TextUnderline"/>.
+    /// </param>
     /// <param name="IsStruckThrough">
     /// True when <c>sprmCFStrike</c> or <c>sprmCFDStrike</c> asks for one through it.
     /// </param>
@@ -256,6 +271,18 @@ public sealed partial class Ww8DocumentReader
     /// <see cref="MatchesFormatting"/> compares it and a run carrying it survives the
     /// uniform-paragraph shortcut — see <see cref="Ww8LayoutFormat.CharacterSpacing"/>.
     /// </param>
+    /// <param name="WidthPerCent">
+    /// The character width <c>sprmCCharScale</c> states, as a percentage.
+    /// <para>
+    /// The same duty as <paramref name="Tracking"/> and a sharper one, because it <em>multiplies</em>
+    /// the advance rather than adding to it — and sharper again in this reader than in the other
+    /// three, because <b>this one builds its runs one character at a time</b> and merges each into its
+    /// predecessor when <see cref="MatchesFormatting"/> finds the formatting identical. A property
+    /// missing from that comparison does not merely fail to vary the paragraph: the scaled characters
+    /// are absorbed into the unscaled run beside them and take <em>its</em> width, so the file's own
+    /// boundary is gone before <c>RunsOf</c> is ever asked.
+    /// </para>
+    /// </param>
     public readonly record struct Ww8LayoutRun(
         int Start,
         int Length,
@@ -268,11 +295,12 @@ public sealed partial class Ww8DocumentReader
         Layout.Escapement Escapement = default,
         Layout.PageCaseMap CaseMap = Layout.PageCaseMap.None,
         Colour? Highlight = null,
-        bool IsUnderlined = false,
+        TextUnderline Underline = TextUnderline.None,
         bool IsStruckThrough = false,
         bool AutoKerning = false,
         char? SymbolSlot = null,
-        Length Tracking = default)
+        Length Tracking = default,
+        int WidthPerCent = 100)
     {
         /// <summary>One past the run's last character.</summary>
         public int End => Start + Length;
@@ -666,6 +694,15 @@ public sealed partial class Ww8DocumentReader
         (Ww8FieldTypes fieldTypes, int fieldBase) = FieldTypesOf(body);
         Stack<int> openFields = new();
 
+        // Where this story's index fields cached their results, for the character styles inside them.
+        // Saved and restored around the walk, because a note or a text box is read from inside it and is
+        // a story of its own — see `_indexResults`.
+        IReadOnlyList<Ww8Range> outerIndexResults = _indexResults;
+        IReadOnlyList<Ww8Range> outerStrippedExceptions = _strippedExceptions;
+        _indexResults = IndexResultRanges(text, body.Start, fieldTypes, fieldBase);
+        _strippedExceptions =
+            StrippedExceptionRanges(IndexFieldStarts(text, body.Start, fieldTypes, fieldBase));
+
         // Where each open field's cached result began, as an offset into the paragraph being built, or
         // −1 for a field whose separator has not been seen — and for one whose result began in an
         // earlier paragraph, which `Close` resets. A field result that crosses a paragraph mark is left
@@ -946,7 +983,24 @@ public sealed partial class Ww8DocumentReader
                     // the two shaped to 18.67 pt of .notdef between "Before the box." and "After the
                     // box." — invisible while the box was misplaced far to the left, and exactly the
                     // width by which the sentence overshot once the box was put in the right place.
-                    if (CollectFrame(position, current.Length)) continue;
+                    //
+                    // An as-character frame is the exception, and it is the same exception the DOCX
+                    // walk makes. Writer inserts an anchor character for FLY_AS_CHAR and for no other
+                    // anchor (`SwFormatFlyCnt` and `GetCharOfTextAttr`,
+                    // `sw/source/core/txtnode/thints.cxx`:3633-3652, put in by
+                    // `SwDoc::SetFlyFrameAnchor`, `docfly.cxx`:337-348), and that character is what
+                    // gives two adjacent inline objects two *offsets*: an inline object's offset is a
+                    // boundary, so without one each they collapse onto the same boundary and no
+                    // measurer can put a break between them. That is the whole of
+                    // `RMI_Document_Repository_Public-Reprts_GettingOffOil.doc` page 2, whose two
+                    // full-measure pictures were drawn one over the other on a single line. It costs no
+                    // width — `ShapingControls.IsRemovedBeforeShaping` drops the whole C0 range before
+                    // the shaper sees it.
+                    if (CollectFrame(position, current.Length, out bool asCharacter))
+                    {
+                        if (asCharacter) Emit(current, positions, AnchorCharacter, position);
+                        continue;
+                    }
 
                     // The other half of the same rule, and it needs one character of lookahead.
                     // `ww8par.cxx:3602` reads a U+0001 inside a SHAPE field as the shape's own
@@ -983,6 +1037,8 @@ public sealed partial class Ww8DocumentReader
             ? LiftTextFrames(assembler.Finished())
             : assembler.Finished();
         SuppressAutoSpacing(finished);
+        _indexResults = outerIndexResults;
+        _strippedExceptions = outerStrippedExceptions;
         return finished;
 
         // One paragraph, handed to the assembler with the properties of the mark that ended it — which is
@@ -1043,8 +1099,10 @@ public sealed partial class Ww8DocumentReader
         // box's story goes through ReadLayoutBlocks exactly as a note's body does, which is what makes a
         // table inside a text box work without a second path. Returns whether a frame was made, which is
         // what decides whether the anchor character stays in the text.
-        bool CollectFrame(int position, int offset)
+        bool CollectFrame(int position, int offset, out bool asCharacter)
         {
+            asCharacter = false;
+
             if (Drawings.AnchorAt(position) is not { } anchor)
             {
                 // No FSPA, which for a U+0001 means an inline picture: its run states a
@@ -1052,8 +1110,11 @@ public sealed partial class Ww8DocumentReader
                 if (InlinePicture(position, offset) is not { } inline) return false;
 
                 _pendingFrames.Add(inline);
+                asCharacter = true;
                 return true;
             }
+
+            asCharacter = openFields.Count > 0 && openFields.Peek() == Ww8FieldTypes.Shape;
 
             MsBinary.Escher.EscherShape? shape = Drawings.Shape(anchor.ShapeId);
             _pendingFrames.Add(
@@ -1068,7 +1129,7 @@ public sealed partial class Ww8DocumentReader
                     // shape FLY_AS_CHAR instead of FLY_AT_CHAR. This is how Word writes a picture that
                     // sits in the run of text: it still gets an FSPA, and the field around it is the
                     // only thing that says the FSPA's position is not to be believed.
-                    IsSetInLine = openFields.Count > 0 && openFields.Peek() == Ww8FieldTypes.Shape,
+                    IsSetInLine = asCharacter,
                 });
 
             return true;
@@ -1360,6 +1421,7 @@ public sealed partial class Ww8DocumentReader
             ListRule = paragraph.ListNumber,
             AutoKerning = character.AutoKerning ?? false,
             Tracking = TrackingOf(character),
+            WidthPerCent = ScaleOf(character),
             Borders = layout.ToParagraphBorders(),
 
             // Resolved for a paragraph in a table too, and the assembler decides what to do with it.
@@ -1471,6 +1533,7 @@ public sealed partial class Ww8DocumentReader
                 (properties, cachedFrom, cachedTo) = _characterProperties.FindWithRange(byteOffset);
                 cached = true;
 
+                if (IsStrippedException(cachedFrom, cachedTo)) properties = default;
                 if (cachedTo <= cachedFrom) cachedTo = cachedFrom + 1;
             }
 
@@ -1517,12 +1580,18 @@ public sealed partial class Ww8DocumentReader
                     _characterProperties.FindWithRange(byteOffset);
                 cached = true;
 
+                // The CHPX an index field's begin marker cuts short is not drawn — see
+                // `_strippedExceptions`. Applied where the run is looked up rather than where it is
+                // resolved, because "which run is this" is the question the rule is about.
+                if (IsStrippedException(cachedFrom, cachedTo)) properties = default;
+
                 // A table with no entry for this offset reports an empty range, which would make every
                 // character a fresh lookup. Treating the one character as the range stops that.
                 if (cachedTo <= cachedFrom) cachedTo = cachedFrom + 1;
             }
 
-            Ww8LayoutFormat format = ApplyCharacterException(inherited, properties);
+            Ww8LayoutFormat format =
+                ApplyCharacterException(inherited, properties, IsInIndexResult(positions[index]));
             Ww8LayoutRun run = new(
                 index,
                 1,
@@ -1535,11 +1604,12 @@ public sealed partial class Ww8DocumentReader
                 format.Escapement ?? Layout.Escapement.None,
                 format.CaseMap,
                 format.Highlight,
-                format.IsUnderlined ?? false,
+                format.Underline ?? TextUnderline.None,
                 format.IsStruckThrough ?? false,
                 format.AutoKerning ?? false,
                 format.SymbolSlot,
-                TrackingOf(format));
+                TrackingOf(format),
+                ScaleOf(format));
 
             if (runs.Count > 0 && MatchesFormatting(runs[^1], run))
             {
@@ -1573,10 +1643,11 @@ public sealed partial class Ww8DocumentReader
            && a.Escapement == b.Escapement
            && a.CaseMap == b.CaseMap
            && a.Highlight == b.Highlight
-           && a.IsUnderlined == b.IsUnderlined
+           && a.Underline == b.Underline
            && a.IsStruckThrough == b.IsStruckThrough
            && a.AutoKerning == b.AutoKerning
-           && a.Tracking == b.Tracking;
+           && a.Tracking == b.Tracking
+           && a.WidthPerCent == b.WidthPerCent;
 
     /// <summary>
     /// The distance a character format puts between its characters, nought when it states none.
@@ -1590,6 +1661,20 @@ public sealed partial class Ww8DocumentReader
         => format.CharacterSpacing is { } twips and >= -1440 and <= 1440
             ? Length.FromTwips(twips)
             : Length.Zero;
+
+    /// <summary>
+    /// The character width a format states, as a percentage, 100 when it states none.
+    /// </summary>
+    /// <remarks>
+    /// The 1..600 bound is <em>the reference's own</em> and not a guard invented here:
+    /// <c>Read_ScaleWidth</c> replaces anything outside it with 100 (<c>ww8par6.cxx</c>:4991-4993),
+    /// which is what <c>WordParagraphFormats.WidthOf</c> already does for <c>w:w</c>, measured at the
+    /// boundary — 600 draws at 6.00621 and 601 at 1.00000. A zero would collapse the run to nothing.
+    /// </remarks>
+    private static int ScaleOf(Ww8LayoutFormat format)
+        => format.CharacterScale is { } percent and >= 1 and <= 600
+            ? percent
+            : TextWidthScale.Natural;
 
     /// <summary>
     /// The em size a character format states, defaulting to ten points.
@@ -1945,7 +2030,224 @@ public sealed partial class Ww8DocumentReader
     private Ww8LayoutFormat ResolveCharacterLayout(int position)
         => ApplyCharacterException(
             CharacterStyleFormat(position),
-            _characterProperties.Find(_pieces.FileOffsetOf(position)));
+            CharacterExceptionAt(position),
+            IsInIndexResult(position));
+
+    /// <summary>
+    /// The CHPX in force at a position, empty where the reference drops it.
+    /// </summary>
+    /// <remarks>See <c>_strippedExceptions</c>.</remarks>
+    private ReadOnlyMemory<byte> CharacterExceptionAt(int position)
+    {
+        (ReadOnlyMemory<byte> properties, int from, int to) =
+            _characterProperties.FindWithRange(_pieces.FileOffsetOf(position));
+        return IsStrippedException(from, to) ? default : properties;
+    }
+
+    /// <summary>
+    /// The cached results of the index fields in the story being walked, in character positions.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A document-level extent rather than a per-paragraph flag, because that is the extent the rule
+    /// has: LibreOffice's <c>m_bLoadingTOXCache</c> is set when the <c>TOC</c> field's instruction has
+    /// been read and cleared at that same field's end (<c>ww8par5.cxx</c>:3053-3055 and :596-608), and
+    /// a contents list is one field spanning every one of its entries' paragraphs. The DOCX reader
+    /// learned the same lesson the expensive way — see <c>DocxLayoutSource._indexFieldDepth</c>, whose
+    /// per-paragraph counter suppressed the style on the first entry and on nothing else.
+    /// </para>
+    /// <para>
+    /// Saved and restored around a nested story exactly as <c>_pendingNotes</c> is: a note or a text box
+    /// read from inside a contents entry is a story of its own, with its own field table, and its text
+    /// is not part of the index's result.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<Ww8Range> _indexResults = [];
+
+    /// <summary>True where a position falls inside an index field's cached result.</summary>
+    private bool IsInIndexResult(int position)
+    {
+        for (int i = 0; i < _indexResults.Count; i++)
+        {
+            Ww8Range range = _indexResults[i];
+            if (position >= range.Start && position < range.End) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The CHPX runs whose direct formatting 26.2.4.2 does not draw, in file offsets.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A character attribute still open where a <c>TOC</c> or <c>INDEX</c> field begins is lost.</strong>
+    /// <c>Read_F_Tox</c> inserts the index section and then moves the insertion point backwards into it —
+    /// <c>m_oPosAfterTOC.emplace(*m_pPaM, m_pPaM); (*m_pPaM).Move(fnMoveBackward);</c>
+    /// (<c>sw/source/filter/ww8/ww8par5.cxx</c>:3531-3533) — while every attribute of the CHPX that is
+    /// still open sits on <c>m_xCtrlStck</c>, so each closes at a position in a node that is not the one
+    /// it opened in and the range it would have covered is never set.
+    /// </para>
+    /// <para>
+    /// <strong>Measured at 26.2.4.2 rather than argued from the source</strong>, as a six-arm series over
+    /// <c>361400CSLegislation1RF01PUBLIC1.doc</c>, each arm one field of the file away from the original
+    /// and each read back through the binary's own <c>--convert-to fodt</c>. Its
+    /// <c>Table of Contents</c> heading is the CHPX at cp 141-158, fc 2189-2207, whose last character is
+    /// the paragraph mark and whose next character is the <c>TOC</c> field's <c>U+0013</c>:
+    /// </para>
+    /// <list type="table">
+    /// <item><description>as authored — <c>flt</c> 13, <c>sprmCKul</c> 1: <strong>no underline</strong>;</description></item>
+    /// <item><description><c>flt</c> 9, a type with no handler: underline drawn;</description></item>
+    /// <item><description><c>flt</c> 13, the run's end moved from fc 2207 to 2206 so it closes at the
+    /// paragraph mark instead of at the field: underline drawn;</description></item>
+    /// <item><description><c>flt</c> 13, <c>sprmCKul</c> replaced by <c>sprmCIco</c> 6: <strong>no colour</strong>
+    /// — so it is the CHPX that goes and not the underline;</description></item>
+    /// <item><description><c>flt</c> 9 with that same colour sprm: <c>fo:color="#ff0000"</c> drawn;</description></item>
+    /// <item><description><c>flt</c> 8 (<c>INDEX</c>, the other <c>Read_F_Tox</c> slot): <strong>no underline</strong>;
+    /// <c>flt</c> 3 (<c>REF</c>) and <c>flt</c> 88 (<c>HYPERLINK</c>): underline drawn.</description></item>
+    /// </list>
+    /// <para>
+    /// So the trigger is exactly the two field types that reach <c>Read_F_Tox</c> — the two
+    /// <see cref="IsIndexField"/> already names — and the boundary is the field's <em>begin</em> marker,
+    /// not its result. The paragraph style's own character half survives, because it is on the node's
+    /// format rather than on the control stack: the heading stays bold from <c>Block Text</c>.
+    /// </para>
+    /// <para>
+    /// This is a defect in the reference and it is reproduced deliberately, as <c>Read_CColl</c>'s
+    /// <c>Hyperlink</c> suppression is. <c>probes/ww8char-r135/results.md</c> §2.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<Ww8Range> _strippedExceptions = [];
+
+    /// <summary>True where a CHPX run is one whose direct formatting the reference drops.</summary>
+    private bool IsStrippedException(int from, int to)
+    {
+        for (int i = 0; i < _strippedExceptions.Count; i++)
+        {
+            Ww8Range range = _strippedExceptions[i];
+            if (range.Start == from && range.End == to) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The CHPX runs that end exactly where an index field begins.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the run's file offsets rather than on a character position, because that is what the
+    /// walk has in hand when it resolves a run and it is what makes the test one comparison.
+    /// </remarks>
+    private List<Ww8Range> StrippedExceptionRanges(List<int> indexFieldStarts)
+    {
+        List<Ww8Range> ranges = [];
+        foreach (int begin in indexFieldStarts)
+        {
+            if (begin <= 0) continue;
+
+            int beginOffset = _pieces.FileOffsetOf(begin);
+            (_, int from, int to) = _characterProperties.FindWithRange(_pieces.FileOffsetOf(begin - 1));
+            if (to > from && to == beginOffset) ranges.Add(new Ww8Range(from, to));
+        }
+
+        return ranges;
+    }
+
+    /// <summary>
+    /// The character positions of a story's <c>TOC</c> and <c>INDEX</c> field begin markers.
+    /// </summary>
+    /// <remarks>
+    /// Every one of them, nested included: each is a <c>Read_F_Tox</c> call, and it is the call that
+    /// moves the insertion point.
+    /// </remarks>
+    internal static List<int> IndexFieldStarts(
+        string text, int start, Ww8FieldTypes types, int fieldBase)
+    {
+        List<int> starts = [];
+        if (types.Count == 0) return starts;
+
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (text[index] != Special.FieldBegin) continue;
+            if (IsIndexField(types.At(start + index - fieldBase) ?? 0)) starts.Add(start + index);
+        }
+
+        return starts;
+    }
+
+    /// <summary>
+    /// Pairs a story's field markers to find where each index field's cached result lies.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same pairing the character walk does, run ahead of it because a run's formatting is resolved
+    /// from a position rather than from the walk's own state — and because the walk reaches a
+    /// paragraph's runs only once the mark that ends it has been read.
+    /// </para>
+    /// <para>
+    /// Only the outermost index field contributes a range. A <c>TOC</c> nested in a <c>TOC</c> is
+    /// <c>m_nEmbeddedTOXLevel</c>, which the reference counts up and down without ever clearing the flag
+    /// (<c>ww8par5.cxx</c>:3058-3062), and the <c>PAGEREF</c> and <c>HYPERLINK</c> fields inside each
+    /// entry open and close well within it.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The story's text, as the walk reads it.</param>
+    /// <param name="start">The character position the text begins at.</param>
+    /// <param name="types">The story's field table.</param>
+    /// <param name="fieldBase">The position that table's own numbering counts from.</param>
+    internal static List<Ww8Range> IndexResultRanges(
+        string text, int start, Ww8FieldTypes types, int fieldBase)
+    {
+        List<Ww8Range> ranges = [];
+        if (types.Count == 0) return ranges;
+
+        Stack<int> open = new();
+        int depth = 0;
+        int resultStart = -1;
+
+        for (int index = 0; index < text.Length; index++)
+        {
+            switch (text[index])
+            {
+                case Special.FieldBegin:
+                    open.Push(types.At(start + index - fieldBase) ?? 0);
+                    break;
+
+                case Special.FieldSeparator:
+                    if (open.Count > 0 && IsIndexField(open.Peek()))
+                    {
+                        if (depth == 0) resultStart = start + index + 1;
+                        depth++;
+                    }
+
+                    break;
+
+                case Special.FieldEnd:
+                {
+                    int closed = open.Count > 0 ? open.Pop() : 0;
+                    if (IsIndexField(closed) && depth > 0 && --depth == 0 && resultStart >= 0)
+                    {
+                        ranges.Add(new Ww8Range(resultStart, start + index));
+                        resultStart = -1;
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        // A field left open where the story ends still had its result drawn, so it reaches the end.
+        if (depth > 0 && resultStart >= 0) ranges.Add(new Ww8Range(resultStart, start + text.Length));
+
+        return ranges;
+    }
+
+    /// <summary>Whether a field type is one whose result LibreOffice rebuilds as an index.</summary>
+    /// <remarks>
+    /// 13 <c>TOC</c> and 8 <c>INDEX</c>, the two <c>Read_F_Tox</c> slots of <c>aWW8FieldTab</c>
+    /// (<c>ww8par5.cxx</c>:857 and :862) and the two cases <c>End_Field</c> handles together at :595.
+    /// </remarks>
+    private static bool IsIndexField(int fieldType) => fieldType is 13 or 8;
 
     /// <summary>
     /// The character sprms an <em>empty</em> paragraph is as tall as.
@@ -2000,12 +2302,16 @@ public sealed partial class Ww8DocumentReader
         Ww8LayoutFormat own = ResolveCharacterLayout(position);
         if (position <= storyStart) return own;
 
-        ReadOnlyMemory<byte> before = _characterProperties.Find(_pieces.FileOffsetOf(position - 1));
+        ReadOnlyMemory<byte> before = CharacterExceptionAt(position - 1);
         if (before.IsEmpty) return own;
 
+        bool inIndex = IsInIndexResult(position);
+        Ww8LayoutFormat fromParagraphStyle = CharacterStyleFormat(position);
         return ApplyCharacterException(
-            ApplyCharacterException(CharacterStyleFormat(position), before),
-            _characterProperties.Find(_pieces.FileOffsetOf(position)));
+            ApplyCharacterException(fromParagraphStyle, before, inIndex, fromParagraphStyle),
+            CharacterExceptionAt(position),
+            inIndex,
+            fromParagraphStyle);
     }
 
     /// <summary>
@@ -2023,14 +2329,26 @@ public sealed partial class Ww8DocumentReader
     /// </para>
     /// </remarks>
     private Ww8LayoutFormat ApplyCharacterException(
-        Ww8LayoutFormat inherited, ReadOnlyMemory<byte> exception)
+        Ww8LayoutFormat inherited,
+        ReadOnlyMemory<byte> exception,
+        bool inIndexResult = false,
+        Ww8LayoutFormat? paragraphStyle = null)
     {
         Ww8LayoutFormat format = inherited;
+        ushort? named = CharacterStyleNamedIn(exception);
+
+        // What this CHPX's toggle sprms are stated relative to: the style this same CHPX names,
+        // resolved on its own, and the paragraph style only when it names none. See
+        // <see cref="StyleToggleFormat"/>.
+        Ww8LayoutFormat toggleBase = named is { } toggleStyle
+            ? StyleToggleFormat(toggleStyle)
+            : paragraphStyle ?? inherited;
 
         // Index zero is not "no character style" — in WW8 the stylesheet is one table and istd 0 is
         // *Normal*, a paragraph style. Resolving its chain here would lay the document's default font size
         // over the paragraph style's own, so every run of an 11 pt paragraph would come out at 12.
-        if (CharacterStyleIndexIn(exception) is var styleIndex and not 0)
+        if (named is { } styleIndex and not 0
+            && !(inIndexResult && IsIndexLinkStyle(_styles, styleIndex)))
         {
             Colour? outer = format.Highlight;
 
@@ -2039,6 +2357,13 @@ public sealed partial class Ww8DocumentReader
                 format = ApplyLayoutSprms(format, fromStyle);
             }
 
+            // The style's own toggles were just resolved against the paragraph's value, and they are not
+            // stated relative to it: a character style's flags are settled when the style is read, against
+            // its *base* style alone. `toggleBase` is that resolution, so where the style states a toggle
+            // its answer replaces the one the layering produced, and where it states none the paragraph's
+            // shows through — which is what a character format that sets no weight item does.
+            format = WithStatedToggles(format, toggleBase);
+
             // Word ignores character highlighting in a *character* style, and only there — a paragraph
             // style's CHPX carries it as it carries everything else. `SwWW8ImplReader::Read_CharHighlight`
             // says so in its first two lines (`ww8par6.cxx`:4237): it returns without reading the operand
@@ -2046,7 +2371,122 @@ public sealed partial class Ww8DocumentReader
             format = format with { Highlight = outer };
         }
 
-        return ApplyLayoutSprms(format, exception);
+        return ApplyLayoutSprms(format, exception, toggleBase);
+    }
+
+    /// <summary>
+    /// The seven toggle attributes a style resolves to on its own, as LibreOffice's
+    /// <c>m_n81Flags</c> holds them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A WW8 toggle sprm's "as the style" and "against the style" operands are relative to one
+    /// style, and that style is the one the same CHPX names — never the value the paragraph resolved
+    /// to.</strong> <c>SwWW8ImplReader::Read_BoldUsw</c> (<c>sw/source/filter/ww8/ww8par6.cxx</c>:3117-3156)
+    /// starts at <c>pSI = GetStyle(m_nCurrentColl)</c>, the paragraph style, and then
+    /// <em>replaces it outright</em> when the CHPX being read carries a <c>sprmCIstd</c>:
+    /// <c>if (aCharIstd.pSprm &amp;&amp; aCharIstd.nRemainingData >= 2) pSI = GetStyle(...)</c>. Only
+    /// then does <c>if (*pData &amp; 0x80) { if (pSI->m_n81Flags &amp; nMask) bOn = !bOn; }</c> decide the
+    /// value. It asks that question whatever else happens to the style — <c>Read_CColl</c> may have
+    /// declined to apply it at all, which is the case inside an index's cached result.
+    /// </para>
+    /// <para>
+    /// <c>m_n81Flags</c> is seeded from the base style — <c>rSI.m_n81Flags = pj->m_n81Flags</c>
+    /// (<c>ww8par2.cxx</c>:3825) — and then set or cleared by each toggle sprm in the style's own CHPX,
+    /// so it is exactly this chain walked from nothing. A style that states no weight at all therefore
+    /// answers <em>not bold</em>, not "whatever the paragraph is", and that is the whole of the defect:
+    /// <c>150_5335_5a.doc</c>'s contents entries name <c>Hyperlink</c>, which states no weight, so
+    /// <c>sprmCFBold</c> 0x81 over it is bold where the same operand over the <c>TOC 3</c> paragraph
+    /// style, which is itself bold, is regular.
+    /// </para>
+    /// <para>
+    /// An index the stylesheet has no style for answers all-clear, as <c>GetStyle</c>'s null does.
+    /// </para>
+    /// <para>
+    /// Memoised: the walk asks this once per character, and a document has a handful of styles.
+    /// </para>
+    /// </remarks>
+    private Ww8LayoutFormat StyleToggleFormat(ushort styleIndex)
+    {
+        if (_styleToggleFlags.TryGetValue(styleIndex, out Ww8LayoutFormat cached)) return cached;
+
+        Ww8LayoutFormat flags = default;
+        foreach (ReadOnlyMemory<byte> fromStyle in _styles.ResolveCharacterChain(styleIndex))
+        {
+            flags = ApplyLayoutSprms(flags, fromStyle);
+        }
+
+        _styleToggleFlags[styleIndex] = flags;
+        return flags;
+    }
+
+    private readonly Dictionary<ushort, Ww8LayoutFormat> _styleToggleFlags = [];
+
+    /// <summary>
+    /// Replaces the toggle attributes of one format with a style's own, where the style states them.
+    /// </summary>
+    private static Ww8LayoutFormat WithStatedToggles(Ww8LayoutFormat format, Ww8LayoutFormat stated)
+        => format with
+        {
+            IsBold = stated.IsBold ?? format.IsBold,
+            IsItalic = stated.IsItalic ?? format.IsItalic,
+            IsSmallCapitalised = stated.IsSmallCapitalised ?? format.IsSmallCapitalised,
+            IsCapitalised = stated.IsCapitalised ?? format.IsCapitalised,
+            IsStruckThrough = stated.IsStruckThrough ?? format.IsStruckThrough,
+            IsHiddenText = stated.IsHiddenText ?? format.IsHiddenText,
+        };
+
+    /// <summary>
+    /// The character style index a grpprl names, or null when it carries no <c>sprmCIstd</c> at all.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <c>CharacterStyleIndexIn</c>'s "zero means none": <c>Read_BoldUsw</c> tests whether
+    /// the sprm is <em>present</em> and hands its operand to <c>GetStyle</c> unfiltered, so a CHPX naming
+    /// istd 0 states <em>Normal</em> as its toggle base rather than falling back to the paragraph's.
+    /// Only the style <em>layer</em> skips zero, and it skips it because <c>Read_CColl</c> ignores every
+    /// paragraph style (<c>ww8par6.cxx</c>:4145-4148).
+    /// </remarks>
+    private static ushort? CharacterStyleNamedIn(ReadOnlyMemory<byte> grpprl)
+    {
+        foreach (Ww8Sprm sprm in Ww8SprmReader.Read(grpprl))
+        {
+            if (sprm.Identifier == Ww8SprmReader.Ids.CharacterStyle) return sprm.Word;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a run's character style is the one an index's cached result must not keep.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word writes every entry of a hyperlinked table of contents as a run naming the built-in
+    /// <c>Hyperlink</c> character style, which is blue and underlined; LibreOffice rebuilds the index's
+    /// own links in the <c>Index Link</c> pool style, which is empty, so honouring the file's style
+    /// draws the whole contents list blue and underlined where the reference draws it plain.
+    /// </para>
+    /// <para>
+    /// <strong>The rule is narrower than the DOCX one and is not an OOXML rule at all.</strong>
+    /// <c>DomainMapper.cxx</c>:3037-3047 declines to insert <em>any</em> character style on a run inside
+    /// a TOC; the WW8 reader instead declines exactly one, in the sprm handler itself —
+    /// <c>SwWW8ImplReader::Read_CColl</c> (<c>sw/source/filter/ww8/ww8par6.cxx</c>:4135-4160) returns
+    /// without applying the style when <c>m_bLoadingTOXCache &amp;&amp;
+    /// m_vColl[nId].GetWWStyleId() == ww::stiHyperlink</c>, under a comment saying why: *"for the
+    /// hyperlinks inside TOX in MS Word is not same with a common hyperlink Character styles: without
+    /// underline and blue font color"*. So <c>FollowedHyperlink</c> (<c>stiHyperlinkFollowed</c>, 86) and
+    /// every style of the document's own are kept, and the run's direct sprms are kept in all cases —
+    /// only the style layer of the one built-in style goes.
+    /// </para>
+    /// <para>
+    /// Keyed on the style's <c>sti</c> and not on its name, exactly as the reference is: a document may
+    /// rename the built-in style, and may equally name a style of its own <c>Hyperlink</c>.
+    /// </para>
+    /// </remarks>
+    internal static bool IsIndexLinkStyle(Ww8StyleSheet styles, ushort styleIndex)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+        return styles.At(styleIndex) is { IsCharacterStyle: true, Sti: Ww8Style.HyperlinkStyle };
     }
 
     /// <summary>
@@ -2079,8 +2519,9 @@ public sealed partial class Ww8DocumentReader
     /// any version of Word may carry either and they are different numbers.
     /// </remarks>
     private Ww8LayoutFormat ApplyLayoutSprms(
-        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl)
-        => ApplyLayoutSprms(format, grpprl, DocumentProperties);
+        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl,
+        Ww8LayoutFormat? toggleBase = null)
+        => ApplyLayoutSprms(format, grpprl, DocumentProperties, toggleBase);
 
     /// <summary>
     /// The same walk with the document's properties passed rather than read off the reader.
@@ -2092,8 +2533,16 @@ public sealed partial class Ww8DocumentReader
     /// tested. See <c>Ww8CharacterSprmTests</c>.
     /// </remarks>
     internal static Ww8LayoutFormat ApplyLayoutSprms(
-        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl, Ww8DocumentProperties properties)
+        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl, Ww8DocumentProperties properties,
+        Ww8LayoutFormat? toggleBase = null)
     {
+        // What the seven toggle sprms' "as the style" and "against the style" operands are stated
+        // relative to. `SwWW8ImplReader::Read_BoldUsw` (`ww8par6.cxx`:3117-3156) reads it out of one
+        // style's `m_n81Flags` and never out of the value it is layering onto, so a caller that knows
+        // which style that is passes it here; with none, the accumulated value stands in, which is
+        // what a style chain's own sprms resolve against.
+        Ww8LayoutFormat toggles = toggleBase ?? format;
+
         // What `sprmPFDyaBeforeAuto` and `sprmPFDyaAfterAuto` stand for in this document. Fourteen
         // points ordinarily and five when the document switched HTML auto-spacing off, which is the
         // whole of `SwWW8ImplReader::GetParagraphAutoSpace` (`ww8par6.cxx:4609`).
@@ -2138,7 +2587,7 @@ public sealed partial class Ww8DocumentReader
                 case Ww8SprmReader.Ids.Vanish:
                     format = format with
                     {
-                        IsHiddenText = sprm.ResolveToggle(format.IsHiddenText ?? false),
+                        IsHiddenText = sprm.ResolveToggle(toggles.IsHiddenText ?? false),
                     };
                     continue;
 
@@ -2321,25 +2770,25 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.Bold:
                     format = format with
                     {
-                        IsBold = sprm.ResolveToggle(format.IsBold ?? false),
+                        IsBold = sprm.ResolveToggle(toggles.IsBold ?? false),
                     };
                     break;
                 case LayoutSprms.Italic:
                     format = format with
                     {
-                        IsItalic = sprm.ResolveToggle(format.IsItalic ?? false),
+                        IsItalic = sprm.ResolveToggle(toggles.IsItalic ?? false),
                     };
                     break;
                 case LayoutSprms.SmallCaps:
                     format = format with
                     {
-                        IsSmallCapitalised = sprm.ResolveToggle(format.IsSmallCapitalised ?? false),
+                        IsSmallCapitalised = sprm.ResolveToggle(toggles.IsSmallCapitalised ?? false),
                     };
                     break;
                 case LayoutSprms.Caps:
                     format = format with
                     {
-                        IsCapitalised = sprm.ResolveToggle(format.IsCapitalised ?? false),
+                        IsCapitalised = sprm.ResolveToggle(toggles.IsCapitalised ?? false),
                     };
                     break;
 
@@ -2349,18 +2798,18 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.Strike:
                     format = format with
                     {
-                        IsStruckThrough = sprm.ResolveToggle(format.IsStruckThrough ?? false),
+                        IsStruckThrough = sprm.ResolveToggle(toggles.IsStruckThrough ?? false),
                     };
                     break;
                 case LayoutSprms.DoubleStrike:
                     format = format with
                     {
-                        IsStruckThrough = sprm.ResolveToggle(format.IsStruckThrough ?? false),
+                        IsStruckThrough = sprm.ResolveToggle(toggles.IsStruckThrough ?? false),
                     };
                     break;
 
                 case LayoutSprms.Underline:
-                    format = format with { IsUnderlined = IsUnderlineStyle(sprm.Byte) };
+                    format = format with { Underline = UnderlineOf(sprm.Byte) };
                     break;
 
                 // Not a toggle: the operand is the threshold size, and only its being nonzero
@@ -2370,6 +2819,14 @@ public sealed partial class Ww8DocumentReader
                     break;
                 case LayoutSprms.CharacterSpacing:
                     format = format with { CharacterSpacing = sprm.SignedWord };
+                    break;
+
+                // One case covers a CHPX and a style's character UPX alike, because
+                // `ApplyCharacterException` resolves a style through this same switch. That is not a
+                // convenience: [bin] 26.2.4.2's own DOC export of a `\charscalex` stylesheet writes the
+                // sprm into the style UPX and into NO CHPX at all, and still draws 0.59974.
+                case LayoutSprms.CharacterScale:
+                    format = format with { CharacterScale = sprm.Word };
                     break;
                 case LayoutSprms.Language or LayoutSprms.Language80:
                     format = format with { LanguageId = sprm.Word };
@@ -2452,11 +2909,23 @@ public sealed partial class Ww8DocumentReader
     /// byte for non-zero matters in both directions: 5 is "hidden" and 8 is a dot style Word never
     /// writes, and neither has a case in that switch, so both fall to <c>LINESTYLE_NONE</c> and draw
     /// nothing. 255 is the cancelling value and is likewise absent. Every value that <em>is</em> listed
-    /// is drawn as one plain rule, because the page model carries no line style.
+    /// is drawn as one plain rule apart from two groups. <c>3</c> is <c>LINESTYLE_DOUBLE</c> and
+    /// <c>43</c> is <c>LINESTYLE_DOUBLEWAVE</c> (<c>ww8par6.cxx</c>:3605, :3619), and this engine
+    /// draws no wave, so both come out as a double line; <c>6</c>, <c>20</c>, <c>23</c>, <c>25</c>,
+    /// <c>26</c>, <c>27</c> and <c>55</c> are the <c>BOLD</c> weights (:3610-3618). The remaining
+    /// eight are one ordinary line whatever pattern they name.
     /// </remarks>
-    internal static bool IsUnderlineStyle(int kul) => kul
-        is 1 or 2 or 3 or 4 or 6 or 7 or 9 or 10 or 11
-        or 20 or 23 or 25 or 26 or 27 or 39 or 43 or 55;
+    internal static TextUnderline UnderlineOf(int kul) => kul switch
+    {
+        3 or 43 => TextUnderline.DoubleLine,
+
+        // The heavy weights: 6 is `LINESTYLE_BOLD` and 20, 23, 25, 26, 27 and 55 are its patterned
+        // siblings (`ww8par6.cxx`:3610-3618).
+        6 or 20 or 23 or 25 or 26 or 27 or 55 => TextUnderline.BoldLine,
+
+        1 or 2 or 4 or 7 or 9 or 10 or 11 or 39 => TextUnderline.SingleLine,
+        _ => TextUnderline.None,
+    };
 
     /// <summary>The layout sprms, from LibreOffice's <c>sprmids.hxx</c>.</summary>
     private static class LayoutSprms
@@ -2549,8 +3018,9 @@ public sealed partial class Ww8DocumentReader
         /// <c>sprmCKul</c>: the <em>style</em> of the rule drawn under the run, not a switch.
         /// </summary>
         /// <remarks>
-        /// See <see cref="IsUnderlineStyle"/> — nought, 255 and two values in between all mean no line,
-        /// so reading this byte as a boolean underlines text Word leaves plain.
+        /// See <see cref="UnderlineOf"/> — nought, 255 and two values in between all mean no line, so
+        /// reading this byte as a boolean underlines text Word leaves plain, and operands 3 and 43
+        /// mean <em>two</em> lines, so reading it as a boolean draws one where Word draws two.
         /// </remarks>
         internal const ushort Underline = 0x2A3E;
 
@@ -2572,6 +3042,18 @@ public sealed partial class Ww8DocumentReader
         /// unsigned would expand by 65 000 twips exactly where the document meant to condense.
         /// </remarks>
         internal const ushort CharacterSpacing = 0x8840;
+
+        /// <summary>
+        /// <c>sprmCCharScale</c>: the character width, as a percentage.
+        /// </summary>
+        /// <remarks>
+        /// <c>sprmChr&lt;0x52, 0, SPRA::operand_2b_2&gt;</c> (<c>sprmids.hxx</c>:335) — two bytes,
+        /// <em>unsigned</em>, unlike <see cref="CharacterSpacing"/> beside it. The negative reading
+        /// would be out of range anyway and <c>Read_ScaleWidth</c> would answer 100 for it, so the
+        /// distinction costs nothing here; it is stated because the two sprms sit together and the
+        /// signedness is the one thing that differs.
+        /// </remarks>
+        internal const ushort CharacterScale = 0x4852;
 
         internal const ushort FontSize = 0x4A43;
         internal const ushort FontIndex = 0x4A4F;

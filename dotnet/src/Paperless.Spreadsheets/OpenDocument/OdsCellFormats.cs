@@ -73,6 +73,40 @@ internal static class OdsCellFormats
         return reader.DefaultFont();
     }
 
+    /// <summary>
+    /// What each named cell style resolves to, for the conditional formats that apply them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Resolution is the same walk a cell's own style takes, parent by parent, which is the whole
+    /// point: an ODF conditional style is a cell <em>style sheet</em> and the reference reads its
+    /// font through that chain rather than out of the style's own element. See
+    /// <see cref="OdsConditionalText"/>.
+    /// </para>
+    /// <para>
+    /// A name the document does not define resolves to the <c>Default</c> cell style's font,
+    /// which is where the chain would have ended anyway.
+    /// </para>
+    /// </remarks>
+    /// <param name="styles">The document's styles.</param>
+    /// <param name="names">The style names to resolve.</param>
+    public static Dictionary<string, SheetCellFormat> ResolveNamed(
+        OdfStyles styles, IEnumerable<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+        ArgumentNullException.ThrowIfNull(names);
+
+        Reader reader = new(styles);
+        Dictionary<string, SheetCellFormat> resolved = new(StringComparer.Ordinal);
+        foreach (string name in names)
+        {
+            if (string.IsNullOrEmpty(name) || resolved.ContainsKey(name)) continue;
+            resolved[name] = reader.ResolveNamed(name);
+        }
+
+        return resolved;
+    }
+
     private sealed class Reader(OdfStyles styles)
     {
         private readonly Dictionary<string, SheetCellFormat> _resolved = new(StringComparer.Ordinal);
@@ -454,6 +488,11 @@ internal static class OdsCellFormats
                     Span(styleName, "text-line-through-style", OdfNamespaces.Style))
                     ?? cellFormat.IsStruckThrough,
                 Colour = colour ?? cellFormat.Colour,
+
+                // A span's own `fo:color` is a hard character attribute and a cell-level one is
+                // an engine default, which is what makes only the first of them beat a hyperlink
+                // field's colour. See `SheetCellFormat.ColourIsHard`.
+                ColourIsHard = colour is not null,
             };
         }
 
@@ -537,6 +576,9 @@ internal static class OdsCellFormats
                 format.DeclaredFontClass);
         }
 
+        /// <summary>One named style's own resolved format.</summary>
+        public SheetCellFormat ResolveNamed(string styleName) => Resolve(styleName);
+
         private SheetCellFormat Resolve(string styleName)
         {
             (string? family, FontFamilyClass declared) =
@@ -568,7 +610,9 @@ internal static class OdsCellFormats
                 // `###` rule — and the code is what states the format to a caller: the HTML
                 // export's `sdnum`, and the `*` fill directive, which could not fire on this path
                 // while the code was null.
-                NumberFormat = OdfNumberFormat.Parse(DataStyleElement(styleName)),
+                // A multi-section format is several elements linked by `style:map`, so the
+                // resolver is what turns the one the cell names into the whole code.
+                NumberFormat = OdfNumberFormat.Parse(DataStyleElement(styleName), DataStyleByName),
             };
         }
 
@@ -602,6 +646,14 @@ internal static class OdsCellFormats
             /// <summary>The element of the data style a cell style names, or null when it names none.</summary>
         private XElement? DataStyleElement(string styleName)
             => styles.FindDataStyle(DataStyleName(styleName))?.Element;
+
+        /// <summary>A data style by its own name, which is what a <c>style:map</c> names.</summary>
+        /// <remarks>
+        /// The styles a map points at are <c>style:volatile="true"</c> — no cell names one — so
+        /// this is the only way they are reached, and it is by the style's own name rather than
+        /// through the cell-style chain <see cref="DataStyleName"/> walks.
+        /// </remarks>
+        private XElement? DataStyleByName(string name) => styles.FindDataStyle(name)?.Element;
 
     /// <summary>The data style a cell style names, following its parent chain.</summary>
         /// <remarks>

@@ -63,13 +63,13 @@ internal sealed class XlsxPivotLabels
         ArgumentNullException.ThrowIfNull(file);
         if (sheet is null || worksheet is null) return None;
 
-        IReadOnlyList<XElement> pivots = file.LoadPivotTables(sheet);
+        IReadOnlyList<XlsxPivotTable> pivots = file.LoadPivotTables(sheet);
         if (pivots.Count == 0) return None;
 
         List<(SheetRange Area, int FirstDataRow, int LabelColumns)> layouts = [];
-        foreach (XElement pivot in pivots)
+        foreach (XlsxPivotTable pivot in pivots)
         {
-            if (Xlsx.Child(pivot, "location") is not { } location) continue;
+            if (Xlsx.Child(pivot.Root, "location") is not { } location) continue;
             if (!SheetAddress.TryParseRange(Xlsx.Attribute(location, "ref"), out SheetRange area)) continue;
             if (!area.IsValid) continue;
 

@@ -109,9 +109,21 @@ internal static class DocxVmlFrames
     /// <summary>The VML shapes and groups of a <c>w:pict</c> that are not inside another group.</summary>
     /// <remarks>
     /// <para>
-    /// <c>v:shapetype</c> is excluded deliberately — it is the reusable geometry definition Word writes
-    /// ahead of the shape that uses it, it carries no <c>style</c>, and a reader that takes the first
-    /// VML element finds no size and silently reserves nothing.
+    /// <c>v:shapetype</c> is excluded — it is the reusable geometry definition Word writes ahead of
+    /// the shape that uses it, it carries no <c>style</c>, and a reader that takes the first VML
+    /// element finds no size and silently reserves nothing.
+    /// </para>
+    /// <para>
+    /// <strong>It was not excluded, and nor was anything else.</strong> This filter read
+    /// <c>IsShape(child) is not false</c> against a predicate that answered <c>true</c> or
+    /// <c>null</c> and never <c>false</c>, so the only condition that did any work was the group
+    /// test below: every descendant of the element was offered to <see cref="One"/>, a
+    /// <c>v:imagedata</c>, a <c>v:f</c> and a <c>v:path</c> among them. Inside a <c>w:pict</c> that
+    /// cost nothing, because <see cref="One"/> wants a size and those elements stated none. Inside
+    /// a <c>w:object</c> it cost a duplicate of everything: <see cref="One"/> falls back to the
+    /// <em>object's</em> <c>w:dxaOrig</c>/<c>w:dyaOrig</c>, which is the same pair for every
+    /// descendant, and <c>DocxPictures.ReadVml</c> searches <c>DescendantsAndSelf</c>, so the
+    /// <c>v:imagedata</c> element resolved itself and the replacement picture was drawn twice.
     /// </para>
     /// <para>
     /// Members of a <c>v:group</c> are excluded here and reached through <see cref="Group"/> instead,
@@ -122,17 +134,50 @@ internal static class DocxVmlFrames
     /// </remarks>
     private static IEnumerable<XElement> TopLevel(XElement element)
         => element.Descendants().Where(child =>
-            IsShape(child) is not false
+            IsShape(child)
             && !child.Ancestors()
                 .TakeWhile(ancestor => ancestor != element)
                 .Any(ancestor => ancestor.Name == XName.Get("group", OoxmlNamespaces.Vml)));
 
-    /// <summary>True for a VML shape or group, false for anything else.</summary>
-    private static bool? IsShape(XElement child)
+    /// <summary>True for a VML element that is a shape in its own right.</summary>
+    /// <remarks>
+    /// <para>
+    /// The ten are VML's own shape elements. <c>v:shape</c>, <c>v:rect</c>, <c>v:roundrect</c>,
+    /// <c>v:oval</c> and <c>v:group</c> were always here; <c>v:line</c>, <c>v:polyline</c>,
+    /// <c>v:curve</c>, <c>v:arc</c> and <c>v:image</c> are named rather than admitted by the
+    /// accident of the predicate never answering false. Everything else answers false —
+    /// <c>v:shapetype</c>, and the property elements (<c>v:fill</c>, <c>v:stroke</c>,
+    /// <c>v:shadow</c>, <c>v:path</c>, <c>v:formulas</c>, <c>v:f</c>, <c>v:handles</c>,
+    /// <c>v:textbox</c>, <c>v:textpath</c>, <c>v:imagedata</c>) which describe a shape rather
+    /// than being one. <strong>Only that second half has any reach</strong>, and the first is
+    /// named because it is what this method claims to answer rather than because the corpus
+    /// needs it.
+    /// </para>
+    /// <para>
+    /// <strong>Widening to the ten is a measured no-op, and an earlier draft of this remark said
+    /// the opposite.</strong> It claimed 72 of the corpus's 150 top-level <c>v:line</c> state a
+    /// sized <c>style</c>, so that narrowing back to the original five would drop them. The
+    /// figure is wrong: <b>all 150 state <c>from</c>/<c>to</c> attributes and none states a
+    /// <c>style</c> width or height at all</b>, every one is <c>position:absolute</c>, and
+    /// <see cref="Floating"/> wants both from the style — so it returns null for each of them
+    /// under either predicate. <see cref="Group"/> answers the same way for the other end: all
+    /// <b>715</b> <c>v:line</c> that are a direct child of a corpus <c>v:group</c> are missing at
+    /// least one of the <c>left</c>, <c>top</c>, <c>width</c> and <c>height</c> its own guard
+    /// requires. Rendering the <b>53</b> corpus documents that hold any of the five added
+    /// elements, once with this set and once narrowed to the original five, gives <b>53
+    /// byte-identical PDFs</b>. <c>probes/vmldup-r140/census-vml.py</c>.
+    /// </para>
+    /// <para>
+    /// What that measurement also says is that <strong>none of those 150 rules is drawn by this
+    /// tree at all</strong>, because a <c>v:line</c> states its extent in <c>from</c>/<c>to</c>
+    /// and nothing here reads them. That is a gap of its own and not this method's to close.
+    /// </para>
+    /// </remarks>
+    private static bool IsShape(XElement child)
         => child.Name.Namespace == OoxmlNamespaces.Vml
-           && child.Name.LocalName is "shape" or "rect" or "roundrect" or "oval" or "group"
-            ? true
-            : null;
+           && child.Name.LocalName is
+               "shape" or "rect" or "roundrect" or "oval" or "group"
+               or "line" or "polyline" or "curve" or "arc" or "image";
 
     /// <summary>
     /// A <c>v:group</c> flattened into one frame per member, each mapped out of the group's own
@@ -249,20 +294,35 @@ internal static class DocxVmlFrames
         (double baseX, double baseY) = Pair(group.Attribute("coordorigin")?.Value) ?? (0, 0);
         if (spaceX <= 0 || spaceY <= 0) return;
 
-        foreach (XElement member in group.Elements().Where(child => IsShape(child) is not null))
+        foreach (XElement member in group.Elements().Where(IsShape))
         {
             Dictionary<string, string> box = Style(member);
-            if (Number(box.GetValueOrDefault("left", "")) is not { } left
-                || Number(box.GetValueOrDefault("top", "")) is not { } top
-                || Number(box.GetValueOrDefault("width", "")) is not { } wide
-                || Number(box.GetValueOrDefault("height", "")) is not { } tall)
+
+            // A `v:line` inside a group states its box in `from`/`to`, in the group's own
+            // coordinate units — see `RelativeLineOf` — and its `style` rectangle is not read.
+            (double Left, double Top, double Width, double Height, bool Mirrored)? segment =
+                RelativeLineOf(member);
+
+            double left, top, wide, tall;
+            if (segment is { } drawn)
+            {
+                (left, top, wide, tall) = (drawn.Left, drawn.Top, drawn.Width, drawn.Height);
+            }
+            else if (Number(box.GetValueOrDefault("left", "")) is { } statedLeft
+                     && Number(box.GetValueOrDefault("top", "")) is { } statedTop
+                     && Number(box.GetValueOrDefault("width", "")) is { } statedWide
+                     && Number(box.GetValueOrDefault("height", "")) is { } statedTall)
+            {
+                (left, top, wide, tall) = (statedLeft, statedTop, statedWide, statedTall);
+            }
+            else
             {
                 continue;
             }
 
             // A straight connector is how VML writes a rule, and a vertical one is
-            // `width:0;height:7035`. Every other shape with no area has nothing to draw.
-            bool rule = IsStraightConnector(member);
+            // `width:0;height:7035`. A `v:line` is the other shape with no area that draws.
+            bool rule = IsStraightConnector(member) || segment is not null;
             if (wide < 0 || tall < 0) continue;
             if (!rule && (wide <= 0 || tall <= 0)) continue;
 
@@ -286,6 +346,7 @@ internal static class DocxVmlFrames
                 : FramePicture.None;
 
             VmlPaint paint = PaintOf(member, box);
+            if (segment is { } sense) paint = paint with { IsLineMirrored = sense.Mirrored };
 
             frames.Add(new PageFrame
             {
@@ -321,6 +382,42 @@ internal static class DocxVmlFrames
         string[] parts = text.Split(',', StringSplitOptions.TrimEntries);
         return parts.Length == 2 && Number(parts[0]) is { } x && Number(parts[1]) is { } y
             ? (x, y)
+            : null;
+    }
+
+    /// <summary>The same pair read as lengths, for the attributes that carry units.</summary>
+    /// <param name="text">The attribute's value.</param>
+    /// <param name="measure">How one coordinate is read.</param>
+    private static (Length X, Length Y)? Pair(string? text, Func<string, Length?> measure)
+    {
+        if (text is null) return null;
+
+        string[] parts = text.Split(',', StringSplitOptions.TrimEntries);
+        return parts.Length == 2 && measure(parts[0]) is { } x && measure(parts[1]) is { } y
+            ? (x, y)
+            : null;
+    }
+
+    /// <summary>
+    /// The leading integer of a token, which is what <c>o3tl::toInt32</c> takes.
+    /// </summary>
+    /// <remarks>
+    /// A unit suffix is dropped rather than converted, so <c>100pt</c> is a hundred. That is the
+    /// rule inside a <c>v:group</c>, where the numbers are coordinate units — see
+    /// <see cref="RelativeLineOf"/>.
+    /// </remarks>
+    private static double? LeadingInteger(string text)
+    {
+        string value = text.Trim();
+        int at = 0;
+        if (at < value.Length && (value[at] is '-' or '+')) at++;
+        int start = at;
+        while (at < value.Length && char.IsAsciiDigit(value[at])) at++;
+        if (at == start) return null;
+
+        return double.TryParse(
+            value[..at], NumberStyles.Integer, CultureInfo.InvariantCulture, out double parsed)
+            ? parsed
             : null;
     }
 
@@ -415,12 +512,28 @@ internal static class DocxVmlFrames
         Func<XElement, IReadOnlyList<PageBlock>>? content,
         Func<string?, OpenTypeFace?>? typeface = null)
     {
-        if ((style.TryGetValue("width", out string? w) ? Css(w) : null) is not { } across) return null;
-        if ((style.TryGetValue("height", out string? h) ? Css(h) : null) is not { } down) return null;
+        // A `v:line` states its box in `from`/`to` and its `style` rectangle is not read at all —
+        // see `LineOf`. It is taken first for that reason: a line that also states a `style`
+        // width would otherwise be placed by the half the reference ignores.
+        VmlLine? segment = LineOf(shape);
+
+        Length across, down;
+        if (segment is { } drawn)
+        {
+            (across, down) = (drawn.Width, drawn.Height);
+        }
+        else
+        {
+            if ((style.TryGetValue("width", out string? w) ? Css(w) : null) is not { } wide) return null;
+            if ((style.TryGetValue("height", out string? h) ? Css(h) : null) is not { } tall) return null;
+            (across, down) = (wide, tall);
+        }
 
         // A straight connector states one extent as zero — `width:0;height:12.75pt` is how VML
         // writes a vertical rule — and is the one shape with no area that still draws something.
-        bool rule = IsStraightConnector(shape);
+        // A `v:line` is the other: every horizontal rule in a header is `to="468pt,15.85pt"`
+        // against a `from` at the same height, so its box is exactly as tall as nothing.
+        bool rule = IsStraightConnector(shape) || segment is not null;
         if (across < Length.Zero || down < Length.Zero) return null;
         if (!rule && (across <= Length.Zero || down <= Length.Zero)) return null;
 
@@ -429,10 +542,18 @@ internal static class DocxVmlFrames
             ? pictures.ReadVml(shape)
             : FramePicture.None;
 
-        Length x = (style.TryGetValue("margin-left", out string? ml) ? Css(ml) : null) ?? Length.Zero;
-        Length y = (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null) ?? Length.Zero;
+        Length x = segment is { } placed
+            ? placed.Left
+            : (style.TryGetValue("margin-left", out string? ml) ? Css(ml) : null) ?? Length.Zero;
+        Length y = segment is { } put
+            ? put.Top
+            : (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null) ?? Length.Zero;
 
         VmlPaint paint = PaintOf(shape, style);
+
+        // Which diagonal of the box is drawn comes from the endpoints for a `v:line` and from
+        // `style:flip` for everything else, so the two cannot share `IsMirrored`.
+        if (segment is { } sense) paint = paint with { IsLineMirrored = sense.Mirrored };
         VmlLayer layer = LayerOf(style);
         VmlFontwork warp = DocxVmlFontwork.Read(
             shape, ShapeTypeOf(shape, element), new DocSize(across, down), typeface);
@@ -591,7 +712,7 @@ internal static class DocxVmlFrames
     private static VmlPaint PaintOf(XElement shape, Dictionary<string, string> style)
     {
         bool box = shape.Name.LocalName is "rect" or "roundrect";
-        bool rule = IsStraightConnector(shape);
+        bool rule = IsStraightConnector(shape) || IsLine(shape);
         if (!box && !rule) return VmlPaint.None;
 
         XElement? fillElement = shape.Element(XName.Get("fill", OoxmlNamespaces.Vml));
@@ -628,6 +749,97 @@ internal static class DocxVmlFrames
     /// <summary>The thinnest line LibreOffice's PDF export writes, which is what it draws a VML
     /// outline stating no <c>strokeweight</c> as.</summary>
     private static readonly Length Hairline = Length.FromPoints(0.1);
+
+    /// <summary>A <c>v:line</c>, which states its extent in <c>from</c>/<c>to</c> and nowhere else.</summary>
+    private static bool IsLine(XElement shape) => shape.Name.LocalName is "line";
+
+    /// <summary>The box a <c>v:line</c>'s two endpoints describe, and which diagonal of it to draw.</summary>
+    /// <param name="Left">The box's left edge, from the shape's own origin.</param>
+    /// <param name="Top">Its top edge.</param>
+    /// <param name="Width">Its width, never negative.</param>
+    /// <param name="Height">Its height, never negative.</param>
+    /// <param name="Mirrored">True when the line runs bottom-left to top-right.</param>
+    private readonly record struct VmlLine(
+        Length Left, Length Top, Length Width, Length Height, bool Mirrored);
+
+    /// <summary>
+    /// Where a top-level <c>v:line</c> is drawn, or null when it states no usable pair.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>v:line</c>'s <c>style</c> rectangle is not read at all.</strong>
+    /// <c>LineShape::getAbsRectangle</c> (<c>oox/source/vml/vmlshape.cxx</c>) builds the shape's
+    /// rectangle entirely out of <c>from</c> and <c>to</c> —
+    /// <c>X = from.x, Y = from.y, Width = to.x − X, Height = to.y − Y</c> — so
+    /// <c>style:left</c>, <c>top</c>, <c>width</c> and <c>height</c> are all ignored where those
+    /// two attributes are present. Confirmed at 26.2.4.2 on four one-attribute probes: adding
+    /// <c>left:100pt;top:50pt</c>, <c>width:200pt;height:100pt</c>, or both, leaves the drawn
+    /// line exactly where the bare shape put it.
+    /// </para>
+    /// <para>
+    /// <strong>A bare number is a pixel at 96 dpi, not a point.</strong> The conversion is
+    /// <c>decodeMeasureToHmm(…, bDefaultAsPixel: true)</c>, and the probe stating
+    /// <c>to="96,48"</c> is drawn 72 pt across and 36 pt down. That is why this parses the pair
+    /// itself rather than through <see cref="Css"/>, whose bare number is a point and which
+    /// serves the <c>style</c> properties this round did not measure.
+    /// </para>
+    /// <para>
+    /// <strong>A line whose x decreases is not drawn, and one whose y decreases is.</strong>
+    /// `getAbsRectangle` subtracts without normalising, so a backwards line has a negative
+    /// width, and 26.2.4.2 draws nothing for it: the probes stating
+    /// <c>from="144pt,0" to="0,0"</c> and <c>from="144pt,72pt" to="0,0"</c> both come back with
+    /// no ink at all, while <c>from="0,72pt" to="144pt,0"</c> is drawn as the box's
+    /// anti-diagonal. Normalising the two points into a rectangle would draw three lines where
+    /// the reference draws two, so the asymmetry is reproduced rather than tidied away.
+    /// </para>
+    /// </remarks>
+    private static VmlLine? LineOf(XElement shape)
+    {
+        if (!IsLine(shape)) return null;
+        if (Pair(shape.Attribute("from")?.Value, VmlMeasure) is not ({ } x0, { } y0)) return null;
+        if (Pair(shape.Attribute("to")?.Value, VmlMeasure) is not ({ } x1, { } y1)) return null;
+
+        if (x1 < x0) return null;
+
+        return new VmlLine(
+            x0, y1 < y0 ? y1 : y0, x1 - x0, y1 < y0 ? y0 - y1 : y1 - y0, y1 < y0);
+    }
+
+    /// <summary>
+    /// The box a <c>v:line</c> inside a <c>v:group</c> describes, in the group's own coordinates.
+    /// </summary>
+    /// <remarks>
+    /// <c>LineShape::getRelRectangle</c> reads each token with <c>o3tl::toInt32</c>, which takes
+    /// the leading integer and <strong>drops any unit suffix</strong> — so inside a group
+    /// <c>100pt</c> is a hundred coordinate units and not a length at all. Measured at 26.2.4.2
+    /// on a 200 × 100 pt group with <c>coordsize="1000,1000"</c>: <c>to="1000,1000"</c> spans the
+    /// whole group, <c>from="250,250" to="750,250"</c> spans its middle half, and
+    /// <c>to="100pt,50pt"</c> is drawn 20 × 5 pt, which is a hundred units by fifty.
+    /// </remarks>
+    private static (double Left, double Top, double Width, double Height, bool Mirrored)? RelativeLineOf(
+        XElement shape)
+    {
+        if (!IsLine(shape)) return null;
+
+        string[] from = (shape.Attribute("from")?.Value ?? string.Empty).Split(',');
+        string[] to = (shape.Attribute("to")?.Value ?? string.Empty).Split(',');
+        if (from.Length != 2 || to.Length != 2) return null;
+        if (LeadingInteger(from[0]) is not { } x0 || LeadingInteger(from[1]) is not { } y0) return null;
+        if (LeadingInteger(to[0]) is not { } x1 || LeadingInteger(to[1]) is not { } y1) return null;
+
+        if (x1 < x0) return null;
+
+        return (x0, Math.Min(y0, y1), x1 - x0, Math.Abs(y1 - y0), y1 < y0);
+    }
+
+    /// <summary>One endpoint's coordinate, where a bare number is a pixel at 96 dpi.</summary>
+    private static Length? VmlMeasure(string text)
+    {
+        string value = text.Trim();
+        if (value.Length == 0) return null;
+
+        return Number(value) is { } pixels ? Length.FromEmu((long)Math.Round(pixels * (914400.0 / 96.0))) : Css(value);
+    }
 
     /// <summary>
     /// True for the straight connector VML writes a rule as.
@@ -835,8 +1047,46 @@ internal static class DocxVmlFrames
             return null;
         }
 
-        return Presets.TryGetValue(text, out uint preset) ? Colour.FromRgb(preset) : null;
+        if (Presets.TryGetValue(text, out uint preset)) return Colour.FromRgb(preset);
+
+        return SystemColours.TryGetValue(text, out uint system) ? Colour.FromRgb(system) : null;
     }
+
+    /// <summary>
+    /// The system colour names, which a VML colour may use instead of a preset.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ConversionHelper::decodeColor</c> (<c>oox/source/vml/vmlformatting.cxx</c>) tries
+    /// <c>Color::getVmlPresetColor</c> first and falls through to
+    /// <c>GraphicHelper::getSystemColor</c>, whose palette is a fixed table of Windows XP's
+    /// defaults rather than anything the running desktop decides
+    /// (<c>oox/source/helper/graphichelper.cxx</c>:63-100). So these are constants, and a
+    /// reader that treats them as "the desktop's theme" and declines to resolve them draws
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// <strong>Drawing nothing is what this cost.</strong> <c>JEMIT_Template.docx</c>'s footer
+    /// rule is the corpus's only <c>strokecolor="windowText"</c> — against 1015 <c>black</c>, 78
+    /// <c>red</c>, 41 <c>white</c>, 34 <c>blue</c>, 4 <c>gray</c> and 3 <c>none</c> — and an
+    /// unresolved name leaves <c>PaintOf</c> with no stroke at all, so the shape is built and
+    /// painted with nothing. That is the failure mode the preset table's own remark already
+    /// warns about: a missing name is invisible.
+    /// </para>
+    /// </remarks>
+    private static readonly Dictionary<string, uint> SystemColours =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["windowText"] = 0x000000, ["window"] = 0xFFFFFF, ["windowFrame"] = 0x000000,
+            ["btnText"] = 0x000000, ["btnFace"] = 0xECE9D8, ["btnShadow"] = 0xACA899,
+            ["btnHighlight"] = 0xFFFFFF, ["grayText"] = 0xACA899, ["highlight"] = 0x316AC5,
+            ["highlightText"] = 0xFFFFFF, ["infoBk"] = 0xFFFFE1, ["infoText"] = 0x000000,
+            ["menu"] = 0xFFFFFF, ["menuText"] = 0x000000, ["scrollBar"] = 0xD4D0C8,
+            ["captionText"] = 0xFFFFFF, ["activeBorder"] = 0xD4D0C8,
+            ["activeCaption"] = 0x0054E3, ["appWorkspace"] = 0x808080,
+            ["background"] = 0x004E98, ["inactiveBorder"] = 0xD4D0C8,
+            ["inactiveCaption"] = 0x7A96DF, ["inactiveCaptionText"] = 0xD8E4F8,
+        };
 
     /// <summary>
     /// The VML preset colour names, from <c>Color::getVmlPresetColor</c>'s table.

@@ -396,6 +396,95 @@ public sealed class OdfStyles : IOdfStyleResolver
     }
 
     /// <summary>
+    /// Resolves several attributes that make up <em>one</em> item, all from the level that states
+    /// any of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The sibling of the multi-spelling overload above and the same rule from the other side.
+    /// There, two spellings say the same thing and the level has to be decided first; here two
+    /// attributes each say <em>part</em> of one thing, and the level has to be decided first for
+    /// the same reason — an outer style that states one part must not be merged with an inner
+    /// style that states the other.
+    /// </para>
+    /// <para>
+    /// The underline is the case this exists for. <c>style:text-underline-style</c>,
+    /// <c>style:text-underline-type</c> and <c>style:text-underline-width</c> are all mapped to
+    /// <c>CharUnderline</c> with <c>MID_FLAG_MERGE_PROPERTY</c>
+    /// (<c>xmloff/source/text/txtprmap.cxx</c>:177-179) and their handlers merge into whatever the
+    /// <em>same element</em> has already contributed — <c>XMLUnderlineTypePropHdl::importXML</c>
+    /// upgrades an existing <c>SINGLE</c> to <c>DOUBLE</c> and leaves anything else alone
+    /// (<c>xmloff/source/style/undlihdl.cxx</c>:114-160). One item, so a child stating
+    /// <c>style:text-underline-style="solid"</c> alone shadows a parent's <c>double</c> outright
+    /// and is drawn with one line.
+    /// </para>
+    /// <para>
+    /// The corpus witness is exactly that shape: <c>RobertQ_Service</c>'s <c>Subtitle</c> style
+    /// states both attributes, four of its automatic children restate the style alone, and those
+    /// four are single-underlined in the reference while the children that restate neither are
+    /// double-underlined.
+    /// </para>
+    /// </remarks>
+    /// <param name="cascade">The style references from outermost to innermost.</param>
+    /// <param name="kind">Which property set to look in.</param>
+    /// <param name="attributes">The attributes of the one item, in no particular order.</param>
+    /// <returns>
+    /// One value per attribute, in the order given, all read from the same style — or all null
+    /// when no style in the cascade or the defaults states any of them.
+    /// </returns>
+    public string?[] ResolveTogether(
+        IReadOnlyList<OdfStyleReference> cascade,
+        OdfPropertyKind kind,
+        IReadOnlyList<(string Namespace, string Name)> attributes)
+    {
+        ArgumentNullException.ThrowIfNull(cascade);
+        ArgumentNullException.ThrowIfNull(attributes);
+
+        for (int i = cascade.Count - 1; i >= 0; i--)
+        {
+            OdfStyle? current = Find(cascade[i].Name, cascade[i].Family);
+            HashSet<string> visited = new(StringComparer.Ordinal);
+
+            for (int depth = 0; current is not null && depth < MaxParentChainDepth; depth++)
+            {
+                if (OwnValues(current, kind, attributes) is { } own) return own;
+                if (!visited.Add(current.Name)) break;
+                current = Find(current.ParentStyleName, cascade[i].Family);
+            }
+        }
+
+        for (int i = cascade.Count - 1; i >= 0; i--)
+        {
+            foreach (OdfStyleFamily candidate in DefaultFamilyChain(cascade[i].Family))
+            {
+                if (GetDefault(candidate) is { } defaults
+                    && OwnValues(defaults, kind, attributes) is { } own)
+                {
+                    return own;
+                }
+            }
+        }
+
+        return new string?[attributes.Count];
+    }
+
+    /// <summary>This style's own values for the attributes, or null when it states none of them.</summary>
+    private static string?[]? OwnValues(
+        OdfStyle style, OdfPropertyKind kind, IReadOnlyList<(string Namespace, string Name)> attributes)
+    {
+        string?[] values = new string?[attributes.Count];
+        bool any = false;
+
+        for (int i = 0; i < attributes.Count; i++)
+        {
+            values[i] = style.GetOwnProperty(kind, attributes[i].Namespace, attributes[i].Name);
+            any |= values[i] is not null;
+        }
+
+        return any ? values : null;
+    }
+
+    /// <summary>
     /// Resolves a property from the family defaults alone.
     /// </summary>
     /// <remarks>

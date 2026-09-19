@@ -160,9 +160,102 @@ internal static class SheetTextLayout
     /// </remarks>
     private static readonly Colour LinkColour = Colour.FromRgb(0x000080);
 
-    /// <summary>The ink one run is painted with: its own colour, the cell's, or the link's.</summary>
-    private static Colour Ink(Colour? portion, Colour fallback, bool field)
-        => field ? LinkColour : portion ?? fallback;
+    /// <summary>The ink one run is painted with: its own colour, the cell's, or the field's.</summary>
+    /// <param name="portion">The rich portion's own colour, or null for the cell's.</param>
+    /// <param name="fallback">The cell's colour.</param>
+    /// <param name="field">
+    /// What a hyperlink field paints the whole cell in, from <see cref="FieldInk"/>, or null when
+    /// the cell holds no field.
+    /// </param>
+    private static Colour Ink(Colour? portion, Colour fallback, Colour? field)
+        => field ?? portion ?? fallback;
+
+    /// <summary>
+    /// What a hyperlink cell's text is painted in — one colour for the whole cell — or null when
+    /// it holds no field.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>One colour for the whole cell, because the reference collapses the cell to one
+    /// character.</strong> Both importers replace the cell's text with a single
+    /// <c>EE_FEATURE_FIELD</c> — <c>lclInsertUrl</c> with
+    /// <c>QuickInsertField(…, ESelection::All())</c> and <c>insertHyperlink</c> after
+    /// <c>rEE.Clear()</c> — so there are no per-run colours left to paint with, and the attribute
+    /// that decides the colour is whichever <c>EE_CHAR_COLOR</c> survives at position zero. That
+    /// is the <em>first</em> portion's where the cell is rich and the cell's own where it is not.
+    /// </para>
+    /// <para>
+    /// <see cref="SheetCellFormat.ColourIsHard"/> is the test, and it is what makes the answer
+    /// differ by format on identical content: measured on 26.2.4.2, an <c>.xlsx</c> hyperlink cell
+    /// stated <c>#FF0000</c> is drawn <c>#000080</c> and the <c>.xls</c> the reference itself
+    /// converts that file to draws the same cell <c>#FF0000</c>. <c>probes/quantise-r120/</c> §5.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// The colour the cell's number format states for the subformat its value selects, or null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only a <em>numeric</em> cell asks. A subformat's colour applies to the value it formats,
+    /// and the text subformat is the fourth one; a cell holding a string takes its own colour,
+    /// which is what <see cref="NumberFormatCode.SelectForText"/> would have to be consulted for
+    /// and which no corpus document states a colour on.
+    /// </para>
+    /// <para>
+    /// Null is the answer for every format that names no colour, which is nearly all of them —
+    /// 14 of 240 corpus workbooks state one at all, and 8 hold a value that selects a coloured
+    /// subformat. See <c>probes/numfmtcolour-r139/results.md</c>.
+    /// </para>
+    /// </remarks>
+    private static Colour? NumberFormatColour(in SheetCellText cell)
+        => cell.Value is double value && cell.Format.NumberFormat is { } code
+            ? code.SelectFor(value).Colour
+            : null;
+
+    private static Colour? FieldInk(in SheetCellText cell)
+    {
+        if (!cell.IsField) return null;
+
+        SheetCellFormat at = cell.Portions is { Count: > 0 } ? cell.Portions[0].Format : cell.Format;
+
+        return at.ColourIsHard ? at.Colour : LinkColour;
+    }
+
+    /// <summary>The rule under one run: the one it states, or the one a field always takes.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The link's underline and the link's colour come out of one function call</strong>,
+    /// and this tree modelled only the colour half. <c>ScEditUtil::GetCellFieldValue</c>
+    /// (<c>sc/source/core/tool/editutil.cxx:209-244</c>) handles a
+    /// <c>text::textfield::Type::URL</c> by writing <em>both</em>
+    /// <c>*ppTextColor = …GetColorValue(LINKS)</c> and
+    /// <c>*ppFldLineStyle = FontLineStyle::LINESTYLE_SINGLE</c>; <c>ScFieldEditEngine</c> passes
+    /// both out through <c>CalcFieldValue</c> (<c>:895-906</c>), <c>ImpEditEngine::UpdateFields</c>
+    /// stores them on the field's own character attribute
+    /// (<c>editeng/source/editeng/impedit2.cxx:3229-3231</c>), and
+    /// <c>EditCharAttribField::SetFont</c> (<c>editeng/source/editeng/editattr.cxx:349-350</c>)
+    /// applies them to the font the run is drawn with. So the two travel together and neither is
+    /// conditional on what the file says — see <see cref="LinkColour"/> for the colour half.
+    /// </para>
+    /// <para>
+    /// <c>SetUnderline</c> <em>replaces</em> whatever the run's own font asked for, so a field
+    /// takes exactly one line even where the cell states two. That is why this returns the style
+    /// rather than the maximum of the two.
+    /// </para>
+    /// <para>
+    /// <strong>The reference's own flat export cannot see this and says the opposite.</strong>
+    /// <c>ScXMLExport</c> resolves a field with <c>GetCellFieldValue(*pField, &amp;rDoc, nullptr,
+    /// nullptr)</c> (<c>sc/source/filter/xml/xmlexprt.cxx:3062</c>) — both out-parameters null —
+    /// so a <c>--convert-to fods</c> of a workbook with a hyperlink cell prints
+    /// <c>style:text-underline-style="none"</c> and the cell's stated colour on the very cells
+    /// 26.2.4.2's own PDF draws navy and underlined. Measured on
+    /// <c>084_Service_invoice_Use_this_template</c>: the flat export gives cell B13
+    /// <c>underline=none, colour=#000000</c>, the PDF a <c>#000080</c> stroke 0.51 pt thick from
+    /// x 83.8 to 193.3. The resolved view is the wrong instrument for this one attribute.
+    /// </para>
+    /// </remarks>
+    private static SheetUnderline Line(SheetUnderline stated, bool field)
+        => field ? SheetUnderline.SingleLine : stated;
 
     private static readonly ConcurrentDictionary<string, ParagraphLayouter> Layouters =
         new(StringComparer.Ordinal);
@@ -199,7 +292,15 @@ internal static class SheetTextLayout
         // The cell's own colour is the fallback rather than the answer: a rich cell's portions
         // carry theirs, and a plain one's segment carries none so that the two paths emit the
         // same paint for the same cell.
-        Colour fallback = cell.Format.Colour;
+        //
+        // A number format's subformat may state one of its own — `#,##0 ;[Red](#,##0)` draws a
+        // negative red — and it beats the cell's, because Calc paints the colour the *selected
+        // subformat* named: `ScOutputData` takes it from the `ScPatternAttr`'s format through
+        // `SvNumberFormatter::GetOutputString`, which returns the subformat's colour beside the
+        // text. Which subformat that is depends on the cell's value, so this is resolved per
+        // cell here rather than per style on `SheetCellFormat`. See
+        // `NumberFormatSection.Colour`, including why `[COLOR n]` is left unresolved.
+        Colour fallback = NumberFormatColour(cell) ?? cell.Format.Colour;
 
         if (cell.Format.IsRotated)
         {
@@ -239,7 +340,7 @@ internal static class SheetTextLayout
                     // it has taken its height already and there is nothing to draw or underline.
                     if (run.Glyphs.Count == 0) continue;
 
-                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
+                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, FieldInk(cell))));
                 }
 
                 // A rich cell answers per segment, because a run may underline part of a line and
@@ -251,12 +352,15 @@ internal static class SheetTextLayout
                     foreach (SheetTextSegment segment in line.Run.Segments)
                     {
                         DecorateSegment(
-                            sink, segment, line, Ink(segment.Colour, fallback, cell.IsField));
+                            sink, context.Scale, segment, line,
+                            Ink(segment.Colour, fallback, FieldInk(cell)), cell.IsField);
                     }
                 }
                 else
                 {
-                    Decorate(sink, cell.Format, face, line, Ink(null, fallback, cell.IsField));
+                    Decorate(
+                        sink, context.Scale, cell.Format, face, line,
+                        Ink(null, fallback, FieldInk(cell)), cell.IsField);
                 }
             }
         }
@@ -409,9 +513,10 @@ internal static class SheetTextLayout
     /// </para>
     /// </remarks>
     private static void Decorate(
-        IDrawingSink sink, SheetCellFormat format, SheetFace face, PlacedLine line, Colour colour)
-        => Rules(sink, format.Underline, format.IsStruckThrough, face, line.Run.Size,
-                 line.X, line.Run.Width, line.Baseline, colour);
+        IDrawingSink sink, double scale, SheetCellFormat format, SheetFace face, PlacedLine line,
+        Colour colour, bool field)
+        => Rules(sink, scale, Line(format.Underline, field), format.IsStruckThrough, face,
+                 line.Run.Size, line.X, line.Run.Width, line.Baseline, colour);
 
     /// <summary>
     /// The rules one segment of a rich cell asks for, under that segment alone.
@@ -423,12 +528,14 @@ internal static class SheetTextLayout
     /// to be the reason this was done per line.
     /// </remarks>
     private static void DecorateSegment(
-        IDrawingSink sink, SheetTextSegment segment, PlacedLine line, Colour colour)
-        => Rules(sink, segment.Underline, segment.StruckThrough, segment.Face, segment.Size,
-                 line.X + segment.Offset, segment.Width, line.Baseline, colour);
+        IDrawingSink sink, double scale, SheetTextSegment segment, PlacedLine line, Colour colour,
+        bool field)
+        => Rules(sink, scale, Line(segment.Underline, field), segment.StruckThrough, segment.Face,
+                 segment.Size, line.X + segment.Offset, segment.Width, line.Baseline, colour);
 
     private static void Rules(
         IDrawingSink sink,
+        double scale,
         SheetUnderline underline,
         bool struckThrough,
         SheetFace face,
@@ -441,27 +548,39 @@ internal static class SheetTextLayout
         if (underline == SheetUnderline.None && !struckThrough) return;
         if (size <= Length.Zero || width <= Length.Zero) return;
 
-        int unitsPerEm = face.Face.UnitsPerEm > 0 ? face.Face.UnitsPerEm : 1000;
-        FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(face.Face, face.Metrics);
+        // Thickness AND offset, both from the device -- see `LineSpacing.ResolveRuleWidths`, which
+        // answers the whole hundredth of a millimetre the reference's own 720 dpi device quantises
+        // each of them to (O64 for the thickness, round 123 for the offset).
+        //
+        // AND the print zoom goes into the grid rather than being left to multiply the answer, O70:
+        // Calc paints through a map mode carrying the zoom, so the whole hundredth of a millimetre
+        // is a hundredth of the UNSCALED page. `size` is already the drawn size and stays that way
+        // -- the device pixel count is taken from it and the scale is already inside it. See
+        // `MetricGrid.PageScale`.
+        LineSpacing.RuleWidths widths = LineSpacing.ResolveRuleWidths(
+            face.Face, face.Metrics, size, MetricGrid.TextLine.Scaled(scale));
 
-        Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
-
-        if (underline != SheetUnderline.None)
+        if (underline == SheetUnderline.DoubleLine)
         {
-            Length thickness = Scaled(metrics.UnderlineThickness);
-
-            // The font records the underline's offset as negative below the baseline.
-            Length top = baseline - Scaled(metrics.UnderlinePosition);
-            Rule(sink, x, top, width, thickness, colour);
-
-            if (underline == SheetUnderline.DoubleLine)
-                Rule(sink, x, top + (thickness * 2), width, thickness, colour);
+            // Both lines AND both offsets come off the device. Round 120 gave this the right
+            // thickness and kept the single underline's offset for the first line and twice the
+            // thickness below it for the second, which is wrong in both places: the pair straddles
+            // where a single rule would sit, its separation is floored on the device rather than
+            // scaled with the em, and the writer adds a further whole thickness to the second.
+            // See `LineSpacing.RuleWidths.DoubleUnderlineSecond`.
+            Rule(sink, x, baseline + widths.DoubleUnderlineFirst, width, widths.DoubleUnderline,
+                 colour);
+            Rule(sink, x, baseline + widths.DoubleUnderlineSecond, width, widths.DoubleUnderline,
+                 colour);
+        }
+        else if (underline != SheetUnderline.None)
+        {
+            Rule(sink, x, baseline + widths.UnderlineOffset, width, widths.Underline, colour);
         }
 
         if (struckThrough)
         {
-            Length thickness = Scaled(metrics.StrikeoutThickness);
-            Rule(sink, x, baseline - Scaled(metrics.StrikeoutPosition), width, thickness, colour);
+            Rule(sink, x, baseline + widths.StrikeoutOffset, width, widths.Strikeout, colour);
         }
     }
 
@@ -998,6 +1117,32 @@ internal static class SheetTextLayout
     /// so <see cref="SheetOptimalRowHeights"/> has to know which portions sit on which line. The
     /// breaking itself is the same run-aware path <see cref="Wrap"/> takes, so a row is measured
     /// against exactly the lines the cell will be drawn with.
+    /// <para>
+    /// <strong>With one addition the layouter cannot make: a trailing hard break leaves an empty
+    /// paragraph, and it is a line of the row's height.</strong> The layouter ends a paragraph on
+    /// its break and never opens the empty one after it — <c>"a\n"</c> lays out as one line where
+    /// <see cref="LineCount"/>, which splits on the break before it wraps anything, answers two.
+    /// The two have to give the same number, because a plain cell and a rich one holding the same
+    /// characters are the same row in Calc: an <c>EditTextObject</c> holds one paragraph per
+    /// <c>text:p</c>, the trailing empty one included, and <c>ScColumn::GetNeededSize</c>'s height
+    /// branch is <c>pEngine-&gt;GetTextHeight()</c> over all of them (<c>column2.cxx</c>:571-577).
+    /// It costs no glyph — an empty paragraph draws nothing — which is why the count shows up in
+    /// the height alone and <see cref="Wrap"/> is left as it is.
+    /// </para>
+    /// <para>
+    /// Measured at 26.2.4.2 rather than argued. Row 5 of <c>Reader Instructions</c> in
+    /// <c>TK-Syllabus-Comparison-Document-v2.ods</c> holds eighteen paragraphs of which the
+    /// eighteenth is empty, and the reference's own <c>--convert-to fods</c> gives that row
+    /// <strong>4864.752 twips</strong>; deleting that one paragraph and converting back gives
+    /// <strong>4597.2</strong>, one line less, which is what this tree computed without the rule.
+    /// See <c>dotnet/probes/sheet-wrap-r99</c>. Its reach is measured rather than censused:
+    /// 1261 cells in 63 of the 550 <c>.ods</c> and <c>.xlsx</c> sheets documents state a trailing
+    /// empty paragraph and <strong>10 of the 63 change a rendering</strong> — the other 53
+    /// documents hold it only in cells that are in one format, where the rule was already right,
+    /// or that are not the tallest in their row.
+    /// Sixty-one non-candidate renderings are byte-identical either way, and no gate column moves
+    /// on any of the ten.
+    /// </para>
     /// </remarks>
     /// <param name="text">The cell's text.</param>
     /// <param name="portions">The stretches it is split into.</param>
@@ -1026,9 +1171,14 @@ internal static class SheetTextLayout
         LaidOutParagraph laid = layouter.Layout(
             Measured(text, portions, scale: 1.0, device), textAreaWidth: available);
 
-        List<(int Start, int End)> ranges = new(laid.Lines.Count);
+        List<(int Start, int End)> ranges = new(laid.Lines.Count + 1);
         foreach (LineBox box in laid.Lines)
             ranges.Add((box.Line.Start, Math.Min(box.Line.End, text.Length)));
+
+        // The empty paragraph a trailing break leaves. Empty, so no portion covers it and
+        // `RichPixels` measures it in the cell's own face — which is what EditEngine gives a
+        // paragraph holding no portion of its own.
+        if (IsHardBreak(text[^1])) ranges.Add((text.Length, text.Length));
 
         return ranges;
     }
@@ -1873,7 +2023,7 @@ internal static class SheetTextLayout
                 {
                     if (run.Glyphs.Count == 0) continue;
 
-                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
+                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, FieldInk(cell))));
                 }
 
                 down += line.Run.LineHeight;
@@ -1963,7 +2113,7 @@ internal static class SheetTextLayout
 
             Length x = cell.Box.X + ((cell.Box.Width - glyph.Width) / 2);
             foreach ((GlyphRun run, Colour? colour) in glyph.At(new DocPoint(x, y)))
-                sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
+                sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, FieldInk(cell))));
             y += pitch;
         }
     }

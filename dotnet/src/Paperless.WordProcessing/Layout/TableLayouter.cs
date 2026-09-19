@@ -81,7 +81,9 @@ public static class TableLayouter
         // sum pass two makes into `tops`, kept here because a cell that has to flow round a frame it
         // anchors needs to know where on the page it is *while* it is being measured. Only the rows above
         // it are needed and they are already settled, so nothing is being read before it is written.
-        Length measuredRowTop = rows > 0 ? BorderHeight(table.Rows[0]) / 2 : Length.Zero;
+        // The table's frame top IS the first boundary: the first row's band hangs downwards from it
+        // rather than the first grid line sitting half a border below it. See `TopBand`.
+        Length measuredRowTop = Length.Zero;
 
         for (int row = 0; row < rows; row++)
         {
@@ -113,7 +115,7 @@ public static class TableLayouter
                         anchored: anchored?.Below(new DocPoint(
                             table.LeftWithin(available ?? table.Width)
                             + lefts[cell.Column] + cell.Padding.Left,
-                            measuredRowTop + (BorderHeight(table.Rows[row]) / 2)
+                            measuredRowTop + TopBand(row > 0 ? table.Rows[row - 1] : null, table.Rows[row])
                             + cell.Padding.Top)))
                     : null;
 
@@ -200,10 +202,18 @@ public static class TableLayouter
             Length bottomInset =
                 table.MinHeightIncludesInsets ? BottomInset(table.Rows[row]) : Length.Zero;
 
+            // The floor and the content do not carry the same border term, and that is why round 131
+            // could fit no linear function of the two facing widths: a `w:trHeight` floor is raised by the
+            // row's OWN STATED top rule while the content is pushed down by the RESOLVED band drawn at that
+            // boundary. `probes/tablerow-r146/results.md` §3.4 measures the two arms that separate them.
+            Length band = TopBand(row > 0 ? table.Rows[row - 1] : null, table.Rows[row]);
+            Length statedRule = table.MinHeightIncludesInsets ? OwnTopRule(table.Rows[row]) : Length.Zero;
+
             heights[row] = table.Rows[row].HasExactHeight
                 ? Length.Max(Length.Zero, table.Rows[row].MinHeight + bottomInset)
-                : Length.Max(heights[row], table.Rows[row].MinHeight + topInset + bottomInset)
-                  + BorderHeight(table.Rows[row]);
+                : Length.Max(
+                    heights[row] + band,
+                    table.Rows[row].MinHeight + statedRule + topInset + bottomInset);
 
             measuredRowTop += heights[row];
         }
@@ -229,10 +239,10 @@ public static class TableLayouter
         // Pass two: the heights are settled, so every cell has a rectangle.
         List<Length> tops = [];
 
-        // The first grid line sits half a border *below* the table's top edge, because a grid line runs through
-        // the centre of its border and the row heights already include half of it at each end. Measured: a
-        // table whose top edge is at 70.2 pt draws its first border at 70.45 with a 0.5 pt border.
-        Length top = rows > 0 ? BorderHeight(table.Rows[0]) / 2 : Length.Zero;
+        // The table's top edge is the first boundary itself, and the first row's band hangs downwards from
+        // it into the row -- which is why the row paid for that band above. [bin] `align.docx`'s outer top
+        // rule is a band 82.401..83.401 on a table whose frame top is 82.401.
+        Length top = Length.Zero;
 
         for (int row = 0; row < rows; row++)
         {
@@ -251,8 +261,10 @@ public static class TableLayouter
                 cell.Width,
                 height);
 
-            Length bandAbove = BorderHeight(table.Rows[cell.Row]) / 2;
-            Length bandBelow = BorderHeight(table.Rows[cell.LastRow]) / 2;
+            // The whole band is inside this row, at its top; the row below pays its own, and the table's
+            // outer bottom band hangs below the last row rather than inside it. So nothing is charged here.
+            Length bandAbove = TopBand(cell.Row > 0 ? table.Rows[cell.Row - 1] : null, table.Rows[cell.Row]);
+            Length bandBelow = Length.Zero;
 
             if (cell.Cell.IsTurned)
             {
@@ -280,19 +292,11 @@ public static class TableLayouter
             });
         }
 
-        // The two half grid lines the rectangles do not cover: the one above the first row, which is why
-        // `tops` starts half a border down, and the one below the last. Writer charges a cell for its
-        // whole border and neighbouring rows share the line between them, so a table of n rows is n+1
-        // borders tall rather than n — measured on a three-row fixture at 0, 1 and 2 pt, where each of the
-        // three cases came out exactly one border taller than this engine made it. Charged to the last row
-        // rather than split between the first and the last, because the paginator reconstructs a
-        // continuation page's offset by adding up the heights it has already placed, and an allowance in
-        // `heights[0]` that no rectangle carries would move every later row up by half a border.
-        if (rows > 0)
-        {
-            heights[rows - 1] +=
-                BorderHeight(table.Rows[0]) / 2 + BorderHeight(table.Rows[rows - 1]) / 2;
-        }
+        // The one band no rectangle covers: the table's outer bottom rule, which hangs below the last row
+        // because there is no row beneath it to pay for it. The outer top rule needs no counterpart — it is
+        // the first row's own `TopBand` and is already inside `heights[0]`. Charged after the rectangles are
+        // built, so the last row's cells keep their own extent and only the table's total height grows.
+        if (rows > 0) heights[rows - 1] += BottomBand(table.Rows[rows - 1]);
 
         return (placed, heights);
     }
@@ -353,13 +357,20 @@ public static class TableLayouter
     /// The document's <c>PARA_SPACE_MAX_AT_PAGES</c> — <see cref="UpperSpaceAbove"/>, which is the only
     /// thing it reaches here. A document without it gives a follow part no upper space at all.
     /// </param>
+    /// <param name="bandAbove">
+    /// The resolved band at the boundary above this row, which the part occupies as well as its own
+    /// content — <see cref="BoundaryBand"/>, because this method is handed one row and cannot resolve it.
+    /// Nought is safe and is what a caller measuring a borderless table passes; it costs a part one
+    /// line's worth of room only where the boundary is really ruled.
+    /// </param>
     public static RowSlice? SliceRow(
         PageTableRow row,
         IReadOnlyList<PlacedTableCell> cells,
         Length drawn,
         Length room,
         bool acrossRowSpans = false,
-        bool keepsSpacingAtPages = true)
+        bool keepsSpacingAtPages = true,
+        Length bandAbove = default)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(cells);
@@ -385,7 +396,31 @@ public static class TableLayouter
             rowTop = Length.Min(rowTop, cell.Area.Y);
         }
 
-        Length border = BorderHeight(row);
+        // What a PART of this row pays for its rules, and at a cut that is the row's own BOTTOM rule
+        // rather than its top.
+        //
+        // [src] `lcl_IsFirstRowInFollowTableWithoutRepeatedHeadlines`
+        // (`sw/source/core/layout/paintfrm.cxx`:2815-2833, used at :3089): the first row of a follow
+        // table draws its **top** line from the cell's **bottom** border style. The master's own foot
+        // draws that same bottom rule, so both halves of a split row are ruled by it and each pays for
+        // it once. [bin] `probes/tablerow-r146/results.md` §4 on `split.docx`, whose cells state
+        // `w:top nil` and a 1 pt `w:bottom`: 26.2.4.2 rules the foot of page 1 at 759.201..760.201 and
+        // the head of page 2 at 70.901..71.901, both 1 pt, both hanging downwards from the frame edge,
+        // and the follow's first line starts at 71.901 -- so the follow really is charged the whole of
+        // it. Charging the row's own TOP here instead, which is what this did until round 152, charges
+        // nothing at all for a table ruled the way this one is, and one line too many then fits above
+        // the cut.
+        Length border = BottomBand(row);
+
+        // What the part pays at its HEAD, and the two parts of a split row do not pay the same thing.
+        // The row's FIRST part begins on the row's own boundary, so it occupies the band there --
+        // `bandAbove`, which the caller resolves because this method is handed one row. A FOLLOW part
+        // begins at the top of a page with no boundary above it, and what is ruled at its head is the
+        // CUT's rule: [src] `lcl_IsFirstRowInFollowTableWithoutRepeatedHeadlines` has the first row of a
+        // follow table draw its top line from the cell's BOTTOM border style. The two coincide on
+        // `split.docx`, whose every boundary is 1 pt, which is why charging `bandAbove` to both looked
+        // right there and cost `review-welsh-...-mandelson.docx` a page it should not have.
+        Length head = drawn > Length.Zero ? border : bandAbove;
         Length above = rowTop + drawn;
 
         // The spans a cut may not fall inside: a table nested in a cell is placed as one rectangle and
@@ -436,7 +471,8 @@ public static class TableLayouter
         {
             if (chosen is { } already && already == candidate) continue;
 
-            Length needed = HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
+            Length needed = head
+                + HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
             if (needed > room) break;
 
             chosen = candidate;
@@ -482,7 +518,8 @@ public static class TableLayouter
             {
                 if (chosen is { } already && already == candidate) continue;
 
-                Length needed = HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
+                Length needed = head
+                    + HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
                 if (needed > room) break;
 
                 chosen = candidate;
@@ -523,8 +560,21 @@ public static class TableLayouter
         // A part holding every remaining line is not a split at all; the caller places the whole row.
         if (complete && drawn <= Length.Zero) return null;
 
+        // Only a part the page CUTS pays a band at its foot. A part that finishes the row pays none:
+        // the boundary below it is an ordinary one and the row after it pays for it as `TopBand`, so
+        // charging it here as well rules that boundary twice, one band apart. [bin] on `split.docx`
+        // that drew bands at 118.050 and 119.050 where 26.2.4.2 draws one at 118.101, and pushed every
+        // later row down with it.
+        if (complete) height -= border;
+
+        // The cells are built to the part's DRAWN extent and the part reports the whole of it, which
+        // differ by the band at the cut: that band hangs below the last line rather than inside the
+        // rectangle, exactly as the table's own outer bottom band does in `LayOut` -- charged after the
+        // rectangles are built so the caller advances past it while no cell claims it. Building the
+        // rectangles to the full height instead draws the cut's rule one band too low and starts the
+        // follow part one band too far down, which is the +0.999 this round measured before fixing it.
         return new RowSlice(
-            Sliced(cells, rowTop, above, cut, height, keepsSpacingAtPages),
+            Sliced(cells, rowTop, above, cut, complete ? height : height - border, keepsSpacingAtPages),
             height, cut - rowTop, complete);
     }
 
@@ -1094,26 +1144,110 @@ public static class TableLayouter
     }
 
     /// <summary>
-    /// How much of a row's height its borders take: half of its thickest top and half of its thickest bottom.
+    /// The band of border a row pays for: the whole of the resolved rule on the boundary <em>above</em> it.
     /// </summary>
     /// <remarks>
-    /// The thickest rather than each cell's own, because the row has one height and one grid line above it: two
-    /// cells disagreeing about their top border share the thicker one's line, which is what the drawing does too
-    /// when it consolidates. Measured: a row 18.95 pt tall without borders is 19.4 pt with 0.5 pt ones, and half
-    /// of each of two borders is 0.5 pt — right to within a twip of rounding.
+    /// <para>
+    /// <strong>The row below a boundary pays the whole of its band and the row above pays nothing</strong>, and
+    /// the band's top edge sits on the boundary and hangs downwards into that row. [src]
+    /// <c>SwTabFramePainter::Insert</c> (<c>sw/source/core/layout/paintfrm.cxx</c>:3061-3064) sets
+    /// <c>RefMode::Begin</c> on a cell's two horizontal borders — <em>"drawn below the reference points"</em>,
+    /// <c>mfRefModeOffset = +width/2</c> — and <c>Centered</c> on its two vertical ones, and
+    /// <c>SwRowFrame::Format</c> (<c>tabfrm.cxx</c>:5338-5430) takes
+    /// <c>nTopPrtMargin = max(lcl_GetTopSpace, pPreviousRow-&gt;GetBottomLineSize() + nTopLineDist)</c> while
+    /// charging the bottom <em>padding</em> and never the bottom line.
+    /// </para>
+    /// <para>
+    /// [bin] Measured on <c>probes/tablerow-r146/fixtures/height.docx</c>, whose arms vary only the pair of
+    /// attributes facing across one boundary: a 3 pt edge stated by the upper row, by the lower row, by both,
+    /// and beside a 0.5 pt one are <b>indistinguishable in every figure</b> — the same 3 pt band at the same y
+    /// and the same 3.000 pt of table height — and the boundary does not move, so the row above pays not half
+    /// but nothing. The width is the <em>resolved</em> rule, the maximum of the two facing statements, and a
+    /// cell's own <c>nil</c> beats a table-level <c>w:insideH</c>.
+    /// </para>
+    /// <para>
+    /// The thickest over the row's cells rather than each cell's own, because the row has one height: two
+    /// cells disagreeing share the thicker one's band, which is what the drawing does when it consolidates.
+    /// </para>
+    /// <para>
+    /// And over the cells the row <em>dropped</em> as well — see <see cref="PageTableRow.CoveredTopRule"/>.
+    /// A covered cell's stated top is charged here and drawn nowhere, which is the one place in this file
+    /// where the height and the ink are deliberately not the same set of statements.
+    /// </para>
+    /// <para>
+    /// The model this replaced charged half of each of the two stated rules to each row and drew the bands
+    /// centred, which is <em>algebraically identical</em> for as long as every horizontal rule in the table has
+    /// one width and the table does not split — which is why the family seated as three separate defects
+    /// (O83, O84, O85) rather than as one.
+    /// </para>
     /// </remarks>
-    private static Length BorderHeight(PageTableRow row)
+    /// <param name="above">The row above, or null for the table's first row, whose band is its own top rule.</param>
+    /// <param name="row">The row that pays.</param>
+    private static Length TopBand(PageTableRow? above, PageTableRow row)
     {
-        Length top = Length.Zero;
-        Length bottom = Length.Zero;
+        Length band = row.CoveredTopRule;
 
-        foreach (PageTableCell cell in row.Cells)
+        foreach (PageTableCell cell in row.Cells) band = Length.Max(band, cell.Borders.Top.Width);
+
+        if (above is not null)
         {
-            top = Length.Max(top, cell.Borders.Top.Width);
-            bottom = Length.Max(bottom, cell.Borders.Bottom.Width);
+            band = Length.Max(band, above.CoveredBottomRule);
+
+            foreach (PageTableCell cell in above.Cells) band = Length.Max(band, cell.Borders.Bottom.Width);
         }
 
-        return (top + bottom) / 2;
+        return band;
+    }
+
+    /// <summary>
+    /// The resolved band at the boundary above a row, for a caller that has the table and the index.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SliceRow"/> is handed one row and its placed cells, so it cannot resolve this itself —
+    /// and it needs it, because a part of a row occupies the boundary band above it as well as its own
+    /// content. Without it a part measures only from its text and the row fits one line too many on the
+    /// page. See <see cref="HeightAt"/>.
+    /// </remarks>
+    public static Length BoundaryBand(PageTable table, int row)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        return row >= 0 && row < table.Rows.Count
+            ? TopBand(row > 0 ? table.Rows[row - 1] : null, table.Rows[row])
+            : Length.Zero;
+    }
+
+    /// <summary>
+    /// The band below the table's last row, which belongs to no row because there is none below it.
+    /// </summary>
+    /// <remarks>
+    /// [bin] <c>probes/tablerow-r146/results.md</c> §3.1: the outer bottom rule of <c>align.docx</c>'s table is
+    /// a band at 109.501..110.501 below a last row ending at 109.501 — the same downward-hanging band as every
+    /// interior boundary, so <em>there is no separate rule for an outer line</em>. The outer <em>top</em> band
+    /// needs no counterpart here: it is the first row's own <see cref="TopBand"/> and sits inside its height.
+    /// </remarks>
+    private static Length BottomBand(PageTableRow row)
+    {
+        Length band = row.CoveredBottomRule;
+        foreach (PageTableCell cell in row.Cells) band = Length.Max(band, cell.Borders.Bottom.Width);
+        return band;
+    }
+
+    /// <summary>The widest top rule the row's own cells state, which is what a declared height is raised by.</summary>
+    /// <remarks>
+    /// [bin] <c>probes/tablerow-r146/results.md</c> §3.4, and it is the reason round 131 could find no linear
+    /// fit: a <c>w:trHeight atLeast</c> floor is raised by the row's <b>own stated</b> top rule while the band
+    /// drawn at that boundary is the <b>resolved</b> one. Two arms of <c>trheight.docx</c> draw the same 3 pt
+    /// line at the same y and differ by 3.000 pt of height, and a third draws a 3 pt line and grows by 0.5 —
+    /// its own statement, every time. [src] <c>lcl_CalcMinRowHeight</c> (<c>tabfrm.cxx</c>:5087-5097) adds
+    /// <c>lcl_GetTopSpace(*_pRow)</c>, this row's own <c>CalcLineSpace(TOP, true)</c>, where the cell's print
+    /// margin at :5399-5404 is the maximum of that and the row above's bottom line size.
+    /// </remarks>
+    private static Length OwnTopRule(PageTableRow row)
+    {
+        Length top = row.CoveredTopRule;
+        foreach (PageTableCell cell in row.Cells) top = Length.Max(top, cell.Borders.Top.Width);
+        return top;
     }
 
     /// <summary>
@@ -1122,9 +1256,11 @@ public static class TableLayouter
     /// <remarks>
     /// <c>lcl_GetTopSpace</c> (<c>sw/source/core/layout/tabfrm.cxx</c>:5175) takes the maximum over the
     /// row's cells of the top border's <em>line space</em> — its width plus its distance — and adds the whole
-    /// of it to a <c>w:trHeight</c> floor. The border half of that is already
-    /// <see cref="BorderHeight"/>'s, which is added outside the floor and comes to the same total, so what is
-    /// left to charge here is the distance: the cell's top margin.
+    /// of it to a <c>w:trHeight</c> floor. The rule half of that is <see cref="OwnTopRule"/>, charged inside
+    /// the same floor term, so what is left here is the distance: the cell's top margin. The two are
+    /// separate because the floor is raised by the row's own <em>stated</em> rule while the band the layout
+    /// makes room for is the <em>resolved</em> one, and <c>probes/tablerow-r146/results.md</c> §3.4 measures
+    /// two arms that draw the same rule at the same y and differ by the whole of it in height.
     /// </remarks>
     private static Length TopInset(PageTableRow row)
     {
