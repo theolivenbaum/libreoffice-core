@@ -9,6 +9,16 @@ namespace Paperless.WordProcessing.Ooxml;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <strong>Off by default: Word draws the cached result and this project wants Word parity.</strong>
+/// Word does not update a <c>REF</c> field when a document is opened or printed — the reader sees
+/// what the producer last computed, and only F9 or an explicit *update fields before printing*
+/// changes that. LibreOffice recomputes every one of them on load. So the two disagree not about
+/// what a <c>REF</c> <em>evaluates</em> to but about <em>when</em> it is evaluated, and the answer
+/// a reader wants is the one their word processor shows them. The expansion below is measured and
+/// implemented, and nothing reaches it unless <see cref="WordParity.Variable"/> says so;
+/// <c>dotnet/TODO.word-parity.md</c> records what leaving it off costs.
+/// </para>
+/// <para>
 /// A <c>REF</c> whose first argument is a bookmark name becomes a <c>SwGetRefField</c> with
 /// <c>ReferenceFieldSource::BOOKMARK</c> and part <c>TEXT</c>
 /// (<c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx</c>:8541-8635), and
@@ -51,7 +61,19 @@ internal static class DocxReferenceFields
     /// </remarks>
     /// <param name="body">The <c>w:body</c>, or any element whose descendants to read.</param>
     public static Dictionary<string, string>? Expansions(XElement body)
+        => WordParity.ReproduceLibreOffice ? Resolve(body) : null;
+
+    /// <summary>
+    /// What <see cref="Expansions"/> answers when the reference's behaviour is switched on.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the switch so the measurement can be pinned by a test without touching the
+    /// environment, which is process-global and would reach every test running beside it.
+    /// </remarks>
+    internal static Dictionary<string, string>? Resolve(XElement body)
     {
+        ArgumentNullException.ThrowIfNull(body);
+
         Dictionary<string, List<string>?> quoted = Quoted(body);
         if (quoted.Count == 0) return null;
 

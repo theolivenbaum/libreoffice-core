@@ -12,7 +12,7 @@ namespace Paperless.WordProcessing.Ooxml;
 /// project wants Word parity.</strong> Word honours the direct formatting; 26.2.4.2 throws it
 /// away. The rule below is measured and implemented so the difference is understood and can be
 /// switched back on for a run scored against LibreOffice, but nothing reaches it unless
-/// <see cref="Variable"/> says so. What that costs on the corpus is written down in
+/// <see cref="WordParity.Variable"/> says so. What that costs on the corpus is written down in
 /// <c>dotnet/TODO.word-parity.md</c> — one document, one page.
 /// </para>
 /// <para>
@@ -68,18 +68,9 @@ internal static class DocxTocStyles
     /// <summary>How many levels WordprocessingML's built-in headings have.</summary>
     private const int HeadingLevels = 9;
 
-    /// <summary>The variable that turns the reference's behaviour on.</summary>
-    /// <remarks>
-    /// <c>1</c>, <c>true</c> or <c>yes</c> reproduces 26.2.4.2; anything else, including unset,
-    /// keeps Word's answer and honours the paragraph. Read that way round — an unexpected value
-    /// leaves the default in place — because the default is the one a reader wants and the
-    /// alternative is a quirk.
-    /// </remarks>
-    public const string Variable = "PAPERLESS_LIBREOFFICE_TOC_STYLES";
-
-    /// <summary>Whether the reference's behaviour is being reproduced.</summary>
-    public static bool Enabled =>
-        Environment.GetEnvironmentVariable(Variable) is "1" or "true" or "yes";
+    /// <summary>Whether the reference's behaviour is being reproduced rather than Word's.</summary>
+    /// <remarks><see cref="WordParity"/>, which is off by default and is one switch for all of them.</remarks>
+    public static bool Enabled => WordParity.ReproduceLibreOffice;
 
     /// <summary>
     /// The ids of the styles whose paragraphs must ignore their own <c>w:pPr</c>.

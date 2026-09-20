@@ -128,6 +128,19 @@ the pair with the outer value alone is a different wrong answer, not a better on
 of this round did substitute it and turned `Exhibit 2` into `Exhibit 1`, which is why the
 `Quotation.Nested` flag exists. Reach: **1 field in 1 document.**
 
+## The decision was reversed in round 161: the expansion ships switched OFF
+
+**This project wants Word parity, and Word draws the cache.** A `REF` is not updated when a
+document is opened or printed — only F9, or *update fields before printing*, changes what the
+reader sees — so the disagreement below is about *when* a field is evaluated rather than about what
+it evaluates to, and the reader's answer is their word processor's. `DocxReferenceFields` is gated
+on `PAPERLESS_LIBREOFFICE_QUIRKS`, off by default, and everything from here on describes the
+switched-on behaviour.
+
+What it costs is one gate row and is written down in `dotnet/TODO.word-parity.md`:
+`FAA 2025-26 Holdover Tables.docx` prints **166 pages against the reference's 167**, deliberately.
+Read the table below as *what the reference does*.
+
 ## Reach and confinement
 
 `census.py` walks every corpus DOCX, resolves each `REF`'s bookmark against the document's own
