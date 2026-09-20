@@ -120,6 +120,7 @@ public sealed class WordStyle
         NextStyleId = Word.Value(element, "next");
         LinkedStyleId = Word.Value(element, "link");
         IsDefault = Word.Attribute(element, "default") is "1" or "true" or "on";
+        IsCustom = Word.Attribute(element, "customStyle") is "1" or "true" or "on";
 
         ParagraphProperties = Word.Child(element, "pPr");
         RunProperties = Word.Child(element, "rPr");
@@ -168,6 +169,17 @@ public sealed class WordStyle
 
     /// <summary>Whether this is the default style for its type.</summary>
     public bool IsDefault { get; }
+
+    /// <summary>
+    /// Whether the file declares this a style of the author's rather than one of the application's.
+    /// </summary>
+    /// <remarks>
+    /// <c>w:customStyle</c>. It separates a built-in style from one that merely wears a built-in
+    /// <em>name</em>, and the two are not interchangeable: 26.2.4.2 voids the direct paragraph
+    /// formatting of a paragraph in a built-in <c>heading N</c> named by a <c>TOC \t</c> switch and
+    /// leaves a custom style of the same name alone. See <see cref="DocxTocStyles"/>.
+    /// </remarks>
+    public bool IsCustom { get; }
 
     /// <summary>The style's <c>w:pPr</c>, or null.</summary>
     public XElement? ParagraphProperties { get; private set; }

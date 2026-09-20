@@ -2976,3 +2976,16 @@ dotnet/probes/listshare-r159/movers.txt	2026-09-19	current	26.2.4.2	present	curr
 dotnet/probes/listshare-r159/reference-arms.txt	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/listshare-r159/results.md	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/listshare-r159/score.py	2026-09-19	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/headspace-r160/make-break.py	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/tocstyle-r160/results.md
+dotnet/probes/headspace-r160/make-probe.py	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/tocstyle-r160/results.md
+dotnet/probes/headspace-r160/make-table.py	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/tocstyle-r160/results.md
+dotnet/probes/headspace-r160/results.md	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/tocstyle-r160/results.md
+dotnet/probes/tocstyle-r160/census.py	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/census.txt	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/confine-rows.tsv	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/make-controls.py	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/make-probe.py	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/movers.txt	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/reference-arms.txt	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/reference-controls.txt	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/results.md	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md

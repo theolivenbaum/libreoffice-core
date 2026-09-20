@@ -356,6 +356,10 @@ public sealed partial class DocxLayoutSource
         // a document whose references point forward is most of them. See `DocxReferenceFields`.
         _referenceText = DocxReferenceFields.Expansions(body);
 
+        // And before it for the same reason: a paragraph loses its direct formatting because of a
+        // TOC field that may be written after it. See `DocxTocStyles`.
+        _tocVoidedStyles = DocxTocStyles.Voided(body, _styles);
+
         // The body is where the document's lists start counting. Reset rather than assumed clean,
         // because the numbering may be the same instance the extraction pass already walked.
         _numbering.ResetCounters();
@@ -830,7 +834,7 @@ public sealed partial class DocxLayoutSource
     /// </param>
     private PageParagraph? Paragraph(XElement element, string? citation = null)
     {
-        XElement? properties = Word.Child(element, "pPr");
+        XElement? properties = DocxTocStyles.Prune(Word.Child(element, "pPr"), _tocVoidedStyles);
 
         // Two character styles, because `w:pPr/w:rPr` is the *paragraph mark's* formatting and not
         // the paragraph's. ECMA-376 names it "Run Properties for the Paragraph Mark", Word applies
@@ -1076,6 +1080,15 @@ public sealed partial class DocxLayoutSource
     /// <param name="name">The bookmark the field named.</param>
     private string? ReferenceText(string name)
         => _referenceText is not null && _referenceText.TryGetValue(name, out string? text) ? text : null;
+
+    /// <summary>
+    /// The styles whose paragraphs draw none of their own direct paragraph formatting.
+    /// </summary>
+    /// <remarks>
+    /// Empty for every document that states no <c>TOC … \t</c> switch, which is 250 of the corpus's
+    /// 271 DOCX. See <see cref="DocxTocStyles"/> for the measurement and for why this is here.
+    /// </remarks>
+    private IReadOnlySet<string> _tocVoidedStyles = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>Whether the paragraph read next begins a page, because the one before ended with a break.</summary>
     private bool _pageBreakPending;
