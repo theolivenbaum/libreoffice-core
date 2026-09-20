@@ -8,8 +8,15 @@ namespace Paperless.WordProcessing.Ooxml;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>This is a LibreOffice behaviour rather than a rule of the format, and it is reproduced
-/// because it decides pages.</strong> A <c>TOC</c> field carrying
+/// <strong>Off by default: this is a LibreOffice behaviour, not a rule of the format, and this
+/// project wants Word parity.</strong> Word honours the direct formatting; 26.2.4.2 throws it
+/// away. The rule below is measured and implemented so the difference is understood and can be
+/// switched back on for a run scored against LibreOffice, but nothing reaches it unless
+/// <see cref="Variable"/> says so. What that costs on the corpus is written down in
+/// <c>dotnet/TODO.word-parity.md</c> — one document, one page.
+/// </para>
+/// <para>
+/// A <c>TOC</c> field carrying
 /// <c>\t "Heading 2,1,Heading 3,2"</c> registers those styles as the index's source styles —
 /// <c>DomainMapper_Impl::handleToc</c>'s template branch fills <c>LevelParagraphStyles</c> and sets
 /// <c>CreateFromLevelParagraphStyles</c>
@@ -61,13 +68,39 @@ internal static class DocxTocStyles
     /// <summary>How many levels WordprocessingML's built-in headings have.</summary>
     private const int HeadingLevels = 9;
 
+    /// <summary>The variable that turns the reference's behaviour on.</summary>
+    /// <remarks>
+    /// <c>1</c>, <c>true</c> or <c>yes</c> reproduces 26.2.4.2; anything else, including unset,
+    /// keeps Word's answer and honours the paragraph. Read that way round — an unexpected value
+    /// leaves the default in place — because the default is the one a reader wants and the
+    /// alternative is a quirk.
+    /// </remarks>
+    public const string Variable = "PAPERLESS_LIBREOFFICE_TOC_STYLES";
+
+    /// <summary>Whether the reference's behaviour is being reproduced.</summary>
+    public static bool Enabled =>
+        Environment.GetEnvironmentVariable(Variable) is "1" or "true" or "yes";
+
     /// <summary>
     /// The ids of the styles whose paragraphs must ignore their own <c>w:pPr</c>.
     /// </summary>
     /// <param name="body">The <c>w:body</c>, whose fields are scanned for a <c>TOC</c>.</param>
     /// <param name="styles">The style table, for the <c>w:name</c> a switch names a style by.</param>
-    /// <returns>An empty set when the document states no such switch, which is the common case.</returns>
+    /// <returns>
+    /// An empty set while <see cref="Enabled"/> is false, which is the default, and an empty set
+    /// for a document that states no such switch, which is 250 of the corpus's 271 DOCX.
+    /// </returns>
     public static IReadOnlySet<string> Voided(XElement body, WordStyles styles)
+        => Enabled ? Resolve(body, styles) : new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// What <see cref="Voided"/> answers when the reference's behaviour is switched on.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the switch so the measurement can be pinned by a test without touching the
+    /// environment, which is process-global and would reach every test running beside it.
+    /// </remarks>
+    internal static IReadOnlySet<string> Resolve(XElement body, WordStyles styles)
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(styles);

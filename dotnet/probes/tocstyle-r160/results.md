@@ -119,11 +119,33 @@ band — and that is the honest cost of the change: the rule moves indents and s
 paragraphs, and where a line then wraps differently the character count follows. `OM template`
 stays one page long, which is a different defect.
 
+## The decision was reversed: the rule ships switched OFF
+
+**The user's call, and it changes the conclusion of this round rather than its measurements: this
+project wants Word parity.** Word honours the paragraph's own formatting; 26.2.4.2 throws it away.
+So `DocxTocStyles` is gated on `PAPERLESS_LIBREOFFICE_TOC_STYLES`, which is **off by default**, and
+everything below this line describes what happens when it is switched on.
+
+What that costs is written down in `dotnet/TODO.word-parity.md` and is one gate row:
+`24-25_FAA_Holdover_Tables.docx` prints **154 pages against the reference's 155**, deliberately,
+while sitting within 51 characters of it over those 155 pages. It also *gains* something — with the
+rule off, `SPA-11` and `SPA-06` are back on the reference's character count **exactly**, where the
+rule put them 18 and 4 characters away.
+
+Re-rendering all 271 corpus DOCX with the rule off reproduces round 159's output **271 of 271,
+byte for byte** (`confine-rows-off.tsv`), so the shipped behaviour of this round is exactly the
+behaviour before it. What the round leaves is the measurement, the switch and the note.
+
+So read the table of movers above as *what the reference does*, not as what this tree draws, and
+read the verdict claim in it — `pages` → `match` on the witness — as conditional on the switch.
+
 ## A note on reproducing it at all
 
-This is not behaviour any reader would choose, and Word does not do it. It is reproduced on the
+This is not behaviour any reader would choose, and Word does not do it. The round shipped it on the
 same footing as the RTF bookmark rotation of round 88 and the doubled `Tables Table 55` of round
-158: the gate scores this tree against 26.2.4.2's own output, the difference decides pages, and a
-rule measured with nine arms and three controls is safer to carry than a 6 pt discrepancy nobody
-can explain. If the project ever needs Word parity instead, this is one of the first things to
-switch off, and `DocxTocStyles` is the one place to do it.
+158 — the gate scores this tree against 26.2.4.2's own output and the difference decides pages —
+and that was overruled the same day: **the project wants Word parity**, and those two precedents
+are worth re-examining on the same grounds by whoever next has cause to. The difference between
+this case and theirs is that theirs change what a reader *reads* to match the reference's own text,
+while this one throws away formatting the author asked for; but that is a distinction to argue
+rather than one the code currently makes.

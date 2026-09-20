@@ -2989,3 +2989,4 @@ dotnet/probes/tocstyle-r160/movers.txt	2026-09-20	current	26.2.4.2	present	curre
 dotnet/probes/tocstyle-r160/reference-arms.txt	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/tocstyle-r160/reference-controls.txt	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
 dotnet/probes/tocstyle-r160/results.md	2026-09-20	current	26.2.4.2	present	current	dotnet/probes/OPEN-ISSUES.md
+dotnet/probes/tocstyle-r160/confine-rows-off.tsv	2026-09-20	current	26.2.4.2	present	current	dotnet/TODO.word-parity.md
