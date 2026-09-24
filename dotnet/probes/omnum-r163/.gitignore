@@ -1,0 +1,20 @@
+# Renders, rasters and generated fixture arms are reproduced by measure.py and
+# fixtures/*.py; see results.md for the commands. Only the harness, the banked
+# page texts and results.md are tracked.
+fixfodt/
+fixours/
+fixref/
+fixtures/*.docx
+fodt/
+mod/
+modfodt/
+modref/
+ours-noquirk/
+ours-noquirk2/
+ours-quirk/
+ref/
+vmours/
+vmref/
+x/
+*.png
+*.bbox
