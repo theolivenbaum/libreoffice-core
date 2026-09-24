@@ -409,3 +409,103 @@ formulas. Give page 6 its missing 8.25 pt and page 7 goes blank with no other ch
    (fixture A, §5).
 
 The second lost page (§6) is a table keep-together difference and is **not** covered by that fix.
+
+---
+
+## 10. Build provenance — every `[bin]` on OUR side is a **Sep-17 build, not HEAD**
+
+Raised by the coordinator mid-round. Verified here.
+
+| | |
+|---|---|
+| binary used | `dotnet/tools/Paperless.Cli/bin/Release/net10.0/linux-x64/` — `Paperless.Cli` and `Paperless.WordProcessing.dll` both **2026-09-17 06:33** |
+| HEAD | `bccfeb64b`, **2026-09-20 22:06** |
+| build base (last commit at or before the binary) | `dd9c2baf7`, 2026-09-17 05:11 |
+| `WordParity` in the shipped assembly | **absent** — `strings Paperless.WordProcessing.dll \| grep -c WordParity` → **0** `[bin]` |
+
+`dd9c2baf7..HEAD` touches **32 files / +2048 −187 lines** in `Paperless.WordProcessing` + `Paperless.Text`.
+
+**So: every number in §1, §4, §5, §6 and §9(b) that describes *our* output is a Sep-17 measurement.**
+Reference-side numbers are unaffected.
+
+### 10a. What does NOT need re-measuring
+
+* **Everything on the reference side** — the 16-page count, the blank-page-7 ink scan, the fodt resolved
+  view, the one-`sectPr`/one-master-page facts, the `svg:height` table, the constant 37.45 pt offset, the
+  reference's 8.50 pt slack threshold, fixture A's reference column. None of it touches our build.
+* **The document's XML** (§2, §3).
+* **The root cause as a source claim.** `git grep -c 'oMath' bccfeb64b -- dotnet/src` → **zero matches at
+  HEAD** `[src]`. OMML is still unimplemented in the current tree. `git status --porcelain -- dotnet/src`
+  is empty, so the source I read *is* HEAD, not a dirty tree.
+* **The patch site.** `git diff dd9c2baf7..HEAD -- Ooxml/DocxLayoutSource.cs` adds and removes **no `case`
+  and no `switch`** in the paragraph walk, and `Layout/PageContent.cs`'s `InlineObjects` and
+  `ShapeLineTwip` are untouched. **§7a applies unchanged to HEAD.**
+* **The two `WordParity` commits are inert by default and need no re-measure.** `WordParity` is *not* page
+  parity — it is "which application this reader agrees with", read from `PAPERLESS_LIBREOFFICE_QUIRKS`,
+  and `ReproduceLibreOffice` is **false unless that variable is set** `[src]`. So `bccfeb64b` (REF-field
+  expansion, `DocxReferenceFields.cs`:64) and `e35a69b16`/`acfa0e973` (TOC template styles,
+  `DocxTocStyles.cs`:73) are switched **off** at HEAD and behave as the Sep-17 binary did. This document
+  holds 32 `REF`, 19 `PAGEREF` and 1 `TOC` field `[src]`, so it would otherwise have been exposed to all
+  three — with the switch off, net zero.
+
+### 10b. What DOES need re-measuring, in priority order
+
+1. **Our page count and the page-6 geometry.** `TableLayouter.cs` (+222) and `PageTable.cs` (+29) changed
+   under `ffbdb45ac` (a cell a vertical merge covers is charged to the row's height), `f2207fde9` (the row
+   below a table boundary pays the whole band), `a3159ce0d` (a split row ruled once at the cut) and
+   `3a2ec4171` (a horizontal border hangs below the boundary). **The top half of page 6 is a large merged
+   table.** Any of these can move the page-6 body by points, and points are exactly the currency of the
+   fit test. A HEAD build could move the 8.240 pt deficit in either direction — conceivably far enough to
+   produce the blank page on its own.
+2. **`b5d46342a` — "A break-only line takes the break run's face, not the neighbour's" (O91).** This lands
+   **directly on the construct at issue**: the empty break-only paragraph whose line height the fit test
+   measures. It is the single commit most likely to move our 16.75 pt threshold.
+3. **Line metrics** — `1ea79b834` (an escaped size truncated to a twip, not rounded) and `72db85d5d` (a
+   character width stated by a style reaches the layout and was dropped three times). Both can change
+   line heights and wrapping on page 6.
+4. **`8af1cbb21`** (list counters keyed on the abstract definition), on by default, 19 `w:numId` in this
+   document. Very likely closes the `5.` vs `8.` heading-number divergence of §6; label-width effect on
+   pagination is small but not zero.
+
+### 10c. What to re-run once a HEAD build exists
+
+All scripted and idempotent, under this directory:
+
+```bash
+P=dotnet/probes/blankpage-r163
+CLI=<HEAD build>/Paperless.Cli
+
+# 1. page count + the offset table (§1)
+"$CLI" render --format pdf --outdir $P/ours "<the document>"
+
+# 2. the page-6 deficit (§4) — expect 8.240 pt to move
+#    compare last body-line yMax on page 6 against the reference's 748.199
+
+# 3. the slack sweep (§4) — ours should read 16.75 pt; the reference's 8.50 pt is fixed
+python3 $P/build-slack.py
+for f in $P/slack/*.docx; do "$CLI" render --format pdf --outdir $P/slackours2 "$f"; done
+
+# 4. fixture A (§5) — our flip point must stay at 26 -> 27 to keep the control valid
+# 5. fixture B (§5) — the 3.05 pt per-formula deficit
+# 6. the "our pitch" column of the mathsizes table (§4)
+python3 $P/build-fixtures.py && python3 $P/build-mathsizes.py
+```
+
+### 10d. Does the conclusion survive?
+
+**Yes, and it does not rest on the stale numbers.** The chain is:
+
+* the reference emits a blank page 7 — reference-side `[bin]`, unaffected;
+* it does so because the empty break-only paragraph does not fit at the foot of page 6 — reference-side
+  `[bin]` (fodt model + the reference's own 8.50 pt fit boundary), unaffected;
+* the document carries no section break of any kind, so parity cannot be the cause — `[src]`/reference
+  `[bin]`, unaffected;
+* we lay out **no** OMML — `[src]` **at HEAD**, re-verified above;
+* the reference reserves `svg:height` per formula and we reserve a text line — reference `[bin]` for the
+  first half, `[src]` for the second.
+
+What a HEAD build can change is **the size of the gap and therefore whether page 6 alone still decides it**
+— not whether OMML is implemented, and not whether a parity rule exists. If a HEAD build already emits the
+blank page, the correct reading is that something in the table work of `dd9c2baf7..HEAD` supplied the
+missing height by accident; the OMML defect would still be real and still be the thing to fix, and §7a
+would be unchanged. **That is the one outcome that would revise §9(d), and it is worth checking first.**
