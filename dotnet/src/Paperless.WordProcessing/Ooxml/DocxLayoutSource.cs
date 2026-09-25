@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml;
+using Paperless.Ooxml.OfficeMath;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
@@ -1486,6 +1487,46 @@ public sealed partial class DocxLayoutSource
     /// <param name="IsChecked">Whether it is ticked, so that it is crossed as well as bordered.</param>
     private sealed record CheckBoxAnchor(int Offset, XElement? RunProperties, bool IsChecked);
 
+    /// <summary>
+    /// The room a formula takes on the line it sits on — nothing drawn, and no width.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 26.2.4.2 does not lay an OMML formula out as text. Its importer builds a StarMath document
+    /// from the subtree and embeds it as an OLE object anchored as-character, so the line takes the
+    /// <em>object's</em> height — see <see cref="OfficeMathBox"/>, which is that height and which
+    /// arm of it is measured against what.
+    /// </para>
+    /// <para>
+    /// <strong>Zero width, because the marks are drawn as text anyway.</strong> This tree emits the
+    /// formula's own glyphs into the paragraph (<c>AppendMath</c>), so the advance is already paid
+    /// for; the frame contributes the <em>height</em> and nothing else. A frame that also claimed
+    /// the object's width would charge the line for the formula twice.
+    /// </para>
+    /// <para>
+    /// <strong>What it is worth.</strong> Our line reserved 11.90 pt for every shape at the default
+    /// size — a nested fraction cost exactly what a bare <c>x</c> did, and the reserved box was
+    /// shorter than the ink we drew into it. On <c>ABCD-FE-01-00 Flight Envelope</c>'s page 6 that
+    /// is 8.24 pt of slack across three formula paragraphs, which is the whole of the blank page
+    /// the reference emits and we did not: the slack sweep puts the reference's threshold at
+    /// 8.50 pt and ours at 16.75, either side of the document's own 10.008 pt.
+    /// <c>probes/blankpage-r163/results.md</c> §4.
+    /// </para>
+    /// </remarks>
+    private static PageFrame? MathFrame(FrameAnchor anchor)
+    {
+        if (OfficeMathBox.Measure(anchor.Element) is not { } extent) return null;
+
+        return new PageFrame
+        {
+            Size = new Core.Geometry.DocSize(Length.Zero, extent.Height),
+            Anchor = Layout.FrameAnchor.AsCharacter,
+            AnchorOffset = anchor.Offset,
+            InlineAscent = extent.Ascent,
+            IsTextPortion = true,
+        };
+    }
+
     private List<PageFrame> FramesOf(
         List<FrameAnchor> anchors,
         List<CheckBoxAnchor> checkBoxes,
@@ -1504,6 +1545,12 @@ public sealed partial class DocxLayoutSource
         {
             Func<XElement, IReadOnlyList<PageBlock>>? content =
                 _frameDepth < MaxFrameNesting ? Content : null;
+
+            if (anchor.Element.Name.NamespaceName == OoxmlNamespaces.OfficeMath)
+            {
+                if (MathFrame(anchor) is { } formula) frames.Add(formula);
+                continue;
+            }
 
             // VML states its geometry differently from DrawingML and most of it reserves nothing, so
             // it has a reader of its own rather than a branch inside `DocxFrames`.
@@ -1921,6 +1968,15 @@ public sealed partial class DocxLayoutSource
                 // namespace is tested first. See `AppendMath`.
                 if (child.Name.NamespaceName == OoxmlNamespaces.OfficeMath)
                 {
+                    // The reference imports the formula into a StarMath object anchored
+                    // as-character, so the line takes the object's height rather than the text's.
+                    // The anchor is registered here and sized in `MathFrame`; the marks themselves
+                    // are still emitted as text, so the formula stays searchable and extractable.
+                    if (child.Name.LocalName is "oMath" or "oMathPara")
+                    {
+                        _frames.Add(new FrameAnchor(_builder.Length, child));
+                    }
+
                     AppendMath(child, depth + 1);
                     continue;
                 }
