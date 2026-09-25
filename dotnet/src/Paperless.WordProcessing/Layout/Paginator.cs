@@ -3936,7 +3936,7 @@ public sealed class Paginator
             for (int row = 0; row < start; row++) skipped += heights[row];
 
             cells.AddRange(TableLayouter.Offset(
-                laid.Cells.Where(cell => cell.Row >= start && cell.Row < end),
+                ClampSpans(laid.Cells.Where(cell => cell.Row >= start && cell.Row < end), heights, end),
                 body.X,
                 body.Y + top + placed - skipped));
 
@@ -3944,9 +3944,12 @@ public sealed class Paginator
         }
 
         // Finally the first part of the row that does not fit, when the document lets it break.
+        // A row a merge reaches into may still be cut. `SliceRow` asks only about the row's own cells —
+        // `RowCells` filters on `cell.Row == end`, and the covering cell's row is above that — so its
+        // `RowSpan > 1` guard is not tripped by the cover, and `ClampSpans` has already cut the covering
+        // rectangle to the rows this part holds.
         if (end < heights.Count
-            && MaySplit(table, end, heights[end], body.Height)
-            && !IsCoveredByAMerge(laid, end))
+            && MaySplit(table, end, heights[end], body.Height))
         {
             List<PlacedTableCell> rowCells = RowCells(laid, end);
 
@@ -3960,6 +3963,12 @@ public sealed class Paginator
                     TableLayouter.BoundaryBand(table, end))
                 is { } head)
             {
+                // A cell the merge carries into the row that was just cut reaches the foot of the part,
+                // not the foot of the last whole row — `ClampSpans` could not know that, because the
+                // slice had not been attempted when it ran. Writer recomputes the same height after its
+                // own split for the same reason.
+                ExtendSpansOverTheCut(cells, end, head.Height);
+
                 cells.AddRange(TableLayouter.Offset(head.Cells, body.X, body.Y + top + placed));
                 placed += head.Height;
 
@@ -4064,13 +4073,90 @@ public sealed class Paginator
         => [.. laid.Cells.Where(cell => cell.Row == row)];
 
     /// <summary>
+    /// A vertically merged cell cut short at the last row this part holds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A cell was laid out as tall as all the rows it spans, so a part ending inside that span would
+    /// otherwise draw the whole rectangle — hanging below the rest of the table by however much of the
+    /// span is on the next page. Measured on <c>OM template for non-complex NCC operators</c>, whose
+    /// column-4 cell spans rows 8 to 10 across a page boundary: ours ran to y = 43.65 where the table's
+    /// other columns stop at 148.60 and the reference's bottom rule is at 67.84, about 105 pt of cell
+    /// below the table it belongs to.
+    /// </para>
+    /// <para>
+    /// This is Writer's <c>lcl_AdjustRowSpanCells</c> (<c>sw/source/core/layout/tabfrm.cxx</c>:909-931),
+    /// which recomputes every cell of layout row span above one as <c>lcl_GetHeightOfRows(pRow,
+    /// nLayoutRowSpan)</c> — the rows present in <em>that</em> frame — and is called from
+    /// <c>SwTabFrame::Split</c>. It is what lets the reference split such a row at all rather than what
+    /// keeps it from doing so.
+    /// </para>
+    /// </remarks>
+    /// <param name="cells">The cells this part places.</param>
+    /// <param name="heights">Every row's height, as the table's own layout measured it.</param>
+    /// <param name="end">One past the last row this part holds.</param>
+    private static IEnumerable<PlacedTableCell> ClampSpans(
+        IEnumerable<PlacedTableCell> cells, List<Length> heights, int end)
+    {
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.Row + Math.Max(1, cell.Cell.RowSpan) <= end)
+            {
+                yield return cell;
+                continue;
+            }
+
+            Length height = Length.Zero;
+            for (int row = cell.Row; row < end && row < heights.Count; row++) height += heights[row];
+
+            // Never grow a cell: a turned cell's rectangle and a cell the table already shortened are
+            // both shorter than the rows they cover, and the clamp is a ceiling rather than a value.
+            yield return height < cell.Area.Height
+                ? cell with { Area = cell.Area with { Height = height } }
+                : cell;
+        }
+    }
+
+    /// <summary>
+    /// Gives back to a clamped merged cell the height of the sliced row's own part.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ClampSpans"/> runs before the row under the last whole one has been offered to
+    /// <c>SliceRow</c>, so it can only clamp to the whole rows. When that row is then cut, the merge
+    /// reaches down through the part it left behind and the rectangle has to grow by exactly that much.
+    /// Measured on the OM template's page 30, where the reference rules column 4 at y = 774.3 and
+    /// clamping to the whole rows alone rules it at 693.3 — the 81 pt of the sliced row's master part.
+    /// </remarks>
+    /// <param name="cells">The cells placed so far, modified in place.</param>
+    /// <param name="cut">The row that was sliced.</param>
+    /// <param name="height">How tall the sliced row's first part is.</param>
+    private static void ExtendSpansOverTheCut(List<PlacedTableCell> cells, int cut, Length height)
+    {
+        for (int index = 0; index < cells.Count; index++)
+        {
+            PlacedTableCell cell = cells[index];
+            if (cell.Row >= cut || cell.Row + Math.Max(1, cell.Cell.RowSpan) <= cut) continue;
+
+            cells[index] = cell with { Area = cell.Area with { Height = cell.Area.Height + height } };
+        }
+    }
+
+    /// <summary>
     /// Whether a cell starting further up the table reaches into this row.
     /// </summary>
     /// <remarks>
-    /// Such a row cannot be broken here: the merged cell is one rectangle drawn with the row it starts in,
-    /// and a break inside it would leave half of it on a page it was never placed on. Writer keeps the
-    /// same case out of its own split by re-formatting the line that a row span crosses
-    /// (<c>lcl_AdjustRowSpanCells</c>); declining is the same answer with none of the machinery.
+    /// Used by <see cref="MinimumRowsBeforeASplit"/>, where Writer counts the row-span line before it
+    /// starts its keep chain: a row the cell above reaches into cannot be the first on a page of its own.
+    /// <para>
+    /// <strong>It no longer decides whether such a row may be cut, and the reasoning that said so was
+    /// refuted.</strong> This remark used to read "Writer keeps the same case out of its own split by
+    /// re-formatting the line that a row span crosses (<c>lcl_AdjustRowSpanCells</c>); declining is the
+    /// same answer with none of the machinery." That function is what <em>enables</em> the split — it
+    /// recomputes a spanning cell's height as the rows present in the frame, and
+    /// <c>SwTabFrame::Split</c> calls it for exactly that reason. Declining instead left the covering
+    /// cell at its full height on the page the table broke on and drew nothing of it on the next, so the
+    /// row moved whole and one column went missing. <see cref="ClampSpans"/> is that port.
+    /// </para>
     /// </remarks>
     private static bool IsCoveredByAMerge(LaidBlock laid, int row)
     {
