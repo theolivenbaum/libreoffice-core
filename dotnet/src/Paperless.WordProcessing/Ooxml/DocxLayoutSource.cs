@@ -1784,7 +1784,64 @@ public sealed partial class DocxLayoutSource
             /// is being read, so the runs inside it do not take the character style they name.
             /// </summary>
             internal bool IsIndexResult { get; set; }
+
+            /// <summary>
+            /// True when pagination will write this field's value over its cached result, so the
+            /// result's runs take <see cref="InstructionProperties"/> rather than their own.
+            /// </summary>
+            /// <remarks>
+            /// See <see cref="RewritesTheResultOf"/> for the rule and what it is measured against.
+            /// </remarks>
+            internal bool RewritesResult { get; set; }
         }
+
+        /// <summary>
+        /// True when this walk replaces the field's value, so the value's character properties are
+        /// the <em>field's</em> and not the cached result's.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <strong>26.2.4.2 discards a field result's own <c>w:rPr</c> entirely.</strong> writerfilter
+        /// builds a <c>com.sun.star.text.TextField</c> and deletes the cached result text with it, so
+        /// the value is drawn in the character properties the field's <em>instruction</em> run carries,
+        /// falling back to the paragraph style. Measured on seven one-attribute arms in a footer, where
+        /// both engines recompute (<c>probes/fieldrpr-r168</c>): a cached result stating 20 pt red comes
+        /// back at the style's 10 pt black in five of them, and the two arms whose <c>w:instrText</c> run
+        /// states the 20 pt come back at 20 pt — including the one whose cached result states 10 pt,
+        /// which inverts the sign and is what says the rule is the instruction's and not "the smaller of
+        /// the two". A <c>w:fldSimple</c> has no instruction run at all, so it falls all the way back to
+        /// the paragraph style, and its own <c>w:rPr</c> child does not count.
+        /// </para>
+        /// <para>
+        /// <strong>Word does not, when the field says not to.</strong> <c>\* MERGEFORMAT</c> means
+        /// <em>preserve the formatting of the previous result</em>, which is exactly the cached runs'
+        /// <c>w:rPr</c>; without the switch Word reformats from the field's own. So the default follows
+        /// Word — the rule applies to a field that does not carry the switch — and
+        /// <see cref="WordParity"/> applies it to every field, which is 26.2.4.2's own reading. The
+        /// reference honours the switch nowhere: five of the seven arms carry it and answer the same as
+        /// the one that does not.
+        /// </para>
+        /// <para>
+        /// <strong>Only a field whose value this walk actually writes.</strong> For anything else the
+        /// cached text <em>is</em> what gets drawn, and drawing it in anything but its own formatting
+        /// would be a defect rather than a fix — the reference recomputes far more fields than this tree
+        /// does, and the rule about a value's formatting cannot be borrowed for a value that was never
+        /// recomputed.
+        /// </para>
+        /// <para>
+        /// Reach, censused over the corpus DOCX on the properties that change the drawn glyphs rather
+        /// than on the presence of a <c>w:rPr</c> — a result stating only <c>w:noProof</c>,
+        /// <c>w:webHidden</c> or <c>w:lang</c> is formatted identically either way:
+        /// <strong>470 field results in 59 documents</strong> without the switch, which is what moves by
+        /// default, and 106 in 29 with it, which move only under <see cref="WordParity"/>.
+        /// <c>probes/fieldrpr-r168/census.py</c>.
+        /// </para>
+        /// </remarks>
+        private bool RewritesTheResultOf(string instruction)
+            => (FieldInstructions.PageFieldOf(instruction) is not null
+                || ValueOf(instruction) is not null)
+               && (WordParity.ReproduceLibreOffice
+                   || !instruction.Contains("MERGEFORMAT", StringComparison.OrdinalIgnoreCase));
 
         /// <summary>
         /// How many index fields' results the walk is inside, so a run's <c>w:rStyle</c> is ignored.
@@ -2041,10 +2098,20 @@ public sealed partial class DocxLayoutSource
                                         _indexResults++;
                                     }
 
+                                    open.RewritesResult =
+                                        RewritesTheResultOf(open.Instruction.ToString());
+
                                     // The one point at which a field this walk computes can be written:
                                     // the instruction has been read in full, so the field's name is
                                     // known, and the cached result it replaces starts here.
-                                    if (_hidden == 0) Substitute(open, _runProperties);
+                                    if (_hidden == 0)
+                                    {
+                                        Substitute(
+                                            open,
+                                            open.RewritesResult
+                                                ? open.InstructionProperties
+                                                : _runProperties);
+                                    }
                                 }
 
                                 break;
@@ -2100,11 +2167,18 @@ public sealed partial class DocxLayoutSource
                         OpenField simple = new() { ResultAt = _builder.Length };
                         simple.Instruction.Append(Word.Attribute(child, "instr") ?? "");
 
-                        // The cached result's own runs carry the formatting the producer gave the field —
-                        // here the whole field is one element, so the first of them is taken rather than
-                        // the paragraph's, which would draw the value in the style's weight instead.
+                        // A `w:fldSimple` states no instruction run, so a value written over it takes
+                        // the paragraph's own style — see `RewritesTheResultOf`. Where the rule does not
+                        // apply, the cached result's first run carries the formatting the producer gave
+                        // the field and is kept, which is what `\* MERGEFORMAT` asks for.
+                        simple.RewritesResult = RewritesTheResultOf(simple.Instruction.ToString());
+
                         if (_hidden == 0
-                            && Substitute(simple, Word.Child(Word.Child(child, "r"), "rPr")))
+                            && Substitute(
+                                simple,
+                                simple.RewritesResult
+                                    ? null
+                                    : Word.Child(Word.Child(child, "r"), "rPr")))
                         {
                             _hidden--;
                         }
@@ -2114,12 +2188,20 @@ public sealed partial class DocxLayoutSource
                             // its runs' character styles for the same reason.
                             bool index = IsIndexField(simple.Instruction.ToString());
                             if (index) _indexResults++;
+
+                            // Pushed so that the result's runs can see it: the compact form states no
+                            // instruction run, so a value written over it is drawn in the paragraph's
+                            // own style, which is what a null `InstructionProperties` means here.
+                            bool pushed = simple.RewritesResult && _fields.Count < MaxDepth;
+                            if (pushed) _fields.Push(simple);
+
                             try
                             {
                                 Append(child, depth + 1);
                             }
                             finally
                             {
+                                if (pushed) _fields.Pop();
                                 if (index) _indexResults--;
                             }
                         }
@@ -2301,8 +2383,17 @@ public sealed partial class DocxLayoutSource
                     case "r":
                         // The one element that carries character formatting. Runs do not nest, but this
                         // saves and restores anyway so that a malformed file cannot lose the outer state.
+                        //
+                        // Inside the cached result of a field whose value pagination will write over it,
+                        // the run's own `w:rPr` is not what the value is drawn in — see
+                        // `RewritesTheResultOf`. The field's own is substituted for it, and null there is
+                        // an answer rather than an absence: it means the paragraph's style, which is what
+                        // a `w:fldSimple` falls back to.
                         XElement? outer = _runProperties;
-                        _runProperties = Word.Child(child, "rPr");
+                        _runProperties =
+                            _fields.Count > 0 && _fields.Peek() is { RewritesResult: true, ResultAt: >= 0 } rewritten
+                                ? rewritten.InstructionProperties
+                                : Word.Child(child, "rPr");
                         Append(child, depth + 1);
                         _runProperties = outer;
                         break;

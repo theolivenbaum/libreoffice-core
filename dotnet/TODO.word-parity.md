@@ -109,6 +109,56 @@ that Word does not press F9 on the reader's behalf. Elsewhere in the same docume
 
 ---
 
+## A recomputed field's value takes the field's formatting, not its cached result's
+
+**26.2.4.2**: a field it recomputes is drawn in the character properties the field's own
+**instruction run** carries, falling back to the paragraph style. The cached result's `w:rPr` is
+discarded entirely — writerfilter builds a `com.sun.star.text.TextField` and deletes the cached
+result text with it — and **`\* MERGEFORMAT` makes no difference to it**.
+
+**Word**: honours `\* MERGEFORMAT`, which is what the switch is for — *preserve the formatting of
+the previous result*, and the previous result's formatting is exactly the cached runs' `w:rPr`.
+Without the switch Word reformats from the field's own, agreeing with the reference.
+
+**This tree**: applies the rule to a field that does **not** carry the switch, which is Word's
+answer and the reference's at once, and the switch above applies it to every field. Only to a
+field this tree actually recomputes — for anything else the cached text *is* what gets drawn, so
+its own formatting is the right formatting. `DocxLayoutSource.RewritesTheResultOf`;
+`FieldResultFormatTests` pins the default and `probes/fieldrpr-r168/results.md` holds the seven
+arms, of which the reference reproduces six under the switch.
+
+**Reach**: censused on the properties that change the drawn glyphs rather than on the presence of
+a `w:rPr` — a result stating only `w:noProof`, `w:webHidden` or `w:lang` is formatted identically
+either way — **470 field results in 59 documents** without the switch and **106 in 29** with it.
+**The renderings that move are one and four**: in 58 of the 59 the cached result's `w:rPr` happens
+to state what the instruction run or the style states anyway.
+
+**What it costs.** Nothing by default: 1 of 59 renderings moves, no gate verdict either way, and
+the mover (`AW-104D-RVSM-Aircraft-Approval-Checklist.pdf.docx`) draws its footer page number in
+the weight its instruction run states, which is the weight the reference draws the literal `Page`
+beside it in. Under the switch, isolated from everything already behind it by rendering the base
+binary with the variable set too: 4 of 29 move and no verdict moves.
+
+| document | 26.2.4.2 | default | under the switch |
+|---|---|---|---|
+| **`words/missing-002/docx/CRIF - Spécification technique - Socle applicatif.docx`** | **29 pages** | **28** | **32** |
+
+CRIF is the row this was found on and the reason the switch is the right home for it. Its footer
+holds two `FILENAME` fields in one cell whose cached results state 8 pt grey against a
+`Pieddepage` style stating 10 pt black; drawn at 10 pt black the first is about 30 % wider, the
+cell overflows, the footer takes a second line and the body bottom rises 11.5 pt — which is the
+real defect, and correcting it makes the *line counts* match the reference on pages 5 to 27
+exactly. It also unmasks three further local events (at reference pages 3/4, 9/10 and 27/28) that
+the footer was hiding, so the page total goes from one out to three out. Those three are the work
+that would make the reference's rule safe to prefer here; until then Word agrees with us.
+
+**A separate defect found with it and not fixed**: a complex field with no
+`w:fldChar w:fldCharType="separate"` has no cached result, the reference computes and draws its
+value, and this tree draws nothing at all. `Substitute` covers the constant fields on that path
+and a page field is not one of them. `probes/fieldrpr-r168`'s `NOSEPARATOR` arm.
+
+---
+
 ## Still LibreOffice's reading, and why
 
 These are places where this tree recomputes a field that Word would leave at its cache, and they
