@@ -49,6 +49,37 @@ STYLES = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
 </w:styles>'''
 
+# An anchored text box 154 pt wide and 265 pt tall at the left margin, square-wrapped. A
+# `w:tblpPr` table is NOT an obstacle in this tree by an explicit decision in
+# `Paginator.PlaceFloatedTable`, so a fixture built on one never reaches the question --
+# see this probe's `results.md` §1.
+SHAPE = '''<w:p><w:r><w:drawing>
+  <wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+             distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="1"
+             behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
+    <wp:simplePos x="0" y="0"/>
+    <wp:positionH relativeFrom="margin"><wp:posOffset>0</wp:posOffset></wp:positionH>
+    <wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>
+    <wp:extent cx="1956435" cy="3365500"/>
+    <wp:effectExtent l="0" t="0" r="0" b="0"/>
+    <wp:wrapSquare wrapText="bothSides"/>
+    <wp:docPr id="1" name="QuickLinks"/>
+    <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+      <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+        <wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+          <wps:cNvSpPr txBox="1"/>
+          <wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1956435" cy="3365500"/></a:xfrm>
+            <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+            <a:ln w="6350"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></wps:spPr>
+          <wps:txbx><w:txbxContent>%s</w:txbxContent></wps:txbx>
+          <wps:bodyPr rot="0" anchor="t"/>
+        </wps:wsp>
+      </a:graphicData>
+    </a:graphic>
+  </wp:anchor>
+</w:drawing></w:r></w:p>'''
+BOXLINE = '<w:p><w:r><w:t>QUICK LINK %d</w:t></w:r></w:p>'
+
 # A floating table: one column 2.1417 in wide, anchored left, which is `absrc`'s `Table2`.
 FLOATER = '''<w:tbl>
   <w:tblPr>
@@ -71,26 +102,34 @@ def prose(n, tag="PROSE"):
         for i in range(1, n + 1))
 
 
-def toc(entries):
-    """A `TOC` field whose cached result is a run of `toc 1` paragraphs, as Word writes one."""
+def toc(entries, tabbed=False):
+    """A `TOC` field whose cached result is a run of `toc 1` paragraphs, as Word writes one.
+
+    `tabbed` gives each entry the dot-leader right stop at the full measure that a real Word
+    contents entry carries, so that the entry is as wide as the text area whatever it says.
+    """
+    stop = ('<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>'
+            if tabbed else '')
+    tail = '<w:r><w:tab/></w:r><w:r><w:t>2</w:t></w:r>' if tabbed else ''
     body = "".join(
-        f'<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>'
-        f'<w:r><w:t>INDEX ENTRY {i}</w:t></w:r></w:p>'
+        f'<w:p><w:pPr><w:pStyle w:val="TOC1"/>{stop}</w:pPr>'
+        f'<w:r><w:t>INDEX ENTRY {i}</w:t></w:r>{tail}</w:p>'
         for i in range(1, entries + 1))
     return (
-        '<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>'
+        f'<w:p><w:pPr><w:pStyle w:val="TOC1"/>{stop}</w:pPr>'
         '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
         '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r>'
         '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
-        '<w:r><w:t>INDEX ENTRY 0</w:t></w:r></w:p>'
+        f'<w:r><w:t>INDEX ENTRY 0</w:t></w:r>{tail}</w:p>'
         + body
-        + '<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>'
+        + f'<w:p><w:pPr><w:pStyle w:val="TOC1"/>{stop}</w:pPr>'
           '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>')
 
 
 def arms():
     rows = "".join(ROW % i for i in range(1, 8))
     table = FLOATER % rows
+    shape = SHAPE % "".join(BOXLINE % i for i in range(1, 8))
 
     # The control both engines already agree on: ordinary paragraphs beside the obstacle.
     yield "plain-after", table + prose(10)
@@ -110,6 +149,31 @@ def arms():
     yield "heading-then-plain", (
         table
         + '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+          '<w:r><w:t>INFORMATION HIGHLIGHTS</w:t></w:r></w:p>'
+        + prose(10))
+
+
+def shaped():
+    """The same four arms with an anchored text box, which the obstacle path does see."""
+    yield "box-plain-after", SHAPE % "".join(BOXLINE % i for i in range(1, 8)) + prose(10)
+    yield "box-toc-after", SHAPE % "".join(BOXLINE % i for i in range(1, 8)) + toc(9)
+    yield "box-heading-then-toc", (
+        SHAPE % "".join(BOXLINE % i for i in range(1, 8))
+        + '<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/></w:pPr>'
+          '<w:r><w:t>INFORMATION HIGHLIGHTS</w:t></w:r></w:p>'
+        + toc(9))
+    # The entries carry the full-measure right stop a real Word contents entry has, so each is
+    # as wide as the text area and cannot fit beside the box on its own terms.
+    yield "box-toc-tabbed", SHAPE % "".join(BOXLINE % i for i in range(1, 8)) + toc(9, tabbed=True)
+    yield "box-plain-tabbed", (
+        SHAPE % "".join(BOXLINE % i for i in range(1, 8))
+        + "".join('<w:p><w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>'
+                  '</w:pPr><w:r><w:t>PROSE line %d</w:t></w:r><w:r><w:tab/></w:r>'
+                  '<w:r><w:t>2</w:t></w:r></w:p>' % i for i in range(1, 11)))
+
+    yield "box-heading-then-plain", (
+        SHAPE % "".join(BOXLINE % i for i in range(1, 8))
+        + '<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/></w:pPr>'
           '<w:r><w:t>INFORMATION HIGHLIGHTS</w:t></w:r></w:p>'
         + prose(10))
 
@@ -134,7 +198,7 @@ def build(name, body):
 
 if __name__ == "__main__":
     n = 0
-    for name, body in arms():
+    for name, body in list(arms()) + list(shaped()):
         build(name, body)
         n += 1
     print("built", n, "fixtures in", OUT)
