@@ -33,7 +33,7 @@ and the only thing left to differ is the formatting.
 | `SIMPLERPR` — `w:fldSimple` with its own `w:rPr` too | **10.00** | 20.00 | **10.00** |
 | `NOMERGE` — no `\* MERGEFORMAT` | **10.00** | **10.00** | **10.00** |
 | `FIELDRUNRPR` — the `fldChar`/`instrText` runs carry it, result run 10 pt | **20.00** | 10.00 | **20.00** |
-| `NOSEPARATOR` — no cached result at all | **20.00** | not drawn | not drawn |
+| `NOSEPARATOR` — no cached result at all | **20.00** | **20.00** | **20.00** |
 
 **`FIELDRUNRPR` is the arm that earns its keep.** Its cached result states 10 pt and its
 instruction run 20 pt, and the reference draws 20 — the opposite sign from every other arm. So
@@ -42,10 +42,22 @@ paragraph style always". `SIMPLERPR` is the control that says a `w:fldSimple`'s 
 does not count either: a compact field states no instruction run and falls all the way back to
 the style.
 
-`NOSEPARATOR` is a **separate defect and is not fixed here**: a complex field with no
+`NOSEPARATOR` was a **separate defect and is now fixed too**: a complex field with no
 `w:fldChar w:fldCharType="separate"` has no cached result, the reference computes and draws its
-value, and this tree draws nothing at all. `Substitute` covers the constant fields on that path
-and a page field is not one of them.
+value, and this tree drew nothing at all — a page field's value is written by `PageFields` over a
+span of the paragraph's text, so with no result there is no span. `DocxLayoutSource.PlaceHolder`
+makes one: a single character in the field's own properties, which pagination replaces *before*
+the flow is laid out so that its width never reaches the page. The arm matches the reference in
+both modes, unconditionally — with no cached result there is nothing for `\* MERGEFORMAT` to
+preserve.
+
+**Its measured reach is nil, and why is the finding.** `census-noseparator.py` counts **10 such
+`PAGE` fields in 8 corpus documents**, every one in a running head — and rendering all eight at
+the round's base and at its head leaves **8 of 8 byte-identical**. Nine of the ten are Word's
+"page number in a frame" template leftover: a paragraph whose whole content is the field, carrying
+a `w:framePr` and no other text, which neither engine draws. The tenth reads `Page  of 10` and
+sits in a `footer2.xml` that the document never reaches. So the corpus agrees with the reference
+on all eight before and after, and the fixture is the only thing that says the rule is right.
 
 ## 2. The rule, and why only a recomputed field
 

@@ -152,10 +152,13 @@ exactly. It also unmasks three further local events (at reference pages 3/4, 9/1
 the footer was hiding, so the page total goes from one out to three out. Those three are the work
 that would make the reference's rule safe to prefer here; until then Word agrees with us.
 
-**A separate defect found with it and not fixed**: a complex field with no
-`w:fldChar w:fldCharType="separate"` has no cached result, the reference computes and draws its
-value, and this tree draws nothing at all. `Substitute` covers the constant fields on that path
-and a page field is not one of them. `probes/fieldrpr-r168`'s `NOSEPARATOR` arm.
+**A separate defect found with it, and fixed unconditionally rather than switched**: a complex
+field with no `w:fldChar w:fldCharType="separate"` has no cached result, so there was no span for
+pagination to write its value over and the field drew nothing where 26.2.4.2 draws it. With no
+cached result there is nothing for `\* MERGEFORMAT` to preserve, so Word and the reference agree
+and this is not a parity question. `DocxLayoutSource.PlaceHolder`; reach **0 of the 8 corpus
+documents that state one**, because nine of the ten are Word's "page number in a frame" template
+leftover that neither engine draws — `probes/fieldrpr-r168` §1.
 
 ---
 

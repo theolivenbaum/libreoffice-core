@@ -1954,6 +1954,39 @@ public sealed partial class DocxLayoutSource
         }
 
         /// <summary>
+        /// Makes a result for a page field that has none, so that pagination has somewhere to write.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A complex field with no <c>w:fldChar w:fldCharType="separate"</c> has no cached result at
+        /// all, and a page field's value is written by <see cref="PageFields"/> over a span of the
+        /// paragraph's text — so with no span there is nothing to write over and the field draws
+        /// <em>nothing</em>. 26.2.4.2 computes and draws it. Measured as the <c>NOSEPARATOR</c> arm of
+        /// <c>probes/fieldrpr-r168</c>, and censused at <strong>10 such <c>PAGE</c> fields in 8 corpus
+        /// documents, every one of them in a running head</strong> — so those eight print no page
+        /// number at all, on every page.
+        /// </para>
+        /// <para>
+        /// One character, in the field's own properties, and its <em>width never reaches the page</em>:
+        /// <see cref="PageFields.Resolve"/> substitutes before the flow is laid out, precisely so that a
+        /// value of a different width from the one it replaces does not move the rest of the line. The
+        /// one pass that can draw it is the measuring pass of a two-pass layout, where a
+        /// <c>NUMPAGES</c> is not yet resolvable — and there this stands in for a cached result that
+        /// does not exist rather than for one it is overriding.
+        /// </para>
+        /// </remarks>
+        private bool PlaceHolder(OpenField field)
+        {
+            if (FieldInstructions.PageFieldOf(field.Instruction.ToString()) is null) return false;
+
+            XElement? outer = _runProperties;
+            _runProperties = field.InstructionProperties;
+            Emit("1");
+            _runProperties = outer;
+            return true;
+        }
+
+        /// <summary>
         /// Records a field that has just ended, when it is one whose value pagination decides.
         /// </summary>
         private void CloseField(OpenField field)
@@ -2145,6 +2178,10 @@ public sealed partial class DocxLayoutSource
                                         {
                                             closing.ResultAt = at;
                                             _hidden--;
+                                        }
+                                        else if (PlaceHolder(closing))
+                                        {
+                                            closing.ResultAt = at;
                                         }
                                     }
                                     else if (closing.Substituted)

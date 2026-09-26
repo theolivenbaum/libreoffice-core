@@ -76,6 +76,31 @@ public sealed class FieldResultFormatTests
     [Fact]
     public void APlainRunIsUntouched() => SizeOf("plain").ShouldBe(Cached);
 
+    /// <summary>
+    /// A page field with no <c>separate</c> marker has no cached result, and is drawn anyway.
+    /// </summary>
+    /// <remarks>
+    /// Its value is written by <see cref="PageFields"/> over a span of the paragraph's text, so with
+    /// no result there is no span and the field drew <em>nothing</em> — where 26.2.4.2 computes and
+    /// draws it. A result is therefore made: one character, in the field's own properties, which
+    /// pagination replaces before the flow is laid out so that its width never reaches the page.
+    /// Censused at 10 such <c>PAGE</c> fields in 8 corpus documents, of which nine are Word's
+    /// "page number in a frame" template leftover that neither engine draws — so the measured reach
+    /// is nil and the fixture is what says the rule is right.
+    /// </remarks>
+    [Fact]
+    public void ASeparatorLessPageFieldIsDrawnAtAll()
+    {
+        LaidOutPage page = Paginate()[0];
+        page.Footer.ShouldNotBeNull();
+
+        PageParagraph arm = page.Footer!.Blocks.OfType<PageParagraph>()
+            .First(p => p.Text.StartsWith("noseparator", StringComparison.Ordinal));
+
+        arm.Text.ShouldBe("noseparator1");
+        SizeOf("noseparator").ShouldBe(Cached);
+    }
+
     /// <summary>The size the run after the named label is drawn at.</summary>
     private static Length SizeOf(string label)
     {
@@ -178,6 +203,11 @@ public sealed class FieldResultFormatTests
                 <w:fldSimple w:instr=" FILENAME ">
                   <w:r><w:rPr><w:sz w:val="40"/></w:rPr><w:t>cached.doc</w:t></w:r>
                 </w:fldSimple></w:p>
+              <w:p><w:r><w:t>noseparator</w:t></w:r>
+                <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+                <w:r><w:rPr><w:sz w:val="40"/></w:rPr>
+                  <w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>
+                <w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
               <w:p><w:r><w:t>nomerge-complex</w:t></w:r>
                 <w:r><w:rPr><w:sz w:val="40"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>
                 <w:r><w:rPr><w:sz w:val="40"/></w:rPr>
