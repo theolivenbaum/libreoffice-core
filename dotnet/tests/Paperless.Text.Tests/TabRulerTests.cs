@@ -308,11 +308,40 @@ public sealed class TabRulerTests
             EndIndent = Length.FromPoints(4),
         };
 
-        // "ab" ends at 2 and "cd" is 2 wide, so the unstretched end is 4; less the 4 pt given back.
+        // "ab" ends at 2 and "cd" is 2 wide, so the unstretched end is 4; less the 4 pt given back,
+        // floored at where the tab began, because the give-back is the trailing stretch's alone.
         TabRuler.WidthOf(
                 "ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(24),
                 countsDeferredStretch: false)
-            .ShouldBe(Length.Zero);
+            .ShouldBe(Length.FromPoints(2));
+    }
+
+    /// <summary>
+    /// The text in front of the tab cannot borrow the indent to stay on the line.
+    /// </summary>
+    /// <remarks>
+    /// Writer reaches the wider limit only once the right tab is the pending one
+    /// (<c>GetLastTab()</c>, <c>sw/source/core/text/inftxt.cxx</c>:2142-2144), so everything before
+    /// that tab was already fitted against <c>rInf.Width()</c>. Subtracting the indent from the
+    /// whole line instead lets a long title stay on a line the reference wraps — measured on
+    /// <c>SPA-02_mcar_part-2_and_IS_v2.9</c>, whose table of contents this tree fitted one word too
+    /// far and then pushed the bare page number onto a line of its own.
+    /// </remarks>
+    [Fact]
+    public void TheTextBeforeTheTabDoesNotGetTheIndent()
+    {
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(24), TabAlignment.Right)) with
+        {
+            TabsOverSpacing = true,
+            EndIndent = Length.FromPoints(4),
+        };
+
+        // A 22 pt title runs past a 20 pt line on its own; the trailing "cd" may reach into the
+        // indent, but the answer must still report the title's own overrun rather than 22 + 2 - 4.
+        TabRuler.WidthOf(
+                new string('a', 22) + "\tcd", 0, 25, format, Measure,
+                rightEdge: Length.FromPoints(24), countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(22));
     }
 
     /// <summary>The control: a stop inside the line gives nothing back.</summary>

@@ -203,7 +203,13 @@ public static class TabRuler
 
         if (countsDeferredStretch || !last.Deferred) return last.Right;
 
-        return last.GapLeft + last.Width - GivenBack(last, format, rightEdge);
+        // Never below `GapLeft`: the give-back is the trailing stretch's alone. Writer reaches the
+        // wider limit only once the right tab is the pending one, so everything in front of that tab
+        // was already fitted against the line's own width and a long title cannot borrow the indent
+        // to stay on the line. Reported as a width rather than as a limit, so the floor is where the
+        // tab began.
+        return Length.Max(
+            last.GapLeft, last.GapLeft + last.Width - GivenBack(last, format, rightEdge));
     }
 
     /// <summary>

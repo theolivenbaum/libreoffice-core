@@ -81,6 +81,40 @@ The two that worsen do so by 0.07 each and both already fail on pages for the re
 `ParagraphFormat.TabsOverSpacing`, whose only two setters in the tree are `WordParagraphFormats`
 and `RtfDocumentReader` — the ODF, WW8, slide and sheet readers never set it.
 
+## Correction (r179): the give-back is the trailing stretch's alone
+
+The first cut subtracted the end indent from the **whole line's** fitted width, which also let a
+long *title* borrow it and stay on a line the reference wraps. Writer reaches the wider limit only
+once the right tab is the pending one — `GetLastTab()`, `inftxt.cxx`:2142-2144 — so everything in
+front of that tab was already fitted against `rInf.Width()`.
+
+`WidthOf` now floors the answer at `GapLeft`, where the tab began, so the title still has to fit
+the line and only the stretch after the tab may reach into the indent.
+
+Found by following the corrected ink ranking (`probes/inkmetric-r178`) to its head:
+`SPA-02_mcar_part-2_and_IS_v2.9.docx` is `02_mcar`'s Spanish sibling with the same TOC geometry,
+and there this tree fitted an entry's last word one line too high and then pushed the bare page
+number onto a line of its own with no leader at all. A blind reading of its page 21 caught exactly
+that — *"the left rendering loses the dot leader entirely when the trailing word is pushed to its
+own line, while the right keeps the word, leaders and number glued together"*.
+
+**4 of 337 renderings move, all four better and none worse**, 333 byte-identical, no page count
+changed and so no gate verdict either:
+
+| document | pixelD before | after |
+|---|---:|---:|
+| `SPA-02_mcar_part-2_and_IS_v2.9.docx` | 1128.68 | **1050.26** |
+| `02_mcar_part-2_and_IS_v2.10.docx` | 223.28 | 222.79 |
+| `24-25_FAA_Holdover_Tables.docx` | 690.96 | 690.79 |
+| `FAA 2025-26 Holdover Tables.docx` | 397.69 | 397.51 |
+
+`SPA-02`'s **page 21 is now identical** — 53 lines on both sides, the same first and last body
+baselines, the same footer. What is left on that document is two other things and neither is this
+rule: a nested list that runs one item later than the reference's from page 140 on, and a table
+whose rows drift about 0.02 pt each so that page 3's lines sit 0.6 pt low by the foot.
+
+`TheTextBeforeTheTabDoesNotGetTheIndent` pins the floor.
+
 ## Deliberately not modelled: the `.doc` arm
 
 `GetLineWidth` needs `TAB_OVER_MARGIN` **or** `TAB_OVER_SPACING`, and a binary `.doc` carries the
