@@ -104,7 +104,6 @@ public sealed record WordCharacterFormat
         // resolved — so it has to be read before anything else can be.
         string? characterStyleId = Word.Value(directRunProperties, "rStyle");
 
-        WordProperty underline = Get("u");
         WordProperty verticalAlignment = Get("vertAlign");
         WordProperty size = Get("sz");
         WordProperty colour = Get("color");
@@ -114,7 +113,8 @@ public sealed record WordCharacterFormat
             IsBold = Get("b").IsOn,
             IsItalic = Get("i").IsOn,
             // w:u carries the line style in w:val, so "none" is off and anything else is on.
-            Underline = UnderlineOf(underline),
+            Underline = UnderlineOf(styles.RunPropertyLayers(
+                "u", directRunProperties, paragraphStyleId, characterStyleId)),
             IsStruckThrough = Get("strike").IsOn || Get("dstrike").IsOn,
             IsSuperscript = verticalAlignment.Value == "superscript",
             IsSubscript = verticalAlignment.Value == "subscript",
@@ -153,21 +153,50 @@ public sealed record WordCharacterFormat
     /// <c>double</c> and <c>wavyDouble</c> draw two. <c>thick</c> and the six heavy forms —
     /// <c>dottedHeavy</c>, <c>dashedHeavy</c>, <c>dashLongHeavy</c>, <c>dashDotHeavy</c>,
     /// <c>dashDotDotHeavy</c>, <c>wavyHeavy</c> — draw one at about twice the weight. The other
-    /// nine draw one ordinary line, and an unstated <c>w:val</c> is one too: the attribute defaults
-    /// to <c>single</c>.
+    /// nine draw one ordinary line.
+    /// </para>
+    /// <para>
+    /// <strong>A <c>w:u</c> stating no <c>w:val</c> is not an underline, and it does not turn one
+    /// off either — it is transparent.</strong> <c>CT_Underline</c>'s <c>val</c> is optional with no
+    /// default (<c>sw/source/writerfilter/ooxml/model.xml</c>:17021-17027), so an element without it
+    /// emits no <c>LN_CT_Underline_val</c> at all and <c>DomainMapper::lcl_sprm</c>'s case for it
+    /// (<c>dmapper/DomainMapper.cxx</c>:364) never fires; the sibling case at <c>:368</c> takes the
+    /// <c>w:color</c> and nothing else. So the run keeps whatever an outer layer stated, which is why
+    /// this searches the layers for the innermost one carrying a <c>val</c> rather than taking the
+    /// innermost <c>w:u</c> and reading its absent one as <c>single</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Reading it as <c>single</c> cost a whole document's ink.</strong>
+    /// <c>f445896eb008d14c1746fc37d412dc22.docx</c> states <c>&lt;w:u w:color="000000"/&gt;</c> on four
+    /// of its styles and <c>&lt;w:u w:color="666666"/&gt;</c> on a run, with no <c>val</c> anywhere, and
+    /// this tree underlined every word of it: 108 filled rules per page against 26.2.4.2's none, on
+    /// fourteen of its fifteen pages, at identical text, identical faces and identical line breaks.
+    /// The gate cannot see an underline. <c>probes/underline-r176</c>.
     /// </para>
     /// </remarks>
-    internal static TextUnderline UnderlineOf(WordProperty property)
+    /// <param name="layers">
+    /// Every <c>w:u</c> the run resolves through, innermost first — see
+    /// <see cref="WordStyles.RunPropertyLayers"/>.
+    /// </param>
+    internal static TextUnderline UnderlineOf(IReadOnlyList<XElement> layers)
     {
-        if (!property.HasValue || property.Value == "none") return TextUnderline.None;
+        ArgumentNullException.ThrowIfNull(layers);
 
-        return property.Value switch
+        foreach (XElement layer in layers)
         {
-            "double" or "wavyDouble" => TextUnderline.DoubleLine,
-            "thick" or "dottedHeavy" or "dashedHeavy" or "dashLongHeavy" or "dashDotHeavy"
-                or "dashDotDotHeavy" or "wavyHeavy" => TextUnderline.BoldLine,
-            _ => TextUnderline.SingleLine,
-        };
+            if (layer.Attribute(Word.Name("val"))?.Value is not { Length: > 0 } stated) continue;
+
+            return stated switch
+            {
+                "none" => TextUnderline.None,
+                "double" or "wavyDouble" => TextUnderline.DoubleLine,
+                "thick" or "dottedHeavy" or "dashedHeavy" or "dashLongHeavy" or "dashDotHeavy"
+                    or "dashDotDotHeavy" or "wavyHeavy" => TextUnderline.BoldLine,
+                _ => TextUnderline.SingleLine,
+            };
+        }
+
+        return TextUnderline.None;
     }
 
     /// <summary>
