@@ -162,6 +162,74 @@ leftover that neither engine draws — `probes/fieldrpr-r168` §1.
 
 ---
 
+## A VML shape inside a `v:group` loses its paragraph formatting, its numbering and its italic
+
+**26.2.4.2**: a `v:shape` at the top level of a `w:pict` becomes a Writer text frame and its
+`w:txbxContent` goes through the whole paragraph machinery. The same shape inside a `v:group`
+cannot be a text frame, so it becomes a drawing object whose text is EditEngine text — and almost
+none of the paragraph formatting survives that. Measured on thirteen one-property fixtures against
+a `w:docDefaults` stating `w:spacing w:after="160" w:line="259" w:lineRule="auto"`:
+
+| property | top level | inside a `v:group` |
+|---|---|---|
+| `w:docDefaults` spacing | pitch 22.90 | pitch **13.80** — the bare face metric |
+| `w:ind w:left="1440"` / `w:firstLine="720"` | 79.3 / 43.3 | **7.2 / 7.2** — dropped |
+| `w:numPr` | `1. Alpha` | **`Alpha`** — the number is not drawn |
+| `w:jc w:val="center"` | that paragraph | **and the paragraph after it** |
+| `w:i` | italic | **upright** |
+| `w:sz`, `w:b`, `w:rFonts` | applied | applied |
+
+`oox::vml::TextBoxContext` reads two things out of a `w:pPr` — `w:jc` and `w:pStyle`
+(`oox/source/vml/vmltextboxcontext.cxx`:265-275) — and `TextBox::convert`
+(`vmltextbox.cxx`:78-160) appends the portions with `ParaAdjust` and six character properties. A
+paragraph break is itself a portion appended as `"\n"` carrying that paragraph's model, which is
+why the adjust lands on the paragraph the break *opens* and leaks forward exactly one paragraph.
+The character half of that reading does not describe Writer — `w:sz`, `w:b` and `w:rFonts` arrive
+by some other route while `w:i` falls between the two — so the arms are the authority and the
+file:line is the explanation of the paragraph half only.
+
+**Word**: honours all of it — the spacing, the indents, the numbering and the italic.
+
+**This tree**: honours all of it, by running the same machinery whether or not the shape is
+grouped. Thirteen arms in `probes/vmlboxtext-r172/results.md`; every top-level arm is reproduced
+exactly.
+
+**Reach**: **113 of the corpus's 166 reachable VML text boxes are inside a `v:group`, and all 113
+are in the five `06x_Work_Breakdown_Structure_Template` documents.** (The 1638 a markup census
+gives are 1472 `mc:Fallback` halves that neither renderer reads, plus 53 top-level boxes where the
+two engines agree — `probes/vmlinset-r171/results.md`.)
+
+**What it costs**: nothing the gate can see. All five are one page and all five are `match` after
+round 171, and their summed unsigned ink against 26.2.4.2 is 0.02 to 0.07. The residual it
+accounts for, each span paired against the reference's within its own box
+(`probes/vmlgroup-r172/inbox.py`):
+
+| document | spans | mean \|dx\| | mean \|dy\| | max \|dy\| |
+|---|---:|---:|---:|---:|
+| `068` | 26 | 0.10 | 0.60 | 0.80 |
+| `066` | 24 | 0.04 | 1.34 | 1.60 |
+| `067` | 17 | 0.04 | 1.48 | 1.60 |
+| `065` | 10 | 1.62 | 4.20 | 15.20 |
+| `069` | 66 | 24.93 | 27.14 | 63.70 |
+
+`069` is the pitch alone: 23.10 against 14.00, which is `1.079 × 13.97 + 8` against the bare 13.97.
+
+**Not switched, and this one is deliberate rather than pending.** The other entries in this file
+each have a switch because reproducing them is a *reading* of the file that can be turned on and
+off at one seat. This one is not a reading: it would mean routing a grouped shape's text through a
+different layout engine, so that an author's numbering, indents, spacing and italic are discarded
+on purpose — for five one-page templates that already pass, and 0.05 of ink. The measurement is
+the deliverable; if a document ever turns up where the pitch costs a page inside a fixed-height
+box, this is the entry that explains it.
+
+**And one thing in `069` is not this rule.** Its `SUBTASK` is drawn 59.80 pt wide by the reference
+and 55.67 by us in the same face at the same size. That is `CLAUDE.md`'s **seventh confound** —
+measuring on the draw layer in the class-ful family and drawing in the class-less one — reaching a
+Writer document, which that section says body text cannot show *because `SwTextPainter` never
+becomes a drawinglayer primitive*. A grouped VML shape does.
+
+---
+
 ## Still LibreOffice's reading, and why
 
 These are places where this tree recomputes a field that Word would leave at its cache, and they
