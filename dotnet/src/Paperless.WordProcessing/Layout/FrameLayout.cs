@@ -589,7 +589,7 @@ public static class FrameLayout
             : FlowLayouter.HeightOf(
                 frame.Blocks, width, 0, collapsesSpacing, addsCellLineSpacing);
 
-        inside = Length.Max(inside, frame.Size.Height - insets);
+        inside = Length.Max(inside, (frame.HeightFloor ?? frame.Size.Height) - insets);
         inside = Length.Max(inside, MinimumFlyHeight);
 
         Length height = inside + insets;

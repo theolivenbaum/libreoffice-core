@@ -76,6 +76,48 @@ public sealed class TextBoxOverflowTests
         => Drawn("BOXC").ShouldBe(6, "spAutoFit grows the box rather than truncating the text");
 
     /// <summary>
+    /// An autofitting box is as tall as its text, and its stated height is not even a floor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Growing it is only half of what <c>a:spAutoFit</c> says. Measured on 26.2.4.2 over twelve
+    /// authored boxes, <c>dotnet/probes/words-spautofit-r182/</c>: three text lengths crossed with a
+    /// stated <c>cy</c> of 200 pt and of 40 pt give <b>25.55, 62.45 and 117.80 pt whichever <c>cy</c>
+    /// is stated</b>, against 200.00 and 40.00 for the same boxes under <c>a:noAutofit</c>. So the
+    /// stated height is read neither as a floor nor as a ceiling — which is <em>not</em> ODF's rule,
+    /// where <c>fo:min-height</c> is a floor and a frame with less text than it states keeps its
+    /// height. Hence <see cref="PageFrame.HeightFloor"/>.
+    /// </para>
+    /// <para>
+    /// <c>BOXC</c> is the case that distinguishes them in the other direction from the test above:
+    /// it states 15 pt and holds six 8 pt lines, so a floor of 15 pt and a floor of nought agree.
+    /// The pair asserted here is the reader's own answer, which does not, plus the placed height,
+    /// which must have left 15 pt behind entirely.
+    /// </para>
+    /// <para>
+    /// It is worth 2.02 % of a page on <c>words/done-016/docx/HC-Bulletin-template.docx</c>, whose
+    /// page 5 states 110.55 pt around three 16 pt paragraphs: both sides fill the same rectangle at
+    /// the same top edge and the same 508.50 pt width, ours 110.55 pt deep against the reference's
+    /// 65.75. That page's verdict goes from MAJOR to ok.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnAutoFittingBoxTakesItsHeightFromItsTextAndNotFromTheFile()
+    {
+        FrameNamed("BOXC").GrowsToContent.ShouldBeTrue("spAutoFit fits the shape to the text");
+        FrameNamed("BOXC").HeightFloor.ShouldBe(Length.Zero, "and the stated cy is not a floor");
+
+        FrameNamed("BOXA").GrowsToContent.ShouldBeFalse("noAutofit keeps the stated height");
+        FrameNamed("BOXA").HeightFloor.ShouldBeNull();
+
+        // The stated 15 pt is gone: six 8 pt lines and 7.2 pt of inset cannot fit inside it.
+        Placed("BOXC").Area.Height.ShouldBeGreaterThan(Length.FromPoints(40));
+
+        // And a stated-height box is still exactly what it states.
+        Placed("BOXA").Area.Height.ShouldBe(Length.FromPoints(30));
+    }
+
+    /// <summary>
     /// The truncation is the layout's, not the reader's: every paragraph is still in the model.
     /// </summary>
     /// <remarks>
@@ -168,6 +210,17 @@ public sealed class TextBoxOverflowTests
         {
             if (frame.Frame.Name != $"Text Box {tag}") continue;
             return frame.Content is null ? 0 : frame.Content.Lines.Count;
+        }
+
+        throw new InvalidOperationException($"the fixture has no frame named 'Text Box {tag}'");
+    }
+
+    /// <summary>One of the fixture's frames as it was placed, rectangle included.</summary>
+    private static PlacedFrame Placed(string tag)
+    {
+        foreach (PlacedFrame frame in Paginate()[0].Frames)
+        {
+            if (frame.Frame.Name == $"Text Box {tag}") return frame;
         }
 
         throw new InvalidOperationException($"the fixture has no frame named 'Text Box {tag}'");

@@ -336,6 +336,8 @@ internal static class DocxFrames
             Padding = box is null ? default : Insets(placed),
             TextAlignment = box is null ? default : TextAlignment(placed),
             HasFixedHeight = box is not null && !GrowsWithText(placed),
+            GrowsToContent = box is not null && FitsShapeToText(placed),
+            HeightFloor = box is not null && FitsShapeToText(placed) ? Length.Zero : null,
         };
     }
 
@@ -837,6 +839,8 @@ internal static class DocxFrames
             Padding = box is null ? default : Insets(shape),
             TextAlignment = box is null ? default : TextAlignment(shape),
             HasFixedHeight = box is not null && !GrowsWithText(shape),
+            GrowsToContent = box is not null && FitsShapeToText(shape),
+            HeightFloor = box is not null && FitsShapeToText(shape) ? Length.Zero : null,
         };
     }
 
@@ -1464,8 +1468,71 @@ internal static class DocxFrames
             _ => VerticalTextAlignment.Top,
         };
 
+    /// <summary>
+    /// Whether the shape's height is its text's rather than the <c>a:ext</c> it states.
+    /// </summary>
+    /// <remarks>
+    /// <c>a:spAutoFit</c>, which <c>TextBodyPropertiesContext</c>
+    /// (<c>oox/source/drawingml/textbodypropertiescontext.cxx</c>:245-251) turns into
+    /// <c>TextAutoGrowHeight</c> — for horizontal text only; a vertical body keeps its stated height.
+    /// It decides two separate things, and both are set from it: the shape is not truncated to the
+    /// stated height (<see cref="PageFrame.HasFixedHeight"/>) and it is not held at it either
+    /// (<see cref="PageFrame.GrowsToContent"/> with a floor of zero — see
+    /// <see cref="PageFrame.HeightFloor"/> for the twelve boxes that measured it).
+    /// </remarks>
     private static bool GrowsWithText(XElement shape)
         => BodyProperties(shape) is { } body && Child(body, "spAutoFit") is not null;
+
+    /// <summary>
+    /// Whether the shape's <em>height</em> is taken from its text, which is narrower than
+    /// <see cref="GrowsWithText"/> by exactly one case.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A WordArt shape keeps the height the file states however it autofits.</b>
+    /// <c>WpsContext::correctTextBoxesForWordArt</c>
+    /// (<c>oox/source/shape/WpsContext.cxx</c>:1021-1023) turns a shape whose body carries an
+    /// <c>a:prstTxWarp</c> other than <c>textNoShape</c> into a Fontwork and then clears both
+    /// <c>TextAutoGrowHeight</c> and <c>TextAutoGrowWidth</c>, with the reason in the source:
+    /// <em>"Fontwork stretches the text to the given path. So adapt shape size to text is
+    /// nonsensical."</em>
+    /// </para>
+    /// <para>
+    /// Found by sweeping the change that added this: fitting every <c>a:spAutoFit</c> shape to its
+    /// text took <c>words/done-014/docx/exhibit-06---technical-architecture-template.docx</c> from
+    /// <b>0.13 to 3.18</b> unsigned ink and from no major page to two, because each of its two
+    /// headers holds a <c>fromWordArt="1"</c> shape stating 412 × 248 pt around one run of 1 pt
+    /// <c>DRAFT</c>. Fitted to that run, the diagonal watermark collapses to a speck. Nothing else
+    /// in the 337 moved either way.
+    /// </para>
+    /// <para>
+    /// <see cref="PageFrame.HasFixedHeight"/> is deliberately left on the wider test. The reference
+    /// does record <c>draw:auto-grow-height="false"</c> for such a shape, but what that means for a
+    /// Fontwork — whose text is stretched along a path rather than broken into lines — is a
+    /// different question from whether a text frame truncates, and no measurement was taken on it.
+    /// Narrowing only the new half keeps this document exactly where it was before the round.
+    /// </para>
+    /// <para>
+    /// The conversion has two further conditions this does not model, both narrowing it further:
+    /// LibreOffice keeps the frame when the shape's geometry is not <c>ooxml-rect</c>, and when the
+    /// frame's text yields no properties to copy. The first is checked here; the second is a shape
+    /// with no text at all, whose fitted and stated heights differ by the insets alone.
+    /// </para>
+    /// </remarks>
+    private static bool FitsShapeToText(XElement shape)
+        => GrowsWithText(shape) && !IsFontwork(shape);
+
+    /// <summary>Whether the shape is one Writer turns into a Fontwork.</summary>
+    private static bool IsFontwork(XElement shape)
+    {
+        if (BodyProperties(shape) is not { } body) return false;
+        if (Child(body, "prstTxWarp")?.Attribute("prst")?.Value is not { } warp) return false;
+        if (warp is "textNoShape") return false;
+
+        // `sType != "ooxml-rect"` — a warp on any other geometry leaves the frame alone.
+        return Descendant(shape, "spPr") is { } properties
+               && Child(properties, "prstGeom")?.Attribute("prst")?.Value == "rect";
+    }
 
     /// <summary>A child by local name, in whichever namespace it was written.</summary>
     /// <remarks>
