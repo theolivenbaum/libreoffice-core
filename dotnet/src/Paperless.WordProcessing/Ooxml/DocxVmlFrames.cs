@@ -369,6 +369,8 @@ internal static class DocxVmlFrames
                 BorderWidth = paint.Width,
                 IsLine = paint.IsLine,
                 IsLineMirrored = paint.IsLineMirrored,
+                HeadEnd = paint.HeadEnd,
+                TailEnd = paint.TailEnd,
                 Blocks = text is not null && content is not null ? content(text) : [],
                 Padding = text is null ? default : Insets(text),
                 HasFixedHeight = text is not null && !GrowsWithText(member, text),
@@ -484,6 +486,8 @@ internal static class DocxVmlFrames
             BorderWidth = paint.Width,
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
+            HeadEnd = paint.HeadEnd,
+            TailEnd = paint.TailEnd,
             Blocks = box is not null && content is not null ? content(box) : [],
             Padding = box is null ? default : Insets(box),
             HasFixedHeight = box is not null && !GrowsWithText(shape, box),
@@ -598,6 +602,8 @@ internal static class DocxVmlFrames
             BorderWidth = paint.Width,
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
+            HeadEnd = paint.HeadEnd,
+            TailEnd = paint.TailEnd,
             Blocks = box is not null && content is not null ? content(box) : [],
             Padding = box is null ? default : Insets(box),
             HasFixedHeight = box is not null && !GrowsWithText(shape, box),
@@ -614,6 +620,12 @@ internal static class DocxVmlFrames
         Colour? Fill, Colour? Line, Length Width, bool IsLine, bool IsLineMirrored)
     {
         public static readonly VmlPaint None = new(null, null, Length.Zero, false, false);
+
+        /// <summary>The marker the outline carries at its first point, or none.</summary>
+        public LineEnd HeadEnd { get; init; }
+
+        /// <summary>The one at its last, or none.</summary>
+        public LineEnd TailEnd { get; init; }
     }
 
     /// <summary>
@@ -747,8 +759,60 @@ internal static class DocxVmlFrames
                 ?? string.Empty)
             ?? Hairline;
 
-        return new VmlPaint(
-            fill, line, width <= Length.Zero ? Hairline : width, rule, IsMirrored(style));
+        return new VmlPaint(fill, line, width <= Length.Zero ? Hairline : width, rule,
+            IsMirrored(style))
+        {
+            HeadEnd = Arrow(strokeElement, "start"),
+            TailEnd = Arrow(strokeElement, "end"),
+        };
+    }
+
+    /// <summary>
+    /// The marker one end of a <c>v:stroke</c> carries, in the DrawingML vocabulary
+    /// <see cref="LineEnds"/> speaks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// VML names five arrow shapes and DrawingML names the same five differently, so the reference
+    /// translates rather than reads: <c>lclGetDmlArrowType</c>
+    /// (<c>oox/source/vml/vmlformatting.cxx</c>:599-611) maps <c>block</c> to <c>triangle</c>,
+    /// <c>classic</c> to <c>stealth</c> and <c>open</c> to <c>arrow</c>, leaving <c>diamond</c> and
+    /// <c>oval</c> alone; the two size words map <c>narrow</c>/<c>short</c> to <c>sm</c> and
+    /// <c>wide</c>/<c>long</c> to <c>lg</c> (<c>:613-632</c>). An unknown or absent type is
+    /// <c>none</c>, which draws nothing.
+    /// </para>
+    /// <para>
+    /// This is on the <c>v:stroke</c> child and never on the shape, unlike every other outline
+    /// attribute here, each of which has a shape-level spelling as well.
+    /// </para>
+    /// </remarks>
+    /// <param name="stroke">The shape's <c>v:stroke</c>, or null when it carries none.</param>
+    /// <param name="which">Either <c>start</c> or <c>end</c>.</param>
+    private static LineEnd Arrow(XElement? stroke, string which)
+    {
+        if (stroke?.Attribute(which + "arrow")?.Value is not { Length: > 0 } arrow) return default;
+
+        string? type = arrow switch
+        {
+            "block" => "triangle",
+            "classic" => "stealth",
+            "diamond" => "diamond",
+            "oval" => "oval",
+            "open" => "arrow",
+            _ => null,
+        };
+
+        return type is null
+            ? default
+            : new LineEnd(type, Size(which + "arrowwidth"), Size(which + "arrowlength"));
+
+        string? Size(string name) => stroke.Attribute(name)?.Value switch
+        {
+            "narrow" or "short" => "sm",
+            "medium" => "med",
+            "wide" or "long" => "lg",
+            _ => null,
+        };
     }
 
     /// <summary>The thinnest line LibreOffice's PDF export writes, which is what it draws a VML
