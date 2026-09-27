@@ -263,6 +263,18 @@ def diagnose(m: dict) -> str:
     # happily hides one ruined region on an otherwise-blank page.
     if (m["differing_fraction"] < 0.005 and m["mean_abs_error"] < 0.004
             and m["max_tile_error"] < 0.05 and 0.98 <= m["ink_ratio"] <= 1.02):
+        # Name colour quantisation when that is demonstrably all it is, because a raw mean
+        # difference is biased by it and a reader who ranks on one will chase a shaded page
+        # for nothing. Not one pixel differs past DIFF_TOLERANCE and the mean is still not
+        # zero: every difference is sub-tolerance, and across a large flat fill that is the
+        # two writers' decimal precision rather than antialiasing. Measured: this tree emits
+        # `0.502 rg` for grey 128 and 26.2.4.2 emits `0.5019607843`, and the rasteriser
+        # resolves a literal at or below v/255 to v-1, so every shaded area is one level
+        # apart although both name the same colour.
+        if m["differing_fraction"] == 0.0 and m["mean_abs_error"] > 0.0005:
+            return ("MATCH - no pixel differs past the tolerance. The residual mean of "
+                    f"{m['mean_abs_error'] * 255:.2f}/255 is colour quantisation across a "
+                    "flat fill, not a rendering difference; do not rank on it.")
         return "MATCH - differences are at antialiasing level."
     # Checked before reflow: when content is simply absent, the shift heuristic often
     # also fires (blank rows align with other blank rows), which would misdiagnose it.

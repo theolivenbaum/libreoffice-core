@@ -1127,6 +1127,31 @@ python3 $S/make-batches.py /c/sandbox/workdir/sample-files /tmp/triage/complexit
 
 ## Traps
 
+### Set `REF_SOFFICE`, and read the line the sweep prints back
+
+`/usr/bin/soffice` is 24.2.7.2 and the tree is calibrated to 26.2.4.2. Both sweeps here now
+resolve `${REF_SOFFICE:-soffice}` and announce the version they got; until round 180
+`track-ink-sweep.sh` and `ref-baseline.sh` hard-coded PATH while `batch-check.sh` did not, so
+an ink sweep and a gate sweep run side by side measured different binaries in silence.
+Measured on `words/done-005`: `TOTAL 10 MATCH 9` against PATH, `MATCH 10` against 26.2.4.2.
+See `libreoffice-reference/SKILL.md` for the full note.
+
+### `ink.tsv` has a `drift` column, and a non-zero value voids that row's ink
+
+Ink is compared page against page. Two documents can hold the same number of pages and still
+carry different content on them, where a block lost early is made up later — and every page
+between is then compared against its neighbour. `drift` counts the pages holding content the
+reference puts elsewhere, read from the text layer rather than from the pixels, so it is an
+independent channel.
+
+**One lost page reads as hundreds of defects.** It has misread three documents in one session:
+`02_mcar_part-2_and_IS_v2.10` ranked first on a track at 881.67, and both FAA Holdover Tables
+at 321.27 and 93.02 — every one of them one page. Explain the pagination before ranking such a
+row.
+
+It is a screen and not a verdict: a page of dense numerals can fall below the threshold while
+being the right page.
+
 **`soffice` exits 0 having converted nothing.** Decide success by the output file existing,
 never by the exit code. Every script here does.
 

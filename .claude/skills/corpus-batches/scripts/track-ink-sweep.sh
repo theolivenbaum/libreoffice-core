@@ -54,6 +54,20 @@ mkdir -p "$OUT" && OUT="$(cd "$OUT" && pwd)"
 DIFF="$REPO/.claude/skills/render-comparison/scripts/pdf-image-diff.py"
 [ -f "$DIFF" ] || { echo "no pdf-image-diff.py at $DIFF" >&2; exit 1; }
 
+# Which soffice is the reference. `$REF_SOFFICE` wins; otherwise whatever is on PATH.
+#
+# This script hard-coded `soffice` for its whole life while its sibling `batch-check.sh`
+# honoured the variable and announced the resolved version -- so an ink sweep run beside a
+# gate sweep silently scored against a DIFFERENT BINARY, and said nothing. On this machine
+# PATH is 24.2.7.2 and the tree is calibrated to 26.2.4.2: measured on `words/done-005`,
+# `f445896e…docx` is 15 pages against 24.2.7.2's 16 and against 26.2.4.2's 15, so the sweep
+# banked a `pages` failure for a document that matches. The wrong reference does not fail; it
+# answers a different question fluently. Announce it, so the run says which one it is.
+REF="${REF_SOFFICE:-soffice}"
+command -v "$REF" >/dev/null || { echo "no soffice at $REF" >&2; exit 1; }
+echo "measuring $CLI" >&2
+echo "reference $(command -v "$REF") -- $("$REF" --version 2>/dev/null | head -1)" >&2
+
 mkdir -p "$OUT/ours" "$OUT/ref" "$OUT/cmp"
 : > "$OUT/rows.tsv"
 : > "$OUT/ink.tsv"
@@ -155,7 +169,7 @@ one() {  # one <index>
       cp -f "$REFDIR/$id.pdf" "$r"
     else
       rm -rf "$OUT/t$idx"; mkdir -p "$OUT/t$idx"
-      timeout 300 soffice -env:UserInstallation="file://$prof" \
+      timeout 300 "$REF" -env:UserInstallation="file://$prof" \
         --headless --convert-to pdf --outdir "$OUT/t$idx" "$f" >/dev/null 2>&1
       [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
     fi
@@ -195,7 +209,7 @@ one() {  # one <index>
     # Ink, whenever both sides rendered and the page counts agree. The tool refuses a
     # document whose counts differ, and rightly: page 3 against a different page 3 makes
     # every region it reports an artefact.
-    ink="-"; sink="-"; major="-"; pages="-"
+    ink="-"; sink="-"; major="-"; pages="-"; drift="-"
     if [ -f "$o" ] && [ -f "$r" ] && [ "$op" = "$rp" ]; then
       rm -rf "$OUT/c$idx"
       timeout 900 python3 "$DIFF" "$o" "$r" --outdir "$OUT/c$idx" > "$OUT/cmp/$id.txt" 2>&1
@@ -206,13 +220,20 @@ one() {  # one <index>
       sink=$(awk -F'\t' '$1 ~ /^[0-9]+$/ && $3 ~ /^-?[0-9.]+$/ {s+=$3} END{printf "%.2f", s}' \
             "$OUT/cmp/$id.txt")
       major=$(awk '/pages, .* with major differences/{print $3}' "$OUT/cmp/$id.txt")
+      # How many pages hold content the reference puts on a different page. Equal page counts
+      # do not prove alignment: a block lost early and made up later leaves every page between
+      # compared against its neighbour, and its ink is then measuring the offset. The warning
+      # is on stderr, which the redirect above already folds into the report.
+      drift=$(awk '/^WARNING: [0-9]+ of [0-9]+ pages hold different content/{print $2; exit}' \
+              "$OUT/cmp/$id.txt")
+      [ -n "$drift" ] || drift=0
       pages="$op"
       [ -n "$ink" ] || ink="?"
       [ -n "$sink" ] || sink="?"
       [ -n "$major" ] || major="?"
     fi
-    printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
-      "${f#"$ROOT_DIR"/}" "$pages" "$ink" "$sink" "$major" "$v" >> "$OUT/ink.tsv"
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+      "${f#"$ROOT_DIR"/}" "$pages" "$ink" "$sink" "$major" "$drift" "$v" >> "$OUT/ink.tsv"
   done
 }
 
@@ -227,7 +248,10 @@ wait
 {
   printf "# abs_ink = sum of the per-page UNSIGNED |ink|%% column -- rank the track on this one\n"
   printf "# signed_ink = sum of the per-page SIGNED ink%% column -- decide direction on this one\n"
-  printf "path\tpages\tabs_ink\tsigned_ink\tmajor\tverdict\n"
+  printf "# drift = pages holding content the reference puts elsewhere. NON-ZERO VOIDS THE INK:\n"
+  printf "#         those pages are compared against the wrong page, so one lost page reads as\n"
+  printf "#         hundreds of defects. Explain the pagination before ranking such a row.\n"
+  printf "path\tpages\tabs_ink\tsigned_ink\tmajor\tdrift\tverdict\n"
   sort "$OUT/ink.tsv"
 } > "$OUT/ink.tsv.tmp" && mv -f "$OUT/ink.tsv.tmp" "$OUT/ink.tsv"
 

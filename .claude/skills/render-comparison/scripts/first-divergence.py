@@ -49,6 +49,15 @@ import re
 import shutil
 import subprocess
 import sys
+
+# Which soffice is the reference. `$REF_SOFFICE` wins; otherwise whatever is on PATH.
+#
+# Hard-coding `soffice` is how a comparison silently scores against the wrong binary. On this
+# machine PATH is 24.2.7.2 and the tree is calibrated to 26.2.4.2, and the two genuinely
+# disagree: `f445896e…docx` is 15 pages under 26.2.4.2 and 16 under 24.2.7.2, so a sweep that
+# took PATH banked a `pages` failure for a document that matches. `batch-check.sh` and
+# `verdict.py` have honoured an override for a long time and their siblings did not.
+REF = os.environ.get("REF_SOFFICE", "soffice")
 import tempfile
 from pathlib import Path
 
@@ -231,7 +240,7 @@ def render_pair(src: Path, tmp: Path, cli: Path):
     (tmp / "o").mkdir(parents=True, exist_ok=True)
     (tmp / "r").mkdir(parents=True, exist_ok=True)
     run([cli, "render", "--outdir", tmp / "o", src])
-    run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp / "r", src])
+    run([REF, "--headless", "--convert-to", "pdf", "--outdir", tmp / "r", src])
     o = next(iter(sorted((tmp / "o").glob("*.pdf"))), None)
     r = next(iter(sorted((tmp / "r").glob("*.pdf"))), None)
     return o, r

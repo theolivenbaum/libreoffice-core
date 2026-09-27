@@ -43,6 +43,7 @@ and PNG is zlib plus four chunks. Adding numpy or Pillow to read two rectangles 
 would be a dependency for its own sake.
 """
 import argparse
+import difflib
 import pathlib
 import re
 import shutil
@@ -88,6 +89,45 @@ MAJOR_PAGE_INK = 0.012  # or this much of a page's total ink unaccounted for eit
 # difference and cropping would be hiding it.
 SIZE_SLACK_PIXELS = 2
 SIZE_SLACK_RATIO = 0.01
+
+
+def page_texts(pdf: pathlib.Path) -> list[str] | None:
+    """Each page's alphanumeric text, from one `pdftotext` call.
+
+    One call rather than one per page: a 727-page document is two subprocesses this way and
+    fifteen hundred the obvious way. `pdftotext` writes a form feed after every page,
+    including the last, so the split has one empty tail element to drop.
+    """
+    try:
+        done = subprocess.run(["pdftotext", "-q", str(pdf), "-"],
+                              capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    pages = done.stdout.split("\f")
+    if pages and pages[-1] == "":
+        pages.pop()
+    return ["".join(c for c in page if c.isalnum())[:400] for page in pages]
+
+
+def misaligned_pages(ours_pdf: pathlib.Path, ref_pdf: pathlib.Path) -> list[int] | None:
+    """The 1-based pages whose content is not the reference's content for that page.
+
+    `quick_ratio` rather than `ratio`, because this runs over every page and the question is
+    only whether the two are the same page. It is a screen and not a verdict: a page of dense
+    numerals can fall below the threshold while being the right page, so a hit means *explain
+    this before reading the ink*, not *this is offset*. Null when the text cannot be read,
+    which is honest — a scanned or wholly outlined document has no text layer to align on.
+    """
+    ours, reference = page_texts(ours_pdf), page_texts(ref_pdf)
+    if ours is None or reference is None:
+        return None
+    if not any(reference):
+        return None
+    return [index + 1
+            for index in range(min(len(ours), len(reference)))
+            if difflib.SequenceMatcher(None, ours[index], reference[index]).quick_ratio() <= 0.9]
 
 
 def run(cmd: list[str]) -> None:
@@ -356,6 +396,22 @@ def main(argv: list[str]) -> int:
         print(f"page counts differ ({a} vs {b}) — fix pagination before comparing images",
               file=sys.stderr)
         return 2
+
+    # The other half of that gate, which counting alone does not cover: two documents can
+    # hold the same number of pages and still carry different content on them, where a
+    # block lost early is made up later. Every page between is then compared against its
+    # neighbour and reported as wholly different.
+    drift = misaligned_pages(ours_pdf, ref_pdf)
+    if drift is None:
+        print("could not read page text; alignment unchecked", file=sys.stderr)
+    elif drift:
+        share = len(drift) / max(a, 1)
+        print(f"WARNING: {len(drift)} of {a} pages hold different content from the "
+              f"reference's page of the same number, first at page {drift[0]}.",
+              file=sys.stderr)
+        if share > 0.1:
+            print("         Ink figures below are measuring that offset rather than a "
+                  "rendering difference — explain the pagination first.", file=sys.stderr)
 
     outdir = pathlib.Path(args.outdir) if args.outdir else pathlib.Path(tempfile.mkdtemp())
     (outdir / "ours").mkdir(parents=True, exist_ok=True)

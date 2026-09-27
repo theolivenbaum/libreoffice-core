@@ -23,6 +23,12 @@
 # not a proof: it says a document is worth measuring precisely, not that it is correct.
 set -uo pipefail
 
+# Which soffice is the reference. `$REF_SOFFICE` wins; otherwise PATH -- which on
+# this machine is 24.2.7.2 while the tree is calibrated to 26.2.4.2.
+REF="${REF_SOFFICE:-soffice}"
+command -v "$REF" >/dev/null 2>&1 || { echo "no soffice at $REF" >&2; exit 3; }
+echo "reference $(command -v "$REF") -- $("$REF" --version 2>/dev/null | head -1)" >&2
+
 DIR="${1:?usage: corpus-parity.sh <dir> [outdir]}"
 OUT="${2:-$(mktemp -d)}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -50,7 +56,7 @@ while IFS= read -r -d '' f; do
 
   timeout 240 "$CLI" render "$f" --format pdf --outdir "$OUT/ours" >/dev/null 2>&1
   [ -f "$OUT/ours/$stem.pdf" ] && mv -f "$OUT/ours/$stem.pdf" "$o"
-  timeout 300 soffice --headless --convert-to pdf --outdir "$OUT/ref" "$f" >/dev/null 2>&1
+  timeout 300 "$REF" --headless --convert-to pdf --outdir "$OUT/ref" "$f" >/dev/null 2>&1
   [ -f "$OUT/ref/$stem.pdf" ] && mv -f "$OUT/ref/$stem.pdf" "$r"
 
   if [ ! -f "$o" ] && [ ! -f "$r" ]; then v="both-failed"

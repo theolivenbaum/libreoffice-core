@@ -128,8 +128,8 @@ the failure modes.
 | Metric | What it is | What it is good for |
 |---|---|---|
 | `differing_fraction` | Fraction of pixels off by more than a tolerance | Trend over time. Noisy: antialiasing alone moves it |
-| `mean_abs_error` | Mean per-channel difference across the page | A single "how close overall" number. Diluted by whitespace |
-| `max_tile_error` | Worst mean error in any 32x32 tile | Catching a badly wrong *small* area a page average would hide |
+| `mean_abs_error` | Mean per-channel difference across the page | A single "how close overall" number. Diluted by whitespace, and **biased by colour quantisation** — see below |
+| `max_tile_error` | Worst mean error in any 32x32 tile | Catching a badly wrong *small* area a page average would hide. Same bias |
 | `ink_delta` | Difference in non-white pixel fraction | **Strongly negative ⇒ Paperless drew too little.** Something was skipped outright: an unsupported shape, a vector image that failed to decode |
 | `shifted_tiles` | Tiles matching the reference well, but at an offset | **The cascade detector.** Non-zero ⇒ content *moved*, so suspect layout — font metrics, margins, line breaking — not drawing |
 | `row_profile_shift` | Vertical offset best aligning the two ink-per-row profiles | Confirms a whole-page vertical shift and quantifies it |
@@ -144,6 +144,80 @@ the failure modes.
 | `max_tile_error` high, `mean_abs_error` low | One small region badly wrong. Usually a colour, a border or one shape |
 | `ink_delta` strongly positive | Paperless drew something extra: a debug artefact, a wrongly-visible element, or a fill that should have been transparent |
 | Everything huge, page 1 included | Not a detail bug. Wrong page size, wrong background, or a failed load |
+
+### Set `REF_SOFFICE` before any of this
+
+`/usr/bin/soffice` is 24.2.7.2 and the tree is calibrated to 26.2.4.2. `look.py`,
+`first-divergence.py`, `line-anatomy.py` and `corpus-parity.sh` hard-coded PATH until round
+180; all of them now read `${REF_SOFFICE:-soffice}`. `verdict.py` is the exception by design —
+it scores against **both** binaries and makes their disagreement the verdict, through `LO24`
+and `LO26`. Full note in `libreoffice-reference/SKILL.md`.
+
+### A raw mean difference is biased by colour quantisation, at 1/255 per shaded pixel
+
+`differing_fraction` and `differing_tiles` apply `DIFF_TOLERANCE`; `mean_abs_error` and
+`max_tile_error` do not, and on a shaded page they are non-zero when the truth is zero.
+
+**The cause is the two writers' decimal precision, and neither renderer is wrong.** Paperless
+emits `0.502 0.502 0.502 rg` for grey 128 and 26.2.4.2 emits `0.5019607843 …`. The rasteriser
+resolves a literal at or below `v/255` to **`v − 1`** — measured on six one-literal PDFs
+(`dotnet/probes/inkmetric-r178/quantise.py`), including the exact `0.50196078431372549`, which
+also comes out 127. So **every flat fill the two render is one grey level apart** while naming
+the same colour.
+
+Measured on a synthetic half-shaded page: `differing_fraction` 0.0, `differing_tiles` 0,
+`ink_delta` 0.0 — and `mean_abs_error` **0.00196**, `max_tile_error` **0.00392**.
+`compare-images.py` now says so in as many words when no pixel differs past the tolerance and
+the mean is still not zero.
+
+It is not hypothetical. `Annex-10-to-the-Aircraft-Maintenance-Specialist-Certification-Rule-GCAA`
+was the **worst passing document on the whole words track** on a hand-rolled mean — page-exact,
+every page aligned, and **189 432 alphanumerics against 189 432, exact**. All of it was this.
+
+**So rank on a tolerance-aware measure.** `differing_fraction`, `differing_tiles` and
+`ink_delta` are safe; a raw mean is not.
+
+### Two pages compared must be the same page, and equal page counts do not prove it
+
+`pdf-image-diff.py` refuses outright when the two page *counts* differ, and that guard is right
+— but it does not cover the other half. Two documents can hold the same number of pages and
+still carry different content on them, where a block lost early is made up later. Every page
+between is then compared against its neighbour and reported as wholly different.
+
+It now also warns, from the text layer (`misaligned_pages`, one `pdftotext` call per side):
+
+```
+WARNING: 37 of 266 pages hold different content from the reference's page of the same number,
+         first at page 111.
+         Ink figures below are measuring that offset rather than a rendering difference —
+         explain the pagination first.
+```
+
+Validated against five documents whose answer was known independently: `Annex-10` **0 of 148**
+and `f445896e` **0 of 15** (both genuinely aligned), `SPA-02_mcar` 37 of 266 at equal counts,
+`02_mcar` 1 of 312, and `24-25_FAA_Holdover_Tables` 49 of 155 **first at page 73** — which is
+exactly where that document's MAJOR pages begin, from a completely separate channel.
+
+**It is a screen, not a verdict.** A page of dense numerals can fall below the threshold while
+being the right page, so a hit means *explain this before reading the ink*.
+
+This trap has cost three misreadings in one session: `02_mcar` ranked first at 881.67, and both
+FAA Holdover Tables at 321.27 and 93.02 — every one of them **one page**, amplified.
+
+### Do not write your own scorer. It has produced a wrong published call twice.
+
+Both instances were a hand-rolled mean absolute difference, and both were quoted in a write-up
+before anyone checked them against the suite:
+
+- a 30 dpi mean scored `WordArt_Shapes_Arrows_Catalog1.docx` page 7 at **0.38 and published it
+  as agreement**; the page is 11.04 pt to the left (below);
+- a 36 dpi mean ranked the whole words track, put `02_mcar` first at 881.67 for a one-page
+  offset it could not see, and `Annex-10` first among passing documents for one part in 255.
+
+Everything a ranking needs is already here and already guards both traps: `track-ink-sweep.sh`
+sweeps a track for the gate *and* unaccounted ink in one pass, `pdf-image-diff.py` gates on
+pagination, `compare-images.py` carries the tolerance, and `verdict.py` compares the faces
+first and scores against both reference binaries. Reach for those before writing anything.
 
 ### The metric set is vertical-only, and that has caused a wrong call
 
