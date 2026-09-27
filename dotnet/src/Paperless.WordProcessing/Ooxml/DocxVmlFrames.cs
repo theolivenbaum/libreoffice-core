@@ -345,7 +345,8 @@ internal static class DocxVmlFrames
                 ? pictures.ReadVml(member)
                 : FramePicture.None;
 
-            VmlPaint paint = PaintOf(member, box);
+            string? memberPreset = PresetOf(member, member);
+            VmlPaint paint = PaintOf(member, box, memberPreset);
             if (segment is { } sense) paint = paint with { IsLineMirrored = sense.Mirrored };
 
             frames.Add(new PageFrame
@@ -367,6 +368,7 @@ internal static class DocxVmlFrames
                 Fill = paint.Fill,
                 BorderColour = paint.Line,
                 BorderWidth = paint.Width,
+                Preset = memberPreset,
                 IsLine = paint.IsLine,
                 IsLineMirrored = paint.IsLineMirrored,
                 HeadEnd = paint.HeadEnd,
@@ -458,7 +460,8 @@ internal static class DocxVmlFrames
             ? pictures.ReadVml(shape)
             : FramePicture.None;
 
-        VmlPaint paint = PaintOf(shape, style);
+        string? preset = PresetOf(shape, element);
+        VmlPaint paint = PaintOf(shape, style, preset);
         VmlFontwork warp = DocxVmlFontwork.Read(
             shape, ShapeTypeOf(shape, element), new DocSize(across, down), typeface);
 
@@ -484,6 +487,7 @@ internal static class DocxVmlFrames
             Fill = paint.Fill,
             BorderColour = paint.Line,
             BorderWidth = paint.Width,
+            Preset = preset,
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
             HeadEnd = paint.HeadEnd,
@@ -557,7 +561,8 @@ internal static class DocxVmlFrames
             ? put.Top
             : (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null) ?? Length.Zero;
 
-        VmlPaint paint = PaintOf(shape, style);
+        string? preset = PresetOf(shape, element);
+        VmlPaint paint = PaintOf(shape, style, preset);
 
         // Which diagonal of the box is drawn comes from the endpoints for a `v:line` and from
         // `style:flip` for everything else, so the two cannot share `IsMirrored`.
@@ -600,6 +605,7 @@ internal static class DocxVmlFrames
             Fill = paint.Fill,
             BorderColour = paint.Line,
             BorderWidth = paint.Width,
+            Preset = preset,
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
             HeadEnd = paint.HeadEnd,
@@ -726,9 +732,125 @@ internal static class DocxVmlFrames
         return double.IsFinite(fraction) ? Math.Clamp(fraction, 0.0, 1.0) : null;
     }
 
-    private static VmlPaint PaintOf(XElement shape, Dictionary<string, string> style)
+    /// <summary>
+    /// The DrawingML preset a VML shape type names, or null for one this does not model.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>v:shape</c> names its geometry by number — <c>type="#_x0000_t15"</c>, or an
+    /// <c>o:spt</c> on the <c>v:shapetype</c> it points at — and the number is Escher's
+    /// <c>MSO_SPT</c>. The names here are the reference's own: <c>GETVMLShapeType</c>
+    /// (<c>filter/source/msfilter/util.cxx</c>:1072-1280) is the same table read the other way
+    /// round, from a DrawingML preset name to an <c>MSO_SPT</c>, and the numbering is the
+    /// <c>MSO_SPT</c> enum in <c>include/svx/msdffdef.hxx</c>:274.
+    /// </para>
+    /// <para>
+    /// <strong>Without this every one of them was drawn as its bounding rectangle, and unpainted
+    /// at that.</strong> <see cref="PaintOf"/> painted only a <c>v:rect</c> and a
+    /// <c>v:roundrect</c>, on the stated grounds that filling a pentagon's box would be a
+    /// confident wrong answer — which was right, and left the pentagon itself undrawn. Naming the
+    /// geometry answers both halves at once: <see cref="Layout.PageFrame.Preset"/> already routes
+    /// a name through <c>CustomShapeGeometry.Preset</c>, which holds all 187 of them.
+    /// </para>
+    /// <para>
+    /// <strong>Censused over the corpus's 271 DOCX</strong>, counting only <c>v:shape</c> that
+    /// state a <c>fillcolor</c> or a <c>strokecolor</c> they do not then switch off: <b>202 uses in
+    /// 27 documents</b> are <c>t202</c>, the text box, which is a plain rectangle; <b>49 in 5</b>
+    /// are <c>t15</c>, the right-pointing pentagon; <b>30 in 2</b> are <c>t13</c>, the right arrow;
+    /// and the rest are the two dozen entries below, none more than 23. <c>t32</c> is excluded
+    /// because <see cref="IsStraightConnector"/> already draws it as a rule, and <c>t136</c>
+    /// because <see cref="DocxVmlFontwork"/> already draws its glyph outlines.
+    /// </para>
+    /// <para>
+    /// Nothing is defaulted by naming a geometry: the shape is still painted only with the fill and
+    /// the stroke it states, which is the rule <see cref="PaintOf"/> has always followed.
+    /// </para>
+    /// </remarks>
+    private static string? PresetOf(XElement shape, XElement scope)
     {
-        bool box = shape.Name.LocalName is "rect" or "roundrect";
+        if (shape.Name.LocalName is not "shape") return null;
+        if (Spt(shape, ShapeTypeOf(shape, scope)) is not { } spt) return null;
+
+        return spt switch
+        {
+            1 or 202 => "rect",
+            2 => "roundRect",
+            3 => "ellipse",
+            4 => "diamond",
+            5 => "triangle",
+            6 => "rtTriangle",
+            7 => "parallelogram",
+            8 => "trapezoid",
+            9 => "hexagon",
+            10 => "octagon",
+            11 => "plus",
+            12 => "star5",
+            13 => "rightArrow",
+            15 => "homePlate",
+            16 => "cube",
+            21 => "plaque",
+            22 => "can",
+            23 => "donut",
+            34 => "bentConnector3",
+            38 => "curvedConnector3",
+            55 => "chevron",
+            62 => "wedgeRoundRectCallout",
+            66 => "leftArrow",
+            67 => "downArrow",
+            68 => "upArrow",
+            93 => "stripedRightArrow",
+            102 => "curvedRightArrow",
+            103 => "curvedLeftArrow",
+            104 => "curvedUpArrow",
+            105 => "curvedDownArrow",
+            109 => "flowChartProcess",
+            110 => "flowChartDecision",
+            111 => "flowChartInputOutput",
+            112 => "flowChartPredefinedProcess",
+            113 => "flowChartInternalStorage",
+            114 => "flowChartDocument",
+            116 => "flowChartTerminator",
+            117 => "flowChartPreparation",
+            118 => "flowChartManualInput",
+            119 => "flowChartManualOperation",
+            120 => "flowChartConnector",
+            125 => "flowChartCollate",
+            _ => null,
+        };
+    }
+
+    /// <summary>The shape's <c>MSO_SPT</c>, from its own <c>o:spt</c>, its type's, or its id.</summary>
+    /// <remarks>
+    /// The same three places <see cref="DocxVmlFontwork"/> looks, and in the same order: Word
+    /// writes the number on the <c>v:shapetype</c> and refers to it as <c>#_x0000_t15</c>, so the
+    /// reference is the reliable one and the attribute is the exception.
+    /// </remarks>
+    private static int? Spt(XElement shape, XElement? shapeType)
+    {
+        XName name = XName.Get("spt", OoxmlNamespaces.VmlOffice);
+        foreach (XElement? carrier in new[] { shape, shapeType })
+        {
+            if (carrier?.Attribute(name)?.Value is not { Length: > 0 } stated) continue;
+            if (double.TryParse(
+                    stated, NumberStyles.Float, CultureInfo.InvariantCulture, out double spt))
+            {
+                return (int)spt;
+            }
+        }
+
+        const string Prefix = "#_x0000_t";
+        return shape.Attribute("type")?.Value is { } reference
+               && reference.StartsWith(Prefix, StringComparison.Ordinal)
+               && int.TryParse(
+                   reference.AsSpan(Prefix.Length), NumberStyles.Integer,
+                   CultureInfo.InvariantCulture, out int number)
+            ? number
+            : null;
+    }
+
+    private static VmlPaint PaintOf(XElement shape, Dictionary<string, string> style, string? preset)
+    {
+        bool box = shape.Name.LocalName is "rect" or "roundrect" || preset is not null;
         bool rule = IsStraightConnector(shape) || IsLine(shape);
         if (!box && !rule) return VmlPaint.None;
 
