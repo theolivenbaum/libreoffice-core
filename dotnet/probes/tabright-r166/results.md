@@ -44,7 +44,8 @@ changed the answer:**
 | this tree | 54 | 52 | 50 | 50 | 48 | 48 | 46 | never |
 
 They agree at a zero right indent and part company as it grows — which is the direction §2's
-diagnosis predicts. **Six arm-steps**, two characters each.
+diagnosis predicts. **Six arm-steps**, two characters each — and see §2 for why that is the wrong resolution to
+reason about.
 
 ## 2. The mechanism is real, and it is not `TabRuler.WidthOf`'s return value
 
@@ -82,14 +83,30 @@ seven columns. So something else clamps the reference back, and this round did n
 
 **Three things the next round should not re-derive.**
 
-- **ε is not a constant.** Working the arithmetic from the measured title widths (7.522 pt per
-  `A`, number 35.54 pt, line edge 540 − R/20): the excess over the line edge that the reference
-  *allows* at its own boundary runs 9.8, 18.8, 12.8, 21.8, 30.8, 7.2, 14.4 pt across the seven
-  columns, and the excess it *refuses* at the next arm runs 24.9, 33.9, 27.8, 36.8, 45.8, 22.3,
-  29.5. **Those intervals have an empty intersection** — the largest lower bound is 30.8 and the
-  smallest upper bound 22.3 — so no single constant excess, ε or otherwise, reproduces the table.
-  §2's two-condition form was fitted to a *bold* sweep over a different title range, and it does
-  not transfer.
+- **ε is not a constant, and neither is anything else this fixture can measure — its resolution
+  is too coarse to tell one rule from another.** The sweep steps the title by two characters,
+  which is **16.28 pt** of the reference's own advance, while its right-indent steps are 6.5 to
+  9 pt. A boundary located to ±16 pt in a variable that moves 9 pt at a time cannot discriminate,
+  and two passes of arithmetic over this table reached two different conclusions for exactly that
+  reason. `build-fine.py` is the instrument that can: it fixes the title and sweeps
+  `w:ind w:right` in **20-twip (1 pt) steps**, so the boundary edge is located to a point.
+
+  | title | 26.2.4.2 | this tree |
+  |---|---|---|
+  | 44 `A` | fails past edge **490.5** | fails past edge **490.5** — *exact* |
+  | 50 `A` | fails past edge **497.5** | fails past edge **508.5** — **11.0 pt too strict** |
+  | 56 `A` | fails at every indent | fails at every indent |
+
+  So the residual is **one number**: at a title six characters longer, we give up 11 pt of line
+  sooner than the reference does. And it is not an offset — at 44 characters the two agree to the
+  point, so whatever the rule is, it is one both engines get right at one length and not at the
+  other.
+
+  **The rule itself is still underived**, and the arithmetic in an earlier draft of this file that
+  claimed to refute a constant is withdrawn with the coarse table it was computed from: both
+  engines' thresholds move far less with the title than the title's own width does (the
+  reference's by 7.0 pt for 6 characters, ours by 18.0), so the binding term is not the title's
+  end against the line's edge in either. `sweep-fine.txt` is the measurement to work from.
 - **`GetTabStop`'s first-stop rule is why the stop is honoured out in the indent at all**, and it
   is already right in this tree. `SwLineInfo::GetTabStop` (`txttab.cxx`:43-62) rejects a stop past
   the paragraph's right boundary — *except the first in the ruler*, for which it instead **raises
