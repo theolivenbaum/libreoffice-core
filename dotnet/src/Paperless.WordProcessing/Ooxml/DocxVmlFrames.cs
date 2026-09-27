@@ -370,6 +370,8 @@ internal static class DocxVmlFrames
                 IsLine = paint.IsLine,
                 IsLineMirrored = paint.IsLineMirrored,
                 Blocks = text is not null && content is not null ? content(text) : [],
+                Padding = text is null ? default : Insets(text),
+                HasFixedHeight = text is not null && !GrowsWithText(member, text),
             });
         }
     }
@@ -483,6 +485,8 @@ internal static class DocxVmlFrames
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
             Blocks = box is not null && content is not null ? content(box) : [],
+            Padding = box is null ? default : Insets(box),
+            HasFixedHeight = box is not null && !GrowsWithText(shape, box),
         };
     }
 
@@ -595,7 +599,8 @@ internal static class DocxVmlFrames
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
             Blocks = box is not null && content is not null ? content(box) : [],
-            Padding = box is null ? default : default,
+            Padding = box is null ? default : Insets(box),
+            HasFixedHeight = box is not null && !GrowsWithText(shape, box),
         };
     }
 
@@ -1110,6 +1115,87 @@ internal static class DocxVmlFrames
     /// <summary>The <c>w:txbxContent</c> a VML shape carries, or null when it carries none.</summary>
     private static XElement? TextBox(XElement shape)
         => shape.Descendants(Word.Name("txbxContent")).FirstOrDefault();
+
+    /// <summary>The <c>v:textbox</c> a <c>w:txbxContent</c> sits in, or null when it sits in none.</summary>
+    /// <remarks>
+    /// The content is the element the readers above carry, and the attributes that decide the box's
+    /// insets are on the <c>v:textbox</c> around it. Matched on the local name because a shape inside a
+    /// <c>mc:Fallback</c> is written in whichever VML namespace its producer chose.
+    /// </remarks>
+    private static XElement? Enclosure(XElement content)
+        => content.Ancestors().FirstOrDefault(element => element.Name.LocalName == "textbox");
+
+    /// <summary>
+    /// The distance between a VML text box's edge and its text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>v:textbox/@inset</c> is a comma list of up to four CSS lengths — left, top, right, bottom —
+    /// and a value omitted from it takes that <em>side's</em> default rather than nothing:
+    /// <c>TextBoxContext</c> reads each in turn and substitutes <c>0.1in</c> across and <c>0.05in</c>
+    /// down for an empty one (<c>oox/source/vml/vmltextboxcontext.cxx</c>:185-211). So an absent
+    /// attribute and a stated <c>0,0,0,0</c> are opposite answers, and <c>inset="4mm"</c> moves the
+    /// left side alone.
+    /// </para>
+    /// <para>
+    /// <strong><c>insetmode="auto"</c> takes none of that.</strong> The whole block is guarded on the
+    /// mode not being <c>auto</c>, so such a box leaves <c>borderDistanceSet</c> false and
+    /// <c>vmlshape.cxx</c>:778-784 sets no distance at all — the frame keeps Writer's own
+    /// <c>Frame</c> style, whose padding is 1.5 mm. No corpus document states the mode, so it is
+    /// modelled for the rule rather than for its reach.
+    /// </para>
+    /// <para>
+    /// Confirmed twice: 26.2.4.2's own <c>--convert-to fodt</c> of ten one-attribute fixtures states
+    /// the four <c>fo:padding-*</c> this computes, and its rendering of the same ten puts the first
+    /// line where they say. <c>probes/vmlinset-r171</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="content">The <c>w:txbxContent</c> whose enclosing box is read.</param>
+    private static Margins Insets(XElement content)
+    {
+        XElement? box = Enclosure(content);
+
+        if (box?.Attribute("insetmode")?.Value == "auto")
+        {
+            return new Margins(
+                WriterFrameInset, WriterFrameInset, WriterFrameInset, WriterFrameInset);
+        }
+
+        string[] stated = (box?.Attribute("inset")?.Value ?? string.Empty).Split(',');
+
+        return new Margins(
+            Side(0, DefaultInsetAcross), Side(1, DefaultInsetDown),
+            Side(2, DefaultInsetAcross), Side(3, DefaultInsetDown));
+
+        Length Side(int index, Length fallback)
+            => index < stated.Length && Css(stated[index]) is { } length ? length : fallback;
+    }
+
+    /// <summary>A VML text box's default inset to left and right.</summary>
+    private static readonly Length DefaultInsetAcross = Length.FromEmu(91440);
+
+    /// <summary>Its default inset above and below.</summary>
+    private static readonly Length DefaultInsetDown = Length.FromEmu(45720);
+
+    /// <summary>What a box asking for the automatic inset gets: Writer's own <c>Frame</c> padding.</summary>
+    private static readonly Length WriterFrameInset = Length.FromMm100(150);
+
+    /// <summary>
+    /// Whether a VML shape's box grows to hold its text rather than keeping the stated height.
+    /// </summary>
+    /// <remarks>
+    /// <c>mso-fit-shape-to-text</c> is the VML spelling of <c>a:spAutoFit</c>, and it is read from two
+    /// styles into one flag: the shape's (<c>oox/source/vml/vmlshapecontext.cxx</c>:551) and the box's
+    /// own (<c>vmltextboxcontext.cxx</c>:221-222). Both set <c>mbAutoHeight</c> true on presence
+    /// alone, whatever value follows the colon, and that becomes <c>SizeType::MIN</c> against
+    /// <c>FIX</c> (<c>vmlshape.cxx</c>:776-777). Measured: the reference exports a fitting box with no
+    /// <c>svg:height</c> at all and draws all four of a fixture's lines in a box that holds two.
+    /// </remarks>
+    /// <param name="shape">The <c>v:shape</c> or its equivalent, whose own style is read too.</param>
+    /// <param name="content">The <c>w:txbxContent</c> whose enclosing box is read.</param>
+    private static bool GrowsWithText(XElement shape, XElement content)
+        => Style(shape).ContainsKey("mso-fit-shape-to-text")
+            || (Enclosure(content) is { } box && Style(box).ContainsKey("mso-fit-shape-to-text"));
 
     /// <summary>Which layer a floating VML shape paints on, and where in that layer's stack.</summary>
     /// <param name="BehindText">True for the hell layer, painted before the text.</param>
