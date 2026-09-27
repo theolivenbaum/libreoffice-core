@@ -43,13 +43,25 @@ paragraphs in all — `SPA-11_mcar_part-11_v2.9` 87, `OM template for non-comple
 
 | document | 26.2.4.2 | this tree | why |
 |---|---|---|---|
-| **`words/pagination-001/docx/24-25_FAA_Holdover_Tables.docx`** | **155 pages** | **154** | the one gate row this costs |
+| **`words/pagination-001/docx/24-25_FAA_Holdover_Tables.docx`** | **155 pages** | **154** | a gate row this costs |
+| **`words/pagination-001/docx/FAA 2025-26 Holdover Tables.docx`** | **167 pages** | **166** | the second, measured in round 177 |
 | `SPA-11_mcar_part-11_v2.9.docx` | 49p, 70 763 chars | 49p, 70 763 — *exact* | ours is closer with the rule **off** |
 | `SPA-06_mcar_part-6_and_IS_v2.9.docx` | 85p, 142 938 | 85p, 142 938 — *exact* | likewise |
 | the other four | — | unmoved on pages and characters | — |
 
-So the rule is worth exactly one page on one document, and switching it off puts two other
-documents back on the reference's character count exactly.
+So the rule is worth one page on each of the two Holdover Tables, and switching it off puts two
+other documents back on the reference's character count exactly.
+
+**The second Holdover Table was recorded here as unmoved and is not.** Round 177 rendered both with
+the switch on: `24-25` goes 154 → **155** pages against the reference's 155 and `FAA 2025-26` 166 →
+**167** against 167, their alphanumerics landing within 22 and 20. It had been carried in the *"the
+other four"* row above, and that row is wrong for it.
+
+**What that one page is worth on an ink ranking is 321.27 and 93.02**, because every page after the
+lost one is then compared against the wrong page. With the switch on, the two documents' summed
+unsigned ink is **33.35 and 34.73 with not one MAJOR page between them** — so there is no second
+defect underneath either of them, and a round that takes them off the top of an ink table is
+chasing this entry. `probes/holdover-r177`.
 
 ### Why `24-25_FAA_Holdover_Tables.docx` is 154 against 155, in one paragraph
 

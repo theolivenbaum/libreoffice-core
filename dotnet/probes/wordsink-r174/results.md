@@ -47,6 +47,24 @@ runs one PDF page behind the reference's from page 29 on, so comparing page *i* 
 compares different pages and reports one defect two hundred times. The defect is one extra page of
 table of contents, and it is closed — 881.67 → 25.57, 214 MAJOR pages → 0, `pages` → `match`.
 
+## Read the `aligned` column before the ink
+
+`rank.py` gained one after this round, and the reason is that the ink figure above misled three
+readings before anyone checked. Ink is compared page against page, so a document that loses or
+gains one page early reports every later page as different — one defect counted two hundred times.
+
+- `02_mcar_part-2_and_IS_v2.10` at 881.67 was **one extra page of table of contents**
+  (`probes/tocwrap-r175`); closed, and now 25.57 with `aligned` 0.99.
+- `24-25_FAA_Holdover_Tables` at 321.27 and `FAA 2025-26 Holdover Tables` at 93.02 are **one
+  deliberately divergent page each** — `TODO.word-parity.md`'s `TOC \t` entry. With the quirks
+  switch on they are page-exact with **no MAJOR page between them** (`probes/holdover-r177`).
+
+**37 of the 337 are in that state**, so the column is not optional reading. It is a screen rather
+than a verdict: a page of dense numerals can score below the threshold while being the right page,
+so a low `aligned` means *explain this before ranking it*.
+
+`ranking.tsv` here is the table as re-scored at `608e635ce`, with the column.
+
 ## Track state
 
 For comparison with the other two tracks, whose seats run into the hundreds per document: the
