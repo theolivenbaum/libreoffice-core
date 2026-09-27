@@ -171,6 +171,11 @@ def shaped():
                   '</w:pPr><w:r><w:t>PROSE line %d</w:t></w:r><w:r><w:tab/></w:r>'
                   '<w:r><w:t>2</w:t></w:r></w:p>' % i for i in range(1, 11)))
 
+    # Longer than the room beside the box, so the section cannot fit in the narrowed measure —
+    # which is the conditional form of the hypothesis the six short arms refute.
+    yield "box-toc-long", SHAPE % "".join(BOXLINE % i for i in range(1, 8)) + toc(30)
+    yield "box-plain-long", SHAPE % "".join(BOXLINE % i for i in range(1, 8)) + prose(30)
+
     yield "box-heading-then-plain", (
         SHAPE % "".join(BOXLINE % i for i in range(1, 8))
         + '<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:jc w:val="center"/></w:pPr>'

@@ -10,11 +10,17 @@ box-heading-then-toc index               p1 x 235.20      p1 x 235.10
 box-plain-after      obstacle            p1 x  79.30      p1 x  79.20
 box-plain-after      body                p1 x 235.20      p1 x 235.10
 
+box-plain-long       obstacle            p1 x  79.30      p1 x  79.20
+box-plain-long       body                p1 x 235.20      p1 x 235.10
+
 box-plain-tabbed     obstacle            p1 x  79.30      p1 x  79.20
 box-plain-tabbed     body                p1 x 235.20      p1 x 235.10
 
 box-toc-after        obstacle            p1 x  79.30      p1 x  79.20
 box-toc-after        index               p1 x 235.20      p1 x 235.10
+
+box-toc-long         obstacle            p1 x  79.30      p1 x  79.20
+box-toc-long         index               p1 x 235.20      p1 x 235.10
 
 box-toc-tabbed       obstacle            p1 x  79.30      p1 x  79.20
 box-toc-tabbed       index               p1 x 235.20      p1 x 235.10

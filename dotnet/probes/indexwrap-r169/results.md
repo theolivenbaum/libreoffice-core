@@ -24,11 +24,14 @@ exactly as it wraps a paragraph, and exactly as this tree does — to within 0.1
 | `box-plain-tabbed` | plain paragraphs with that same stop (control) | x 235.20 | x 235.10 |
 | `box-heading-then-toc` | a centred heading, then the index | x 307.85 / 235.20 | x 307.72 / 235.10 |
 | `box-heading-then-plain` | the same heading, then prose (control) | x 307.85 / 235.20 | x 307.72 / 235.10 |
+| `box-toc-long` | thirty entries, more than fit beside the box | x 235.20 | x 235.10 |
+| `box-plain-long` | thirty paragraphs (control) | x 235.20 | x 235.10 |
 
-So a section frame is **not** exempt from wrapping, the tabbed arm rules out "the entry is as wide
-as the measure so it cannot fit", and **the proposed patch would have broken six arms that are
-currently right.** `absrc`'s cause is still unknown; it is something about that document rather
-than about indexes and flies.
+So a section frame is **not** exempt from wrapping; the tabbed arm rules out *the entry is as wide
+as the measure so it cannot fit*; the long arm rules out the conditional form, *a section that
+cannot fit beside the fly is placed below it*; and **the proposed patch would have broken eight
+arms that are currently right.** `absrc`'s cause is still unknown, and it is something about that
+document rather than about indexes and flies.
 
 ## 1. A positioned table is never an obstacle here, which the first cut of this fixture hit
 
@@ -60,13 +63,18 @@ first index entry at **y 82.70 x 76.60**. Ours agrees on the first three to 0.15
 index at y 423.60 x 256.50 — beside the obstacle, where the reference has it below.
 
 **The heading's x 311 is evidence of wrapping after all, and an earlier note in this file saying
-it might be centring is withdrawn.** `P30` states `fo:text-align="center"`, and on this page
-centring in the *full* measure (72 → 540) would start an 11 pt bold `INFORMATION HIGHLIGHTS`
-around x 236. Centring in the measure *left over beside the obstacle* (220.8 → 540) starts it at
-**310.4**, which is what both engines draw. So both wrap the heading, and only the index differs —
-which is exactly what `pages-r164` reported.
+it might be centring is withdrawn.** `P30` states `fo:text-align="center"`, and the reference
+draws `INFORMATION HIGHLIGHTS` spanning **311.00 → 467.63**, so the measure it is centred in has
+its middle at **389.31** and therefore its left edge at `2 × 389.31 − 540 = 238.62`. That is the
+obstacle's right edge — 66.6 + 154.2 = 220.8 — plus about 18 pt of wrap distance. Centring in the
+full measure would put it near x 236, and centring in the style's own `fo:margin-left="-0.1874in"`
+measure near x 221. **So both engines make a fly there and both wrap the heading beside it**, and
+only the index differs — which is what `pages-r164` reported.
 
-What it is not is the rule above. Two things to try next, neither of which this round has
-measured: whether the obstacle's own wrap mode in that WW8 file differs from the square wrap the
-fixture uses, and where the reference puts the eight empty paragraphs between the heading and the
-index — a 365 pt gap with nothing visible in it.
+What it is not is the rule above, in either its plain or its conditional form. **Four hypotheses
+are now refuted** — an index is exempt from wrapping; an index whose entries span the measure
+cannot fit; an index too long for the room beside the fly descends; and the heading's position is
+not evidence of wrapping — so the next round should start somewhere else. What is left unexamined
+is the fly itself: `absrc`'s is a WW8 APO **holding a table**, and the fixture's is a text box with
+a square wrap. Read the `sprmPPc`/`sprmPWr` the row-head paragraphs of `Table2` state, and
+build the fixture's obstacle to match, before looking at the index again.
