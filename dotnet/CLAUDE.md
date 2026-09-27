@@ -635,16 +635,20 @@ whatever you already believed. A reviewer that has never seen the document and i
 to grep the repo is the only reader whose agreement is evidence. The `page-vision` skill has
 the brief to give it, the pixel-budget arithmetic that decides your dpi, and when to crop.
 
-**In this container there is no such reader, and the check is two calls rather than a guess.**
-An agent here has no `Task`/subagent tool; what it does have is
-`mcp__Claude_Code_Remote__create_session`, which spawns a *sibling session* — and that is not a
-substitute, for two independent reasons measured 2026-09-06. The sibling runs in its own
-`anthropic_cloud` container, so it cannot open `/home/user/...` and there is no way to hand it the
-composed PNG; and this session has no `list_events`, while `SendMessage` answers *"No agent named
-… is reachable"* and `get_session` returns the session record without its transcript — so even a
-sibling that could see the image could not report back. Four rounds have now said "no such tool",
-which was right. **Say so explicitly, treat your own readings as contaminated, and corroborate
-anything you lean on with arithmetic that does not depend on the reading.**
+**That reader IS available, and the paragraph that stood here for four rounds was looking at the
+wrong tool.** Measured 2026-09-27: the in-process **`Agent`** tool with
+`subagent_type: "general-purpose"` spawns a subagent in *this* container, which opens
+`/home/user/...`, reads the composed PNG, and hands its report back. Six readings were delegated
+that way in one session and all six came back usable — four independently named a one-page offset
+that turned out to be the round's whole finding, and one caught a dropped tab leader the numbers
+could not show.
+
+What is not available is the **sibling session**, `mcp__Claude_Code_Remote__create_session`: it
+runs in its own container, cannot see the PNG, and has no channel back. Four rounds checked for
+*that*, and for a tool called `Task`, found neither, and wrote off the whole practice. **Delegate
+the reading.** Only if `Agent` is absent in some future container does the old advice apply — say
+so explicitly, treat your own readings as contaminated, and corroborate anything you lean on with
+arithmetic that does not depend on the reading.
 
 Three things this changes about how a round is run:
 
@@ -940,6 +944,35 @@ Comparing against LibreOffice — use the skills, they encode hard-won details:
 | `page-vision` | Actually looking at a page — resolution, cropping, and getting it read by someone uncontaminated |
 | `extraction-comparison` | Comparing extracted text; also the right first step for a visual bug |
 | `paperless-corpus` | Building and curating test documents |
+
+**`render-comparison/SKILL.md` opens with a router — which tool answers which question — and
+four rules that each cost a round.** Read it before writing any comparison of your own.
+
+- **Set `REF_SOFFICE=/opt/libreoffice26.2/program/soffice`.** PATH here is 24.2.7.2 and this
+  tree is calibrated to 26.2.4.2, and they disagree on real documents:
+  `f445896eb008d14c1746fc37d412dc22.docx` is 16 pages under one and 15 under the other, so a
+  sweep on PATH banks a `pages` failure for a document that matches. Until round 180 only
+  `batch-check.sh` and `verdict.py` honoured the variable; the other eight scripts — the *ink*
+  sweep, the reference *bank*, and `look.py`, which `page-vision` names for every page reading
+  — hard-coded `soffice` and said nothing. All ten now resolve it and **print the resolved path
+  and version as their first line of output.** Read that line before the numbers.
+- **Do not write your own scorer.** Twice now a hand-rolled mean absolute difference has
+  produced a wrong *published* call: one scored a page 11.04 pt out of place as agreement, and
+  one ranked a whole track, putting `02_mcar` first at 881.67 for a one-page offset it could
+  not see and `Annex-10` first among passing documents for one part in 255 of grey.
+  `track-ink-sweep.sh` already does this and already guards both traps.
+- **Check page alignment before reading an ink figure.** Ink is compared page against page, so
+  one lost page reads as hundreds of defects — it has misread three documents in one session,
+  every one of them a single page. Equal page counts do **not** prove alignment: two documents
+  can carry different content on the same-numbered pages where a block lost early is made up
+  later. `ink.tsv`'s `drift` column counts it, from the text layer rather than the pixels.
+- **A raw mean difference is biased by colour quantisation**, at one grey level across every
+  flat fill, because the two writers emit colour to different decimal precision and the
+  rasteriser floors. `differing_fraction`, `differing_tiles` and `ink_delta` are safe; a raw
+  mean is not.
+- **For an import question, `soffice --convert-to fodt`/`fods`/`fodp` is the first
+  instrument**, not the last: it prints the reference's own resolved view with no rasteriser
+  and no tolerance in it.
 
 ### The sample corpus
 

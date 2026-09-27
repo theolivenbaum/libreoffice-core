@@ -79,11 +79,20 @@ mkdir -p "$OUT/ours" "$OUT/ref" "$OUT/cmp"
 # with every batch-check sweep. A sweep whose verdict column is a different metric from the
 # scoreboard's looks exactly like a regression. Emits "<words> <rawwords>"; the raw figure is
 # kept as the last TSV column so an old run under this script is still reconcilable.
-words_of() {  # words_of <pdf> -> "<words> <rawwords>"
+words_of() {  # words_of <pdf> -> "<words> <rawwords> <glyphs>"
+  # Verbatim from `batch-check.sh`, and it has to stay verbatim: for its whole life this
+  # script carried its own older copy, returning tokens alone, and its verdict column was
+  # therefore the PRE-2026-09-05 gate -- the token rule with a floor of 3 -- while the
+  # scoreboard had moved to alphanumeric characters with a floor of 15. Two gates under one
+  # column name, which is the trap this file's own header warns about for the ink columns.
+  # Measured on the words track: 322 rows `match` under the old rule against 329 under the
+  # new one, a seven-row disagreement that is the rule and not the tree.
   pdftotext "$1" - 2>/dev/null | python3 -c '
 import sys
-t = sys.stdin.buffer.read().decode("utf-8", "replace").split()
-print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t))'
+b = sys.stdin.buffer.read().decode("utf-8", "replace")
+t = b.split()
+print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t),
+      sum(1 for c in b if c.isalnum()))'
 }
 
 # shellcheck disable=SC2086  # the glob is meant to expand
@@ -174,16 +183,16 @@ one() {  # one <index>
       [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
     fi
 
-    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"
+    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"; og="-"; rg="-"
     if [ -f "$o" ]; then
       op=$(pdfinfo "$o" 2>/dev/null | awk '/^Pages/{print $2}')
-      read -r ow owraw < <(words_of "$o")
+      read -r ow owraw og < <(words_of "$o")
       of=$(pdffonts "$o" 2>/dev/null | tail -n +3 | grep -c .)
       un=$(pdffonts "$o" 2>/dev/null | tail -n +3 | awk 'NF>=8 && $(NF-4)=="no"' | wc -l)
     fi
     if [ -f "$r" ]; then
       rp=$(pdfinfo "$r" 2>/dev/null | awk '/^Pages/{print $2}')
-      read -r rw rwraw < <(words_of "$r")
+      read -r rw rwraw rg < <(words_of "$r")
       rf=$(pdffonts "$r" 2>/dev/null | tail -n +3 | grep -c .)
     fi
 
@@ -193,18 +202,22 @@ one() {  # one <index>
     else
       v=""
       [ "$op" = "$rp" ] || v="pages"
-      if [ "$rw" -gt 0 ] 2>/dev/null; then
-        awk -v a="$ow" -v b="$rw" 'BEGIN{d=(a>b?a-b:b-a); exit !(d > b*0.02 && d > 3)}' \
+      # The gate's own rule, `batch-check.sh`:298-302: alphanumeric CHARACTERS, band
+      # max(2%, 15). Not tokens with a floor of 3, which is what stood here.
+      if [ "$rg" -gt 0 ] 2>/dev/null; then
+        awk -v a="$og" -v b="$rg" 'BEGIN{d=(a>b?a-b:b-a); exit !(d > b*0.02 && d > 15)}' \
           && v="${v:+$v,}words"
-      elif [ "${ow:-0}" -gt 3 ]; then v="${v:+$v,}words"
+      elif [ "${og:-0}" -gt 15 ]; then v="${v:+$v,}words"
       fi
       [ "${un:-0}" = "0" ] || v="${v:+$v,}unembedded"
       [ -n "$v" ] || v="match"
     fi
 
-    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\n" \
+    # `glyphs` last, after `rawwords`, exactly as `batch-check.sh` appends it: every reader
+    # that reaches for an existing column keeps working and the two files stay joinable.
+    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\t%s/%s\n" \
       "${f#"$ROOT_DIR"/}" "${ext,,}" "$op" "$rp" "$ow" "$rw" "$of" "$rf" "$un" "$v" \
-      "$owraw" "$rwraw" >> "$OUT/rows.tsv"
+      "$owraw" "$rwraw" "$og" "$rg" >> "$OUT/rows.tsv"
 
     # Ink, whenever both sides rendered and the page counts agree. The tool refuses a
     # document whose counts differ, and rightly: page 3 against a different page 3 makes
@@ -242,7 +255,8 @@ wait
 
 {
   printf "# words = tokens carrying at least one Unicode letter or digit; rawwords = pdftotext | wc -w\n"
-  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\n"
+  printf "# glyphs = alphanumeric characters, ours/reference -- THIS is what the verdict uses\n"
+  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\tglyphs\n"
   sort "$OUT/rows.tsv"
 } > "$OUT/parity.tsv"
 {

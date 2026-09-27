@@ -8,6 +8,46 @@ description: Compare a Paperless rendering of a document against the LibreOffice
 Generate reference output with the **libreoffice-reference** skill first; this skill is
 about comparing against it and interpreting the result.
 
+## Which tool answers which question
+
+Every one of these already exists, and three rounds of one session were spent re-deriving
+things two of them already guard. **Find the row before writing anything.**
+
+| The question you actually have | The tool |
+|---|---|
+| Is the right text on the right page, across a track? | `corpus-batches/scripts/batch-check.sh` |
+| Where is the *ink* wrong, across a track? | `corpus-batches/scripts/track-ink-sweep.sh` |
+| Bank the reference half, without a build | `corpus-batches/scripts/ref-baseline.sh` |
+| How do these two page images differ? | `compare-images.py` |
+| Where on the page, and how, for a whole PDF? | `pdf-image-diff.py` |
+| What does the divergence *mean*, against both binaries? | `verdict.py` |
+| Which page did it start on? Everything after is cascade | `first-divergence.py` |
+| Which element of the source made this mark? | `trace-text.py` |
+| Which operator differs — size, face, position, colour? | `pdf-ops.py` |
+| Why does *this line* differ, portion by portion? | `line-anatomy.py` |
+| Get a page in front of a reader | `look.py`, then `page-vision/scripts/pair.sh` |
+| Is the text even right? (do this before pixels) | `extraction-comparison/scripts/compare-text.py` |
+| **What did LibreOffice actually compute?** | `soffice --convert-to fodt` / `fods` / `fodp` |
+
+That last row is not a fallback. It prints the reference's own resolved view — every style,
+every tab stop, every row height, every graphic property — in seconds, with no rasteriser and
+no tolerance anywhere in it. It is what turned "the reference draws a longer string" into a
+named permutation and "the heading is two points bigger" into a pool parent. **For any question
+about an import rather than a layout, it is the first call, not the last.**
+
+### Four rules that cost rounds to learn
+
+1. **Set `REF_SOFFICE`.** PATH is 24.2.7.2 and the tree is calibrated to 26.2.4.2; they
+   disagree on real documents. Every script here prints the one it resolved — read that line
+   before the numbers.
+2. **Do not write your own scorer.** It has produced a wrong published call twice, both times
+   a hand-rolled mean absolute difference. See below.
+3. **Check page alignment before ranking ink.** One lost page reads as hundreds of defects.
+   Equal page counts do not prove alignment.
+4. **Pair text by identity, not by string.** A document repeating `SUBTASK` thirty times
+   defeats any string pairing and will report a confident phantom displacement. `trace-text.py`
+   rewrites the document so every word is unique, which is the only reliable way.
+
 ## The one thing to internalise first
 
 **Rendering errors cascade.** Almost every visual difference has one of two shapes, and

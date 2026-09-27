@@ -1,3 +1,9 @@
+> **Superseded by `probes/wordsink-r181`, and `rank.py` should not be reused.** It duplicated
+> `corpus-batches/scripts/track-ink-sweep.sh` with a measure biased by colour quantisation, no
+> page-count gate and no alignment screen. The maintained tool ranks this track differently:
+> `Annex-10` is ninth rather than first, and the two documents at the head here are excluded
+> outright because their page counts differ. Kept as the record of what r174 ran.
+
 # r174 — the words track ranked by ink at HEAD
 
 `CLAUDE.md`'s standing instruction: the gate is page count, alphanumerics within max(2 %, 15) and

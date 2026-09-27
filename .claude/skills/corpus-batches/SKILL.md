@@ -1136,6 +1136,23 @@ an ink sweep and a gate sweep run side by side measured different binaries in si
 Measured on `words/done-005`: `TOTAL 10 MATCH 9` against PATH, `MATCH 10` against 26.2.4.2.
 See `libreoffice-reference/SKILL.md` for the full note.
 
+### The two sweeps ran two different gates under one column name
+
+`batch-check.sh` moved its `words` check from **tokens, floor 3** to **alphanumeric characters,
+floor 15** on 2026-09-05. `track-ink-sweep.sh` carried its own older copy of `words_of` and of
+the verdict block and was never moved with it, so for its whole life its `verdict` column was
+the *previous* gate — and its `rows.tsv` had no `glyphs` column at all, so nothing showed it.
+
+Measured on the words track at `22cca57dc`: **322 rows `match` under the old rule against 329
+under the new one.** Seven rows of disagreement that are the rule and not the tree, in a column
+both files call `verdict`.
+
+Fixed in round 181 — `words_of`, the verdict block and the `glyphs` column are now verbatim
+from `batch-check.sh`, and the two files are joinable row for row. **If you copy a check out of
+one sweep into another, copy it verbatim and say so**; this is the third time two measurements
+have circulated in this skill under one name, after the signed/unsigned ink pair that the
+header of `track-ink-sweep.sh` still records.
+
 ### `ink.tsv` has a `drift` column, and a non-zero value voids that row's ink
 
 Ink is compared page against page. Two documents can hold the same number of pages and still
