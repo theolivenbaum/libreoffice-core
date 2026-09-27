@@ -1,5 +1,8 @@
 using System.Buffers.Binary;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
+using Paperless.Text.Layout;
+using Paperless.WordProcessing.Layout;
 using Paperless.WordProcessing.Model;
 using Paperless.WordProcessing.Ww8;
 using Shouldly;
@@ -39,15 +42,125 @@ public sealed class DocSectionGeometryTests
     /// <summary>What the second section restates, and which Word never applies.</summary>
     private static readonly Length SecondTop = Length.FromTwips(1135);
 
+    /// <summary>
+    /// The table reader keeps what the descriptor says; dropping it is pagination's job.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This pass used to overwrite the second section's vertical margins with the first's, and that
+    /// was wrong rather than merely redundant: a continuous section that states furniture of its own
+    /// <em>does</em> get a page descriptor — hung on the first hard page break inside it — and that
+    /// descriptor carries the section's own margins. <see cref="ContinuousPageDescriptors"/> already
+    /// declines to inherit in exactly that case, and it could not put back what this had erased.
+    /// </para>
+    /// <para>
+    /// The two arms are asserted together below, through the pass that actually decides.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void ACompatibleContinuousSectionKeepsThePageItLandsOn()
+    public void TheTableReaderKeepsTheMarginsTheDescriptorStates()
     {
         List<WritingSection> sections = Read(secondIsWider: false);
 
         sections.Count.ShouldBe(2);
         sections[0].Page.Margins.Top.ShouldBe(FirstTop);
         sections[1].Page.Margins.Top.ShouldBe(
-            FirstTop, "a break that starts no page cannot re-cut the sheet it lands on");
+            SecondTop, "what the file says; whether it applies is not this pass's question");
+    }
+
+    /// <summary>
+    /// A continuous section that names no furniture of its own cannot re-cut the sheet it lands on.
+    /// </summary>
+    /// <remarks>
+    /// The `foca_form_1.doc` case, now asserted where it is decided. Its second section is continuous,
+    /// begins inside the opening table and states 1135 twips against the first's 567; taking it at its
+    /// word started the body an inch down every page and made four pages of three.
+    /// </remarks>
+    [Fact]
+    public void AContinuousSectionWithoutItsOwnFurnitureLosesItsMargins()
+    {
+        Paginated(statesOwnFurniture: false, hardBreakInSecond: false)[1]
+            .Section.Page.Margins.Top.ShouldBe(FirstTop);
+    }
+
+    /// <summary>
+    /// A continuous section that names its own furniture and holds a hard page break keeps them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>wwSectionManager::InsertSegments</c>'s <em>"nightmare scenario"</em> arm
+    /// (<c>sw/source/filter/ww8/ww8par.cxx</c>:4515-4560): the continuous section has headers and
+    /// footers of its own, so a descriptor is built and hung on the first hard page break inside the
+    /// section — and a descriptor carries the paper, the margins and the running head together.
+    /// </para>
+    /// <para>
+    /// Measured on <c>words/done-014/doc/PK_FlugzeugeStricken.doc</c>, whose second section is
+    /// continuous, names its own running head and states <c>sprmSDyaTop</c> = 1701 twips against the
+    /// first's 1417. Patching that 1701 to 2500 moves the reference's body from 85.08 pt to 125.03 and
+    /// repaginates it from 7 pages to 11; before this, it moved nothing here at all, and pages 3 to 7
+    /// sat 14.20 pt too high — two extra lines by page 6. After: those five pages' unsigned ink goes
+    /// from 0.10, 0.08, 0.21, 0.36, 0.54 to 0.01, 0.01, 0.04, 0.05, 0.03.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AContinuousSectionWithItsOwnFurnitureAndAHardBreakKeepsThem()
+    {
+        Paginated(statesOwnFurniture: true, hardBreakInSecond: true)[1]
+            .Section.Page.Margins.Top.ShouldBe(SecondTop);
+    }
+
+    /// <summary>
+    /// Own furniture is not enough on its own: with nowhere to hang the descriptor it is dropped.
+    /// </summary>
+    /// <remarks>
+    /// The control that separates the two conditions, and it is the branch `wwSectionManager` writes
+    /// as <c>if (bFailed) aIter-&gt;mpPage = pOrig</c> — the search for a hard break found none, so the
+    /// section wears the descriptor above it after all.
+    /// </remarks>
+    [Fact]
+    public void OwnFurnitureWithNoHardBreakStillLosesTheMargins()
+    {
+        Paginated(statesOwnFurniture: true, hardBreakInSecond: false)[1]
+            .Section.Page.Margins.Top.ShouldBe(FirstTop);
+    }
+
+    /// <summary>The two sections as pagination settles them, over two one-paragraph sections.</summary>
+    private static IReadOnlyList<PaginatedSection> Paginated(
+        bool statesOwnFurniture, bool hardBreakInSecond)
+    {
+        List<WritingSection> read = Read(secondIsWider: false);
+
+        List<PaginatedSection> sections =
+        [
+            new PaginatedSection(read[0], SideMarginsAreASectionIndent: true),
+            new PaginatedSection(
+                read[1], StatesOwnFurniture: statesOwnFurniture, SideMarginsAreASectionIndent: true),
+        ];
+
+        List<PageBlock> blocks =
+        [
+            Paragraph(0, startsNewPage: false),
+            Paragraph(1, startsNewPage: hardBreakInSecond),
+        ];
+
+        return ContinuousPageDescriptors.Resolve(sections, blocks);
+    }
+
+    private static PageParagraph Paragraph(int section, bool startsNewPage) => new()
+    {
+        Text = "x",
+        Face = Face,
+        SectionIndex = section,
+        Format = ParagraphFormat.Default with { StartsNewPage = startsNewPage },
+    };
+
+    private static OpenTypeFace Face { get; } = Resolve();
+
+    private static OpenTypeFace Resolve()
+    {
+        SystemFontResolver resolver = new(SystemFontIndex.Build());
+        return resolver.LoadOpenType(
+            resolver.Resolve(new FontRequest("Liberation Serif", 400, false)));
     }
 
     [Fact]

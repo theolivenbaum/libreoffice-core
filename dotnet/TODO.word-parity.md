@@ -290,6 +290,43 @@ cost a pagination it currently gets right. The measurement is the deliverable.
 
 ---
 
+## A continuous section's own furniture arrives a page late
+
+**26.2.4.2**: a continuous section that states a running head of its own does not get it on the
+page where the section begins. Writer cannot give a page style to part of a page, so the importer
+builds the descriptor and then hunts forward for the first *hard page break* inside the section to
+hang it on — and the section's paper, margins, running head and numbering all arrive there
+together, a page or more after the section did. The WW8 importer says so in terms
+(`sw/source/filter/ww8/ww8par.cxx`:4518-4560, *"In this nightmare scenario the continuous section
+has its own headers and footers so we will try and find a hard page break between here and the end
+of the section and put the headers and footers there"*), and `SectionPropertyMap::CloseSectionGroup`
+does the same for DOCX and RTF (`dmapper/PropertyMap.cxx`:1746-1801).
+
+**Word**: shows a section's own header on the first page that is wholly that section's.
+
+**This tree**: the same as Word. `ContinuousPageDescriptors` models the *drop* — a descriptor that
+can be hung nowhere is lost, which is Word's behaviour too, since a section that never gets a page
+of its own never gets its page setup either — but not the *deferral*, and the two are different
+claims. **Not switched**, for the same reason the entry below this one is not: deferring a
+descriptor to a later page is an importer's workaround for a model limitation this tree does not
+have, and reproducing it means drawing the wrong running head on a page on purpose.
+
+**Measured on `words/done-014/doc/PK_FlugzeugeStricken.doc`**, whose second section is continuous,
+begins at CP 738 — page 2 — and states its own running head. The reference draws section 0's
+full-page letterhead image on pages 1 **and** 2 and the `SIGL / SCHAFFLER / STOLLBERGER / KASTNER`
+running head from page 3, the first hard page break inside the section (CP 2936); we draw the
+letterhead on page 1 and the running head from page 2. Two blind readings of the composed pairs,
+given no numbers, reported the split independently. `probes/docsection-r184/`.
+
+**Reach**: not censused as a class. In this corpus it is one document's one page.
+
+**What it costs: 6.42 of unsigned ink on one page**, which as of round 184 is the worst single page
+in the words track — and the reason the track's head is worth re-reading rather than worked. The
+same document's *other* six pages come to 0.71 between them once the margin half of this rule was
+fixed, which was ours and is in `probes/docsection-r184/` as well.
+
+---
+
 ## Still LibreOffice's reading, and why
 
 These are places where this tree recomputes a field that Word would leave at its cache, and they
