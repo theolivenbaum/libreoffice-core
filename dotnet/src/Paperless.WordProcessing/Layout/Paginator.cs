@@ -3487,14 +3487,27 @@ public sealed class Paginator
     /// Whether a block would draw anything a fly could displace.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A table always would — except a positioned one, which the caller skips before asking, because it
     /// is not in the flow at all. A paragraph counts only when it holds a character that is neither
     /// whitespace nor a control — the anchor character a frame, a field or a note citation occupies is
     /// <c>U+0001</c>, and a paragraph holding nothing else is the empty spacer this has to let past.
+    /// </para>
+    /// <para>
+    /// <b>An as-character frame is that paragraph's ink even though its anchor is a control.</b> It is a
+    /// portion on the line, so <c>SwTextFly</c> moves it exactly as it moves a word, while a frame
+    /// anchored to the paragraph or to a character states its own position and is not in the flow to be
+    /// displaced. Reading only <see cref="PageParagraph.Text"/> cannot tell the two apart, and calling a
+    /// paragraph whose whole content is one inline picture an empty spacer is what drew
+    /// <c>HC-Bulletin-template.docx</c>'s map over its own table: the fly was floated because nothing
+    /// after it appeared to hold ink, the flow stayed at the top of the body, and the picture landed
+    /// there. 26.2.4.2 puts the same picture below the frame, at y = 413.6 against our 63.3.
+    /// </para>
     /// </remarks>
     private static bool HasInk(PageBlock block)
         => block is not PageParagraph paragraph
-           || paragraph.Text.Any(c => !char.IsWhiteSpace(c) && !char.IsControl(c));
+           || paragraph.Text.Any(c => !char.IsWhiteSpace(c) && !char.IsControl(c))
+           || paragraph.Frames.Any(frame => frame.Anchor is FrameAnchor.AsCharacter);
 
     /// <summary>
     /// Places a body table that names a position on the page rather than a place in the text, and
