@@ -242,6 +242,54 @@ becomes a drawinglayer primitive*. A grouped VML shape does.
 
 ---
 
+## An inherited header or footer gains an empty paragraph
+
+**26.2.4.2**: a section that states no `w:footerReference` — OOXML's *"link to previous"*, §17.10.1
+— gets the previous section's footer as a **copy carrying one extra empty paragraph**, which makes
+the footer a line taller and pushes its content a line up the page. The same applies to a header.
+LibreOffice cannot link header or footer *content* between page styles, and the comment above the
+copy says so (`sw/source/writerfilter/dmapper/PropertyMap.cxx`:1118-1124, *"LO does not support
+linking of header/footer content across page styles so we just copy the content from the previous
+section"*). The seat is `copyHeaderFooterTextProperty` (`:935-960`), which calls
+`removeXTextContent` (`:518-526`) and then `copyText`: the removal empties the target with
+`setString("")` and appends and disposes one paragraph, and since a text body cannot be left with
+none, the target still holds an empty paragraph when the source's content arrives beside it.
+
+**Word**: shows the linked footer, unchanged.
+
+**This tree**: shows the linked footer, unchanged. `DocxReader.FurnitureCarry` carries the slot
+across the sections and nothing is appended. **Not switched** — see below.
+
+**Measured on `words/pagination-002/docx/docs-quality-MA.IMS.00001-Integrated-Management-System-manual.docx`**,
+whose sections 4 and 5 state a `w:headerReference` and no `w:footerReference`. Footer text bottom
+edge, in points, on an 841.89 pt page with `w:footer="567"`:
+
+| pages | the section's own `w:footerReference` | this tree | 26.2.4.2 |
+|---|---|---:|---:|
+| 1–7 | stated | 813.55 | 813.55 |
+| 8–44 | absent, so inherited | 813.55 | **802.05** |
+
+11.50 pt, constant, and the split falls exactly at the first inheriting section — the same document
+and the same footer part on both sides of it. Appending `<w:p><w:r><w:t>XTRAIL</w:t></w:r></w:p>`
+after that footer's table draws `XTRAIL` at y 802.40–813.56, filling the gap without moving the
+copyright block, so the space is one paragraph's and the reference had already reserved it. The
+reference's own `--convert-to fodt` writes `<text:p text:style-name="Footer"/>` after the table in
+the two master pages built for the inheriting sections and not in the three built for sections that
+name their own. Both directions are in `probes/footerlink-r183/`, with a two-section synthetic that
+reproduces the spare paragraph from scratch.
+
+**Reach**: not censused. It needs a document with more than one section, at least one of which
+links its footer or header to the previous, and a running foot tall enough for a line to matter.
+
+**What it costs: 0.29 of ink and no gate row.** Supplying the paragraph in the file and re-rendering
+this tree against the unmodified reference takes the document from 10.22 unsigned ink to 9.93 and
+from two major pages to one — while opening a two-page drift at page 34. That is why it is **not
+switched**: the rule is a defect in the reference's importer rather than a reading of the file, the
+whole of what it buys is three short lines moving 11.5 pt on 37 pages, and reproducing it would
+cost a pagination it currently gets right. The measurement is the deliverable.
+
+---
+
 ## Still LibreOffice's reading, and why
 
 These are places where this tree recomputes a field that Word would leave at its cache, and they

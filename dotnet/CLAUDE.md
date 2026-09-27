@@ -966,6 +966,12 @@ four rules that each cost a round.** Read it before writing any comparison of yo
   every one of them a single page. Equal page counts do **not** prove alignment: two documents
   can carry different content on the same-numbered pages where a block lost early is made up
   later. `ink.tsv`'s `drift` column counts it, from the text layer rather than the pixels.
+- **Rank on the worst page, not on summed ink.** `abs_ink` is the per-page figure *summed*, so a
+  long document outranks a badly wrong short one for being long. `ink.tsv` also carries `worst`
+  and `mean`; rank on `worst`, and read a `mean` below about 0.3 as "no defect, only
+  antialiasing". Round 183 spent most of a round on a 44-page document that headed the ranking at
+  10.22 and whose mean is 0.23 — the raster floor — while three one-page charts it outranked were
+  5.18, 4.64 and 4.25 on their only page.
 - **A raw mean difference is biased by colour quantisation**, at one grey level across every
   flat fill, because the two writers emit colour to different decimal precision and the
   rasteriser floors. `differing_fraction`, `differing_tiles` and `ink_delta` are safe; a raw

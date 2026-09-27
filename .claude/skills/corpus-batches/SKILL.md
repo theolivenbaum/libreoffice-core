@@ -1153,6 +1153,24 @@ one sweep into another, copy it verbatim and say so**; this is the third time tw
 have circulated in this skill under one name, after the signed/unsigned ink pair that the
 header of `track-ink-sweep.sh` still records.
 
+### Rank on the `worst` page, not on `abs_ink` — the sum is weighted by length
+
+`abs_ink` is the per-page `|ink|%` column **summed**, so a long document outranks a badly wrong
+short one just for having more pages. `ink.tsv` therefore also carries `worst` — the worst single
+page's figure — and `mean`, and the ranking to work is the one on `worst`.
+
+**Measured, at the cost of most of a round.** `docs-quality-MA.IMS.00001-Integrated-Management-System-manual.docx`
+headed round 182's `drift`-free ranking at `abs_ink` **10.22**. Its `mean` is **0.23** over 44
+pages, which is the raster floor for text that dense, and its `worst` page is 2.77 — **seventh**
+in the same track. The three one-page chart templates it outranked are 5.18, 4.64 and 4.25 on
+their only page. Round 183 went after the 44-page document, found a real 11.5 pt footer offset on
+37 of its pages, and measured it at **0.29 of the 10.22** — the rest was length. See
+`probes/footerlink-r183/`, and `probes/wordsink-r183/` for the re-ranked track.
+
+`mean` is the companion screen: **below about 0.3 says the document holds no defect at all**, only
+antialiasing and hairline placement. A row whose `mean` is at the floor and whose `abs_ink` is high
+is a long document, not a broken one.
+
 ### `ink.tsv` has a `drift` column, and a non-zero value voids that row's ink
 
 Ink is compared page against page. Two documents can hold the same number of pages and still
