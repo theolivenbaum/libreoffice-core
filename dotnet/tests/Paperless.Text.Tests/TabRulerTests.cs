@@ -288,6 +288,117 @@ public sealed class TabRulerTests
             .ShouldBe(Length.FromPoints(30));
     }
 
+    /// <summary>
+    /// A trailing right stop past the line's end lets its text use the paragraph's end indent.
+    /// </summary>
+    /// <remarks>
+    /// <c>SwTextFormatInfo::GetLineWidth</c> (<c>sw/source/core/text/inftxt.cxx</c>:2132-2182) answers
+    /// <c>Width() - X()</c> until there is a pending tab whose stop is past <c>Width()</c>, and then
+    /// answers the frame's width less the <em>left</em> margin alone — <em>"text is allowed to use the
+    /// full text frame area to the right (RR above, but not LL)"</em>. Here the line ends at 20 pt, the
+    /// paragraph's end indent is 4 pt so the frame's edge is 24, and the stop at 24 is past the line —
+    /// so <c>cd</c> is fitted against 24 and the width comes back 4 pt short of its unstretched end.
+    /// </remarks>
+    [Fact]
+    public void AStopPastTheLineEndGivesTheEndIndentBack()
+    {
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(24), TabAlignment.Right)) with
+        {
+            TabsOverSpacing = true,
+            EndIndent = Length.FromPoints(4),
+        };
+
+        // "ab" ends at 2 and "cd" is 2 wide, so the unstretched end is 4; less the 4 pt given back.
+        TabRuler.WidthOf(
+                "ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(24),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.Zero);
+    }
+
+    /// <summary>The control: a stop inside the line gives nothing back.</summary>
+    /// <remarks>
+    /// This is the direction the corpus settles as well — moving <c>02_mcar</c>'s TOC stops back to
+    /// their own line end makes <em>the reference</em> wrap exactly as this tree did before the rule.
+    /// </remarks>
+    [Fact]
+    public void AStopInsideTheLineGivesNothingBack()
+    {
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(20), TabAlignment.Right)) with
+        {
+            TabsOverSpacing = true,
+            EndIndent = Length.FromPoints(4),
+        };
+
+        TabRuler.WidthOf(
+                "ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(24),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(4));
+    }
+
+    /// <summary>
+    /// And a document without <c>TabOverSpacing</c> gives nothing back either.
+    /// </summary>
+    /// <remarks>
+    /// <c>GetLineWidth</c> returns before the pending tab is even looked at unless the document carries
+    /// <c>TAB_OVER_MARGIN</c> or <c>TAB_OVER_SPACING</c>. A binary <c>.doc</c> carries the first, whose
+    /// arm is a flat 558 mm rather than the frame's edge and is deliberately not modelled, so a
+    /// paragraph that states neither keeps the line's own boundary.
+    /// </remarks>
+    [Fact]
+    public void WithoutTabOverSpacingNothingIsGivenBack()
+    {
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(24), TabAlignment.Right)) with
+        {
+            EndIndent = Length.FromPoints(4),
+        };
+
+        TabRuler.WidthOf(
+                "ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(24),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(4));
+    }
+
+    /// <summary>The drawn width is untouched by any of it.</summary>
+    /// <remarks>
+    /// The give-back is a fitting rule: Writer settles the tab's real width in
+    /// <c>SwTabPortion::PostFormat</c> afterwards, so the line is still <em>drawn</em> with its text
+    /// ending on the stop. Subtracting the indent from the placed width would draw every such entry
+    /// 4 pt short of where it was measured to.
+    /// </remarks>
+    [Fact]
+    public void ThePlacedWidthIsUntouched()
+    {
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(24), TabAlignment.Right)) with
+        {
+            TabsOverSpacing = true,
+            EndIndent = Length.FromPoints(4),
+        };
+
+        TabRuler.WidthOf("ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(24))
+            .ShouldBe(Length.FromPoints(24));
+    }
+
+    /// <summary>A stretch a <em>left</em> stop placed is never given the indent.</summary>
+    /// <remarks>
+    /// <c>GetLineWidth</c>'s <c>TabOverSpacing</c> arm narrows the answer again for a pending
+    /// <c>TabLeft</c>, and a left stop is never deferred in the first place — only a right, centred or
+    /// decimal one is settled after its text is fitted.
+    /// </remarks>
+    [Fact]
+    public void ALeftStopIsNotGivenTheIndent()
+    {
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(24), TabAlignment.Left)) with
+        {
+            TabsOverSpacing = true,
+            EndIndent = Length.FromPoints(4),
+        };
+
+        TabRuler.WidthOf(
+                "ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(24),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(26));
+    }
+
     [Fact]
     public void ATabReachingTheLineEdgeEndsTheLineAtItself()
     {

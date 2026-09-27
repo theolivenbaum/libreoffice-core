@@ -42,9 +42,10 @@ By that column the two passing documents worth opening are
 312 pages MAJOR** — and its alphanumerics are **414 531 against 414 481**, fifty characters apart
 in four hundred thousand, on 313 pages against 312.
 
-So it is not a content difference and it is not a cumulative drift: pages 1–28 are all at or below
-0.1, page 29 jumps to 4.0, and pages after it alternate between 0.0 and 2.5. Something is drawn
-differently on two thirds of the pages without changing what is drawn.
+**That reading was wrong and `probes/tocwrap-r175` corrects it.** The pages are *misaligned*: ours
+runs one PDF page behind the reference's from page 29 on, so comparing page *i* against page *i*
+compares different pages and reports one defect two hundred times. The defect is one extra page of
+table of contents, and it is closed — 881.67 → 25.57, 214 MAJOR pages → 0, `pages` → `match`.
 
 ## Track state
 
