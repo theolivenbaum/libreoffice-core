@@ -2407,7 +2407,10 @@ is read and verified, so what remains is the filling of pages rather than the me
   reproduces **8 of 8** within the two writers' own 0.36 pt border-origin constant. `PageFrame.FollowsTextFlow`,
   `FrameLayout.Place`, `DocxFrames.FollowsTextFlow`, `FrameFollowsTextFlowTests`; `probes/pagev-r192/`.
 
-  **Confinement: 2 of the words track's 337 renderings move and 335 are byte-identical**, and the two
+  **Confinement: 2 of the words track's 337 renderings move and 335 are byte-identical** -- 337 being
+  the track as this round swept it, before `WordArt_Shapes_Arrows_Catalog1.docx` arrived from
+  `sample-files#5`; that document holds 340 `wp:inline`, no `wp:anchor` and no chart, so it fails both
+  halves of the reader's test and its frames never reach `FrameLayout.Place` at all. The two movers
   are exactly the two documents whose chart states `relativeFrom="page"` -- the three stating `margin`
   do not move by a byte, `PAGE_PRINT_AREA` resolving to the body either way. `027` goes 9.48 ->
   **4.61** worst-page `diff%` and draws its chart at 470.30 against 26.2.4.2's 470.30 exactly; `028`

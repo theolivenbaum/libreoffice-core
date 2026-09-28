@@ -181,6 +181,14 @@ built to remove a defect stops being a control once the defect is fixed.*
 Nothing outside the words track can move: `PageFrame.FollowsTextFlow` has one writer, and with the
 flag false every expression in `FrameLayout.Place` reduces to what it was.
 
+**The 337 is the corpus as this round swept it, and the track is 338 now.**
+`words/drawingset-001/docx/WordArt_Shapes_Arrows_Catalog1.docx` arrived from
+`theolivenbaum/sample-files#5` after the sweep. It cannot move: it holds **340 `wp:inline` and zero
+`wp:anchor`**, and no chart part at all, so it fails both halves of `DocxFrames.FollowsTextFlow`'s test
+and its frames never reach `FrameLayout.Place`, which is not called for an as-character frame. The
+census is 5 embedded-object anchors in 5 documents before and after it. Re-sweep it with the 338th
+document if a later round wants the figure restated rather than reasoned.
+
 **And one banked row has to be re-measured before it is built on.**
 `probes/ofpie-r190/results.md`'s variant table gives `layoutInCell="0"` a frame top of **214.94**
 and annotates it *"i.e. ours"*, while `w:top="0"` gives **175.86** and is annotated the same way, and
