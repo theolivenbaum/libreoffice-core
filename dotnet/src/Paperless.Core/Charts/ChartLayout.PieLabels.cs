@@ -127,6 +127,18 @@ public static partial class ChartLayout
     /// best-fit test are horizontal measures, and the reference's own wrapping width comes from
     /// the rim's <em>x</em> alone (<c>nOuterX</c>).
     /// </param>
+    /// <param name="startDegrees">
+    /// Where the first wedge opens, counter-clockwise from three o'clock. Twelve o'clock for an
+    /// ordinary pie; an of-pie's main ring opens at minus half its composite wedge instead, so
+    /// that the composite closes across three o'clock — <c>createOneRing</c>'s <c>sAngle</c>
+    /// (<c>PieChart.cxx</c>:1229-1244).
+    /// </param>
+    /// <param name="limit">
+    /// How many of the series' points the ring holds, when it does not hold all of them. An
+    /// of-pie's main ring holds the first <c>n − splitPos</c> and then a composite wedge that
+    /// <c>createOneRing</c> deliberately gives no label (<c>:1346-1350</c>), so the labels stop
+    /// there while the shares stay fractions of the whole series.
+    /// </param>
     private static List<PiePlacedLabel> PieLabels(
         ChartPlot plot,
         ChartSeries series,
@@ -134,7 +146,9 @@ public static partial class ChartLayout
         Length radius,
         Length verticalRadius,
         DocRect available,
-        ChartText measurer)
+        ChartText measurer,
+        double startDegrees = 90.0,
+        int? limit = null)
     {
         List<PiePlacedLabel> placed = [];
 
@@ -150,9 +164,10 @@ public static partial class ChartLayout
         Length keyGap = key + Length.FromMm100((int)Math.Max(
             LabelKeyGapFloor.Mm100, size.Mm100 * LabelKeyGap));
 
-        double start = 90.0;
+        double start = startDegrees;
+        int last = Math.Min(limit ?? series.Values.Count, series.Values.Count);
 
-        for (int at = 0; at < series.Values.Count; at++)
+        for (int at = 0; at < last; at++)
         {
             if (series.Values[at] is not { } value || !double.IsFinite(value)) continue;
 
@@ -551,6 +566,20 @@ public static partial class ChartLayout
 
         // The of-pie's own drawn extent, which AddOfPie composes from the same constants. Below
         // the four-point minimum it draws a plain pie instead and there is nothing to add.
+        //
+        // And its LABELS belong to the main pie, which is two thirds of the unit radius and sits
+        // three quarters of one to the left of the unit centre -- not to the unit circle, which
+        // nothing is drawn on. Measuring them on the unit circle is what left this pass with
+        // nothing to consume on 028_Unit_Circle_Chart_Optimized_Graph: at pass 1's unit radius of
+        // 84.25 pt every one of its sixteen labels passed the inner best-fit test and the
+        // consumed rectangle came back exactly as tall as the diagram square, so the second pass
+        // grew the diagram to the whole available rectangle and drew a unit radius of 185.3
+        // against 26.2.4.2's 135.5.
+        DocPoint ring = centre;
+        Length ringRadius = radius;
+        double ringStart = 90.0;
+        int? ringPoints = null;
+
         if (split && pie[0].Values.Count >= OfPieMinimumPoints)
         {
             double far = plot.OfPieType is ChartOfPieType.Bar
@@ -561,12 +590,17 @@ public static partial class ChartLayout
             right = Length.Max(right, centre.X + (radius * far));
             top = Length.Min(top, centre.Y - (radius * OfPieLeftScale));
             bottom = Length.Max(bottom, centre.Y + (radius * OfPieLeftScale));
+
+            ring = new DocPoint(centre.X + (radius * OfPieLeftShift), centre.Y);
+            ringRadius = radius * OfPieLeftScale;
+            (ringStart, ringPoints) = OfPieRingLabels(plot, pie[0]);
         }
 
         if (!plot.Rings)
         {
             foreach (PiePlacedLabel placed in PieLabels(
-                         plot, pie[0], centre, radius, verticalRadius, available, measurer))
+                         plot, pie[0], ring, ringRadius, split ? ringRadius : verticalRadius,
+                         available, measurer, ringStart, ringPoints))
             {
                 left = Length.Min(left, placed.Block.Left);
                 top = Length.Min(top, placed.Block.Top);

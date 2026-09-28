@@ -4336,6 +4336,10 @@ public static partial class ChartLayout
     /// the wrapping width and the best-fit test are horizontal measures and stay on the full
     /// radius, which is what the reference's own <c>nOuterX</c> is.
     /// </para>
+    /// <para>
+    /// <c>startDegrees</c> and <c>limit</c> are <see cref="PieLabels"/>'s, and an of-pie's main
+    /// ring is the only caller that passes either.
+    /// </para>
     /// </remarks>
     private static void AddPieLabels(
         ChartPlot plot,
@@ -4346,10 +4350,13 @@ public static partial class ChartLayout
         DocRect available,
         ChartText measurer,
         List<ChartShape> shapes,
-        List<ChartLabel> labels)
+        List<ChartLabel> labels,
+        double startDegrees = 90.0,
+        int? limit = null)
     {
         foreach (PiePlacedLabel placed in PieLabels(
-                     plot, series, centre, radius, verticalRadius, available, measurer))
+                     plot, series, centre, radius, verticalRadius, available, measurer,
+                     startDegrees, limit))
         {
             if (placed.GhostKey is { } ghost && placed.KeyFill is { } ghostFill)
                 shapes.Add(new ChartShape(GraphicsPath.Rectangle(ghost), ghostFill));

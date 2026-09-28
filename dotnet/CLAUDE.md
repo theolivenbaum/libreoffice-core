@@ -3388,6 +3388,88 @@ are byte-identical**, the three extra being charts whose *lines and ticks* moved
 month-linear axis. Two improve (16.01 → 12.91 and 2.57 → 2.12), five are level, one worsens by
 0.05 on a chart already within 0.13 pt.
 
+### An of-pie's composite wedge, its bar and its opening angle are `PieChart`'s, not the file's
+
+**Read a pie's geometry out of the page's fill operators.** `pdf-ops.py dump --only fill` gives
+every filled path's colour and bounding box, and a wedge's path runs centre → rim → centre, so
+the boxes fix the centre, the radius and each wedge's span exactly and the colour is read rather
+than sampled. A blind reading of the same page named five differences and **two were wrong** — it
+read the reference's legend as 12 entries where the operators show all 16, and the bar's split as
+75/25 where they give 47.7/52.3. It had the *direction* right on the rest, which is what a
+reading is for.
+
+Three things the reference decides for itself on `028_Unit_Circle_Chart_Optimized_Graph`, the
+corpus's one drawn `c:ofPieChart`:
+
+- **The composite wedge's colour is not in the document, and the document states one.** That
+  series carries sixteen values and *seventeen* `c:dPt`, the last of them `accent4 lumMod 50%` =
+  `#806000`; 26.2.4.2 draws `#7E0021`. `propIndex` gives the composite the property index
+  `getTotalPointCount()` (`PieChart.cxx`:1185-1191) — one past the last value, **always** — and
+  `DataSeries::getDataPointByIndex` answers an empty reference outside
+  `0 <= nIndex < getData().getLength()` (`DataSeries.cxx`:312-337), so the import drops that
+  `c:dPt`, `hasPointOwnColor` is false, and `createOneRing` falls through to
+  `m_xColorScheme->getColorByIndex` (`:1325-1331`). That is
+  `Office.Chart/DefaultColor/Series` — twelve values in
+  `officecfg/registry/schema/org/openoffice/Office/Chart.xcs`:35-36, indexed `nIndex % 12` — and
+  `16 % 12 = 4` is `0x7E0021`. Reproduced deliberately; it disagrees with the writer's intent and
+  agrees with the reference.
+- **The bar stacks upward in data order**, so the *first* split point is its foot:
+  `createOneBar` opens at `fBarTop = -0.5` and adds each share, `// make the bar go from -0.5 to
+  0.5` (`:1416-1430`), against a value axis that points up.
+- **The main ring opens at minus half the composite sweep**, so the composite closes across three
+  o'clock where the two connecting lines meet it — `sAngle`'s
+  `clockwiseWedges() ? 360 - degAng : degAng` (`:1229-1244`). Opening at plus half puts the whole
+  composite above the axis.
+
+**What the of-pie constants already had right, measured the same way:** the unit centre to 0.6 pt,
+`bar width / unit radius` 0.747 against 0.750, `bar height / unit radius` 1.495 against 1.499. So
+`m_fLeftShift`, `m_fLeftScale` and the three bar constants are exact and **only the unit radius is
+wrong, by 1.37×** — round 104's figure, still open.
+
+**And the labels went through a placer of their own, which is also why the radius is stuck.**
+`AddOfPie` put each label flat on its bisector at half the radius where a plain pie goes through
+`PieLabels`, and `PieConsumedRect` — which is what the pie's second pass shrinks against —
+measured them **on the unit circle**, which nothing is drawn on, rather than on the main ring at
+two thirds of it. Both are now the same placer at the same place, and on `028` it changes nothing,
+because that chart states `<c:dLblPos val="inEnd"/>` and both placers take the fixed branch. The
+arithmetic says what is missing: for the reference's final square to be 270.9 rather than 370.68
+its pass-1 consumed rectangle must be **268.27** tall against our 168.49, about 50 pt of label
+overflow each way — and `INSIDE` is not half the radius, it is **the rim less a flat 150** in the
+radius direction (`PieChart.cxx`:439-452). That is the next measurement.
+
+**Reach 1 of the 168 chart documents and 167 byte-identical.** `029`, the other `c:ofPieChart`,
+is exploded and both renderers draw it as a plain pie. `probes/ofpie-r190`.
+
+***And a page-fraction metric cannot see any of it on that document, because the chart is 71.6 pt
+out of place.*** `028` goes **16.48 → 16.72 `diff%`**; scored against a reference rendered from a
+variant that puts 26.2.4.2's chart where ours is and changes nothing else, the same two
+renderings give **15.21 → 14.47**. When a chart is displaced by more than its own features, the
+headline number measures the displacement and nothing else — **render the reference with the
+displacement removed and score against that.**
+
+### A `relativeFrom="page"` vertical anchor counts from the page, except on one corpus document
+
+Measured, mechanism not found, **not implemented**. On `028_Unit_Circle_Chart_Optimized_Graph`
+26.2.4.2 places the chart's `<wp:positionV relativeFrom="page"><wp:posOffset>` **71.6 pt lower
+than the offset states** — the frame is the same size and every line of body text agrees to a
+twentieth of a point, so only the frame moves. One-attribute variants
+(`probes/ofpie-r190/variants.py`) put the rule beyond doubt: `margin` renders identically to
+`page`; offset 0 gives 72.36 and offset −36 gives 36.36, so it is linear and not a clamp at the
+margin; offset −200 gives 0.36, so it *is* clamped to the page; and the base tracks
+`w:pgMar/@w:top` one for one — `w:top="0"` renders it exactly where this tree does.
+**`layoutInCell="0"` also renders it exactly where this tree does**, although the object is not
+in a table and `IsInTable()` guards every place `GraphicImport` acts on that attribute
+(`GraphicImport.cxx`:777-788, `:1315-1317`).
+
+**The general rule is the page edge and this tree is right about it**, which is what kept this
+from being "fixed": `probes/ofpie-r190/page-anchor-fixture.py` builds a minimal DOCX — one
+`wps:wsp` at `relativeFrom="page"`, `layoutInCell="1"`, and a `word/settings.xml` so the OOXML
+compatibility defaults apply — and 26.2.4.2 draws it at the page's own top edge at both
+`w:top="1440"` and `w:top="2880"`. So `028` meets a second condition the fixture does not
+reproduce. Reach if anyone takes it: **16 corpus DOCX, 41 page-relative vertical offsets**
+(`probes/ofpie-r190/census-pagev.py`). **Do not implement "page means margin" from the corpus
+document alone** — the fixture refutes it.
+
 ### Stored evidence decays silently, and the prose knows it while the data does not
 
 Three cases surfaced in a single day: a `words-after.tsv` carrying numbers from a sweep that
