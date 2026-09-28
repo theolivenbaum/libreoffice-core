@@ -79,20 +79,60 @@ so the label takes the *run's* size and not the level's. And rewriting the slide
 than honouring the stated scale** — all three renderings draw the text at 14.00 pt. So a probe that
 tries to vary the shrink through the file cannot; the unshrunk size has to be read off the runs.
 
-## 3. Reach, and what implementing it needs
+## 3. A generated NUMBER is the exception, and one corpus deck is what found it
 
-The rule only shows where `advance(bullet at the unshrunk size)` exceeds the hanging width
-`|indent|`, which needs an autofit shrink deep enough to separate the two — so it is a property of
-heavily autofitted decks with narrow hanging indents rather than of bullets in general.
-**Not censused yet**, and the census is the first thing the next round should do: for every slide
-text body with a `normAutofit` and a `buChar`, compare the character's advance at the run's stated
-size against `|indent|`.
+The rule above holds for a fixed character. It does **not** hold for a generated number, and the
+first confinement sweep is what said so: of the ten slides documents that moved, nine improved and
+`30-04-2021 merged NDoH and NICD_Presentation HBV BD meeting 05May2021_1.pptx` went **85.02 → 90.72**
+summed `diff%`, all of it on page 9 (5.00 → 10.70). That page numbers its second level, and its five
+first lines move from 63.01 to 65.74 where 26.2.4.2 draws **62.90** — so the reference measured that
+label at the size it *drew* it, not at the unfitted one.
 
-What it would move on this witness is the whole of page 13 (15.93 `diff%` with almost no ink
-difference) and, quite possibly, pages 11 and 21. What it costs is a slides-track sweep, because
-every autofitted bulleted deck is a candidate — which is why it is written down rather than pushed.
+The reading that fits is the cache's own key. `Paragraph::IsBulletInvalid` compares the bullet's
+**text** as well as the scaling parameters, so a generated number — whose text differs on every
+paragraph — refills the cache while the search already has a scale, where a fixed character never
+changes and is measured once, before it. Restricting the rule to a character bullet keeps every gain
+and removes the loss: `Sector_Skills` stays at 131.47 and `30-04-2021` returns to 85.02, exactly its
+base figure.
 
-## 4. And a second lead from the same deck's page 11, read blind and not measured
+## 4. What it is worth
+
+`sweep.py` renders one document per directory under `SOURCE_DATE_EPOCH=0`, three workers, at the
+round's base and with the change; `movers.py` diffs the two legs and refuses to print a total unless
+every document on the list rendered in both. The slides track is the whole reach by construction:
+`SlideTextLayout` has no consumer outside `Paperless.Presentations`, and the two references to it
+from `Paperless.Text` and `Paperless.WordProcessing` are doc comments.
+
+**9 of the 302 slides documents move and 293 are byte-identical**, and all nine improve: summed
+`diff%` over them **1148.05 → 1121.17**, MAJOR pages 14 → 14. The number-bulleted deck of §3 is not
+in the mover set at all — its rendering is byte-identical to the base — which is the restriction
+working rather than an absence of coverage.
+
+Scored against a freshly rendered 26.2.4.2 with `pdf-image-diff.py`, over the first sweep's ten
+movers (the unrestricted rule, so the one number-bulleted deck is in it):
+
+| document | worst `diff%` | summed `diff%` |
+|---|---|---|
+| `Sector_Skills_Insights_Advanced_Manufacturing…` | 15.93 → **13.13** | 139.74 → **131.47** |
+| `Liturgical-Commission-2025-Convention-Presentation` | 15.40 → **11.27** | 28.31 → **24.18** |
+| `chapter_4_0` | 14.79 → **14.46** | 220.18 → **218.76** |
+| `5b_upasana_dasgupta_-_liability_and_registration` | 9.98 → 10.27 | 50.46 → **47.42** |
+| `FAA_Form_337` | 11.60 → 11.60 | 346.68 → **342.92** |
+| `joint_user_outcomes_michael_fullerton_29.06.12` | 18.93 → 18.93 | 99.75 → **98.03** |
+| `RESPA_-_Section_8_Webinar` | 8.98 → 8.98 | 96.66 → **94.89** |
+| `ghgp-supply-chain-initiative_20100323_wri` | 13.94 → 13.94 | 143.77 → **143.07** |
+| `BMFE-06-03 (Gerflor) Smoke Density and Toxicity` | 13.72 → 13.72 | 22.50 → **20.43** |
+| `30-04-2021 merged NDoH and NICD…` | 14.94 → 14.94 | 85.02 → 90.72 → **85.02** |
+| **total over the nine the shipped rule moves** | | **1148.05 → 1121.17** |
+
+MAJOR pages 15 → 15. One worst page rises — `5b_upasana` 9.98 → 10.27 — while that document's sum
+falls by 3.04, which is a paragraph whose wrap changed on a page that was already the best of its
+document.
+
+**No gate column can see any of it.** A changed wrap keeps the same characters, and a slide's page
+count is its slide count.
+
+## 5. And a second lead from the same deck's page 11, read blind and not measured
 
 A second uncontaminated reading of page 11 (6.70 `diff%`, MAJOR) found the text identical — *"same
 text, same line breaks, same line positions to ±1 px, same box widths, same colours"* — and three

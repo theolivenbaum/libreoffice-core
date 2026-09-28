@@ -3449,27 +3449,28 @@ displacement removed and score against that.**
 
 ### An autofitted slide body shrinks its text and not its bullet's label, and the first line moves
 
-**Diagnosed, pinned with no free parameter, and not implemented.** `probes/slidebullet-r191`.
-
-The rule, on 26.2.4.2:
+**The width half of a rule this file already had the height half of.** `Outliner::ImplGetBulletSize`
+measures the bullet once and caches the whole `Size` on the paragraph, and the autofit search formats
+the outliner once *unscaled* before it walks `constScaleLevels` — so the cached width, like the
+cached height `SlideFittedBulletBoxTests` already pins, is the unfitted one. EditEngine then takes
+that width for the first line alone, `nStartX = max(textLeft + firstLineOffset, bulletX)`
+(`editeng/source/editeng/impedit3.cxx`:846-851 over the `BulletX` set at `:798-802`), while
+`StripBullet` asks `ImpCalcBulletFont` again and *does* scale what it draws. So a hanging indent wide
+enough for the shrunk bullet can still be too narrow for the cached one:
 
 ```
-firstLineTextX = max(marL, marL + indent + advance(bullet))
+firstLineTextX = max(marL, marL + indent + advance(bullet at the run's STATED size))
 ```
 
-and **the advance is taken at the run's stated size, not at the size the autofit draws it at.**
-`Sector_Skills_Insights_Advanced_Manufacturing_summary_slide_pack.pptx` page 13 is the witness: its
-runs state `sz="5600"`, its body states `<a:normAutofit fontScale="25000" …>` so the text is drawn at
-**14 pt**, and the en-dash bullet's label is measured at **56 pt** — 31.13 pt wide, which overruns
-the level's 22.5 pt hanging indent and pushes every second-level paragraph's first line **8.63 pt**
-right of its own continuation lines. The bullet glyph itself does not move.
-
-Pinned over **ten one-attribute variants** of that one master: `indent` 0 / −9 / −22.5 / −36 and
-`marL` 58.5 / 78.75 give first-line positions of 89.63, 80.62, 67.13, clamped and 87.37 against
-89.62, 80.62, 67.12, clamped and 87.37 predicted — **five of five exact and two clamped as
-predicted** — and the bullet character decides the width: `–` 0.5562 em → 31.15 (31.13 measured),
-`W` 0.9438 → 52.85 (52.87), `i` 0.2222 → 12.43, which fits inside the hanging indent and is
-therefore invisible.
+`Sector_Skills_Insights_Advanced_Manufacturing_summary_slide_pack.pptx` page 13 is the witness. Its
+master states `lvl2 marL="742950" indent="-285750"` — a 58.5 pt margin with the bullet 22.5 pt to its
+left — and its runs state **56 pt** under a `normAutofit` that draws them at 14. Its en-dash bullet is
+0.5562 em, so 31.13 pt at 56 and 7.79 at 14: 26.2.4.2 starts every second-level first line 31.13 pt
+past the bullet and this tree started it at the 22.5 pt margin. **Pinned over twelve one-attribute
+variants of that one master** (`probes/slidebullet-r191`): four hanging indents and two margins give
+five first-line positions exact and two clamped as predicted; three bullet characters give `–` 31.13,
+`W` 52.87 and `i` clamped; three stated run sizes give 28 pt clamped, 56 → 31.13 and 112 → 62.25
+against 15.57, 31.14 and 62.29 predicted.
 
 **Two variants that decide nothing and are worth knowing.** The bullet's own stated size — the
 `<a:defRPr sz="2800">` on the same `lvl2pPr` — moves the offset not at all at 14, 28 or 56 pt, so the
@@ -3478,19 +3479,38 @@ changes nothing, because LibreOffice recomputes the autofit rather than honourin
 all three variants draw the text at 14.00 pt. A probe cannot vary the shrink through the file; the
 unshrunk size has to be read off the runs.
 
-**It is a cascade, which is why it is worth a round.** Page 13 is `diff%` **15.93** with `|ink|%`
-**0.14**: nothing is drawn differently and one wrap is. Our line fits 94 glyphs where the reference's
-fits 92, so a paragraph we set in two lines takes three, everything below drops one pitch, and the
-reference's last line is clipped by the slide's edge. **Reach is uncensused** and the census is the
-first job: every slide text body with a `normAutofit` and a `buChar` whose advance at the run's
-*stated* size exceeds `|indent|`.
+***A generated NUMBER is the exception, and the confinement sweep is what found it.*** Of the ten
+documents the unrestricted rule moved, nine improved and
+`30-04-2021 merged NDoH and NICD_Presentation…pptx` went 85.02 → 90.72 summed `diff%`, all of it on
+page 9, whose second level is numbered: its five first lines moved from 63.01 to 65.74 where 26.2.4.2
+draws **62.90**. The cache's own key explains it — `Paragraph::IsBulletInvalid` compares the bullet's
+**text** as well as the scaling parameters, so a number, whose text differs per paragraph, refills the
+cache while the search already has a scale. Restricting the rule to a fixed character keeps every gain
+and removes the loss. **So the one-line version of this is: a character bullet's label is measured
+before the fit and a generated number's after it.**
+
+**It is a cascade, which is what makes it worth more than its 8.63 pt.** Page 13 was `diff%` **15.93**
+at `|ink|%` **0.14** — the signature of a page where nothing is drawn differently and a great deal is
+drawn in the wrong place: our line fitted 94 glyphs where the reference's fitted 92, so a two-line
+paragraph took three, everything below dropped a pitch, and the reference's last line is clipped by
+the slide's edge. After the fix the reach is **31.15 against 31.13**, the two sides draw the same 49
+text records, and the page is **15.93 → 13.13** — the rest of that page being a 0.4 pt baseline drift
+and the reference's own clipped last line.
+
+**Reach: 9 of the 302 slides documents move and 293 are byte-identical, and all nine improve** —
+summed `diff%` over them 1148.05 → **1121.17**, MAJOR pages 14 → 14. One worst page rises,
+`5b_upasana_dasgupta` 9.98 → 10.27, while that document's sum falls by 3.04. The slides track is the
+whole reach by construction: `SlideTextLayout` has no consumer outside `Paperless.Presentations`, and
+the two mentions of it from `Paperless.Text` and `Paperless.WordProcessing` are doc comments. **No
+gate column can see any of it** — a changed wrap keeps the same characters and a slide's page count
+is its slide count.
 
 **And the same page taught a census rule again**: that deck heads the chart ranking at 15.93 and its
 worst page holds **no chart at all**. Census which page the feature is on before working the number.
 
-***A second lead from the same deck, read blind and not measured: our drop shadow ignores its blur
-and its lateral offset.*** On page 11 ours is a uniform RGB 153 band 4 rows deep offset straight down
-by ~2.2 pt with **zero** spread to the left, the right or above, where 26.2.4.2 ramps 157 → 249 over
+***A second lead from the same deck, read blind and not measured: our drop shadow ignores its blur and
+its lateral offset.*** On page 11 ours is a uniform RGB 153 band 4 rows deep offset straight down by
+~2.2 pt with **zero** spread to the left, the right or above, where 26.2.4.2 ramps 157 → 249 over
 about 11 rows below, 8 px right, 7 px left and 3 px above — a 4–6 pt blur offset down *and* to the
 right. That is what an ignored `a:outerShdw/@blurRad` with a substituted vertical `@dist` looks like.
 It is not only cosmetic: this file already records that **LibreOffice rasterises a blurred shadow**,
