@@ -26,10 +26,10 @@ first answer to an overflow is tighter leading at full size, applied as
 `nHeight = round(GetHeight() * fSpacingY)` in the `InterLineSpaceRule::Off` arm (`:1584-1600`).
 So **the reference is in autofit and we are not**, and the reason is the extra line.
 
-## The extra line is a trailing blank, and the experiment is one attribute
+## It is NOT a trailing blank, and the first cut of this probe said it was
 
-Identical lines measure identically on the two sides, so it is not metrics — over five lines the
-widths agree to **0.6 pt**:
+Identical lines measure identically on the two sides, so it is not a metric difference at the
+scale of a word — over five lines the widths agree to **0.6 pt**:
 
 | line | ours | reference |
 |---|---:|---:|
@@ -39,37 +39,96 @@ widths agree to **0.6 pt**:
 | `system supply rail > 2MΩ (typical)` | 505.84 | 506.44 |
 | the title | 363.88 | 363.46 |
 
-The body placeholder is `<a:off x="609599"/><a:ext cx="11012681"/>` — x 48.00 pt, **right edge
-915.14**. Our accepted line `• One transceiver will be active while the other transceiver` ends
+The body placeholder is `<a:off x="609599"/><a:ext cx="11012681"/>` — x 48.00 pt, right edge
+**915.14**. Our accepted line `• One transceiver will be active while the other transceiver` ends
 at **906.82**; the reference refuses it and ends at 740.57 after `other `.
 
-`widths.py` rewrites `cx` alone and asks the reference where it breaks:
+`widths.py` rewrites `cx` alone:
 
 | placeholder right edge | the reference's line | its right edge |
 |---:|---|---:|
-| 907.0 | `…while the other ` | 740.57 |
-| 915.0 | `…while the other ` | 740.57 |
-| 915.14 (as authored) | `…while the other ` | 740.57 |
-| 915.6 | `…the other transceiver ` | 915.70 |
-| 916.14 | `…the other transceiver ` | 915.70 |
-| 924.0 | `…the other transceiver ` | 915.70 |
+| 907.0, 915.0, 915.14 (as authored) | `…while the other ` | 740.57 |
+| 915.6, 916.14, 924.0 | `…the other transceiver ` | 915.70 |
 
-**The boundary is between 915.0 and 915.6, and the candidate line's own extent is 915.70.**
-Without its trailing blank that line reaches 906.82, which is below every edge in the table at
-which the reference still breaks — so *"the blank is hung past the end of the line"*, which is
-what this tree does, is refuted, and the blank is charged against the break to within half a
-point. The blank is worth **8.88 pt** here (the same line with and without it, 751.98 against
-760.75 on bullet 1).
+**Read on its own that table says the trailing blank is charged** — the boundary is between
+915.0 and 915.6, the candidate's own extent with its blank is 915.70, and without the blank it is
+906.82, which is below every edge at which the reference still breaks. That is what the first cut
+of this probe concluded, and **it is wrong, because the placeholder is not the text area.**
 
-**And the two differences are one.** At a right edge of 916.14 the reference draws bullet 3 on
-two lines like ours and its baselines are **241.97 and 274.68 — ours exactly**. So the leading
-is not a second defect: one extra line tips the body past its box, the box autofits, and the
-whole slide reads as displaced.
+### The master states a 7.2 pt right inset, and both renderers honour it
 
-## Where it would go, and why it is not done here
+`<a:bodyPr vert="horz" lIns="0" tIns="45720" rIns="91440" bIns="45720" rtlCol="0">` on the
+master's body placeholder. The slide's own and the layout's are bare `<a:bodyPr/>`. So the text
+area is 48.00 … 907.94 and the available width is **859.94**, against our visible candidate of
+858.83: it fits by **1.11 pt** and the reference breaks it anyway.
 
-The wrap is `Paperless.Text/Layout/ParagraphLayouter`, which all three tracks share, and Writer
-genuinely does hang a trailing blank — so this cannot be a global change. It needs a mode the
-slides path (and Calc's shape text, which is the same EditEngine) opts into, and a slides-track
-confinement sweep behind it, because the rule is a tie-breaker that fires wherever a line's next
-word lands within one space of the limit. Filed as task #28.
+Both sides honour the inset, which is what makes the next sweep a statement about the break rule
+rather than about the box — at `rIns="182880"` (14.4 pt) the reference ends the line at 740.57
+and this tree at 731.68, and at `rIns="0"` the reference ends it at 915.70 and this tree at
+906.82.
+
+### How much more than its visible text a line must be given: (1.11, 2.01] pt
+
+`insets.py` rewrites that one attribute:
+
+| `rIns` | available | the reference |
+|---:|---:|---|
+| 0.0 | 867.14 | keeps `transceiver` |
+| 0.5 | 866.64 | keeps |
+| 1.0 | 866.14 | keeps |
+| 3.6 | 863.54 | keeps |
+| 4.5 | 862.64 | keeps |
+| 5.4 | 861.74 | keeps |
+| **6.3** | **860.84** | **keeps** |
+| **7.2** | **859.94** | **breaks** |
+| 14.4 | 852.74 | breaks |
+
+So the reference needs between **1.11 and 2.01 pt** more room than the line's visible text — about
+**0.2% of the line**. The trailing blank is **8.26 pt** at 25.99 pt in this face, four times that
+and outside the bracket. *"The blank is charged"* is refuted by the same document that suggested
+it, once the inset is in the arithmetic.
+
+## The trailing-blank rule was implemented anyway, and the slides track refuted it
+
+Before the inset was found, `LineFiller` was given a `chargesTrailingBlanks` mode — the candidate
+line judged by its width *to the break opportunity* rather than to `VisibleEnd` — and
+`SlideTextLayout` set it. On slide 37 it is exact: all thirteen of our baselines become the
+reference's, to the hundredth.
+
+Over the whole slides track it is a clear regression. Our half rendered twice, at the round's base
+and with the mode on, one output directory per document: **210 of 302 documents move**, and
+scoring every mover against a freshly rendered 26.2.4.2:
+
+| | before | after |
+|---|---:|---:|
+| worst-page `diff%`, summed over 210 | 1750.8 | **1950.8** |
+| every page's `diff%`, summed | 15405.8 | **16839.0** |
+| MAJOR pages | 280 | **401** |
+| documents whose worst page improves | — | 16 |
+| … worsens | — | **109** |
+| … level | — | 85 |
+
+Both formats regress (`.pptx` 8 better / 60 worse, `.ppt` 6 / 27 over the first 175), and the
+worst movers are large: `ws_prod-g-doc-Events-2007-may-presentation` 4.79 → 16.01,
+`attendance-updates-for-governors` 8.45 → 18.68, `dhs-293364` 9.63 → 19.30 — the signature of an
+extra line tipping a body into autofit where the reference does not shrink.
+
+**Reverted.** Nothing in `dotnet/src` carries it.
+
+## What is left, and what not to re-derive
+
+- **Do not re-derive "the reference charges the trailing blank" from slide 37.** The width sweep
+  alone says it and the inset sweep refutes it; the two together are the finding.
+- The residue is **1.11 to 2.01 pt on an 859.94 pt line**. Candidates the measurements here
+  cannot separate: EditEngine's whole-1/100 mm arithmetic (`GetCharPosArray` is integer, and
+  `ImpBreakLine`'s test is strict `<`); a per-line reserve; or simply that the reference measured
+  this one line ~0.2% wider than we do, which is the same order as the ±0.6 pt spread the five
+  agreeing lines already show and would mean there is no rule here at all. The third would explain
+  the track result exactly.
+- **The leading difference on this page is a consequence, not a defect.** The extra line tips the
+  body past its autofit box, the reference takes `constScaleLevels[0]` — `{1.000, 1.000, 1.0,
+  0.9}`, font unscaled and spacing 0.9, applied as `nHeight = round(GetHeight() * fSpacingY)` in
+  the `InterLineSpaceRule::Off` arm (`editeng/source/editeng/impedit3.cxx`:1584-1600) — and draws
+  a 28.15 pt pitch where we draw 31.27 at the same 25.99 pt size. Widen the placeholder by 1 pt
+  and the reference draws our two lines at our exact baselines, 241.97 and 274.68. **Measure a
+  page's line count before its pitch.**

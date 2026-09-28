@@ -3514,7 +3514,7 @@ reproduce. Reach if anyone takes it: **16 corpus DOCX, 41 page-relative vertical
 (`probes/ofpie-r190/census-pagev.py`). **Do not implement "page means margin" from the corpus
 document alone** — the fixture refutes it.
 
-### An EditEngine line break charges its trailing blank, and a chart sweep's worst page is not the chart's
+### A chart sweep's worst page is not the chart's, and "the line break charges its trailing blank" is refuted
 
 **Two findings from one page, and the first is about instruments.** The chart-type sweep ranked
 `Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final.pptx` at 18.08 `diff%` and a task carried
@@ -3523,31 +3523,47 @@ is slide **37**, a bulleted text slide, and 15.91 is slide 13. *A sweep that ran
 its worst page attributes that page to whatever the document was selected for* — census which
 page the feature is on before working the number.
 
-**The second: a slide's line break charges the blank that ends the line, and this tree hangs
-it.** Slide 37's body placeholder is `<a:off x="609599"/><a:ext cx="11012681"/>`, right edge
-**915.14 pt**. Our line `One transceiver will be active while the other transceiver` ends at
-906.82 and we keep it; the reference breaks before the last word. It is not metrics — five
-identical lines measure the same on the two sides to **0.6 pt**. Rewriting `cx` alone
-(`probes/slidewrap-r190/widths.py`) puts the boundary between a right edge of **915.0**, where
-the reference still breaks, and **915.6**, where it keeps the word — and the kept line's own
-extent is **915.70**, which is 906.82 plus the 8.88 pt blank. So the blank is charged to within
-half a point and "it hangs past the end of the line" is refuted.
+**The second is a negative result, and it was implemented and measured before it was refuted, so
+do not re-derive it.** Slide 37's body placeholder is
+`<a:off x="609599"/><a:ext cx="11012681"/>`, right edge **915.14 pt**. Our line
+`One transceiver will be active while the other transceiver` ends at 906.82 and we keep it; the
+reference breaks before the last word. It is not metrics at the scale of a word — five identical
+lines measure the same on the two sides to **0.6 pt**. Rewriting `cx` alone
+(`probes/slidewrap-r190/widths.py`) puts the boundary between a right edge of **915.0**, where the
+reference still breaks, and **915.6**, where it keeps the word; the kept line's own extent with its
+trailing blank is **915.70** and without it 906.82. **Read alone that says the blank is charged.
+It is wrong, and the reason is that the placeholder is not the text area.**
 
-***And the leading difference on the same page is that one line, not a second defect.*** The
-extra line tips the body past its autofit box, so the reference takes `constScaleLevels[0]` —
+***The master states a 7.2 pt right inset and both renderers honour it.***
+`<a:bodyPr vert="horz" lIns="0" tIns="45720" rIns="91440" bIns="45720" rtlCol="0">` on the
+master's body placeholder; the slide's own and the layout's are bare `<a:bodyPr/>`. So the
+available width is **859.94**, our visible candidate is 858.83, it fits by **1.11 pt**, and the
+reference breaks it anyway. Sweeping that one attribute (`insets.py`) brackets how much more than
+its visible text a line must be given: the reference keeps the word at `rIns` 6.3 pt and breaks it
+at 7.2, so the residue is **1.11 to 2.01 pt — about 0.2% of the line**, against a trailing blank
+of **8.26 pt**. Four times too small.
+
+***And charging the blank regresses the slides track, which is the measurement that settles it.***
+`LineFiller.chargesTrailingBlanks` was written, `SlideTextLayout` set it, and on slide 37 it is
+exact — all thirteen of our baselines become the reference's to the hundredth. Over the track:
+**210 of 302 documents move**, and against a freshly rendered 26.2.4.2 the summed worst-page
+`diff%` goes **1750.8 → 1950.8**, every page's summed `diff%` **15405.8 → 16839.0**, MAJOR pages
+**280 → 401**, and **16 documents improve against 109 worse**. Both formats regress and the worst
+movers are large (4.79 → 16.01, 8.45 → 18.68, 9.63 → 19.30) — an extra line tipping a body into
+autofit where the reference does not shrink. **Reverted; nothing in `dotnet/src` carries it.** The
+residue may not be a rule at all: 0.2% on one line is the same order as the ±0.6 pt spread the
+five agreeing lines already show, and "the reference measured this line a little wider" would
+explain the track result exactly.
+
+***The leading difference on that page is a consequence, not a second defect.*** The extra line
+tips the body past its autofit box, so the reference takes `constScaleLevels[0]` —
 `{1.000, 1.000, 1.0, 0.9}`, font unscaled and **spacing 0.9**, applied as
 `nHeight = round(GetHeight() * fSpacingY)` in the `InterLineSpaceRule::Off` arm
 (`editeng/source/editeng/impedit3.cxx`:1584-1600) — and draws a 28.15 pt pitch where we draw
 31.27 at the same 25.99 pt size, `31.27 × 0.9 = 28.14`. Widen the placeholder by 1 pt and the
 reference draws our two lines at our exact baselines, 241.97 and 274.68. **A page that reads as
-wholly displaced can be one word's worth of wrap plus an autofit that followed it**; measure the
-line count before the pitch.
-
-Not implemented: the wrap is `Paperless.Text/Layout/ParagraphLayouter`, which all three tracks
-share, and **Writer genuinely does hang a trailing blank** — so it needs a mode the slides path
-(and Calc's shape text, which is the same EditEngine) opts into, plus a slides-track confinement
-sweep, because the rule is a tie-breaker that fires wherever a line's next word lands within one
-space of the limit and cannot be censused from markup. Task #28.
+wholly displaced can be one word's worth of wrap plus an autofit that followed it; measure the
+line count before the pitch.**
 
 ### Stored evidence decays silently, and the prose knows it while the data does not
 

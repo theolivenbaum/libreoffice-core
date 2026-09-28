@@ -3033,3 +3033,6 @@ dotnet/probes/ofpie-r190/census-dlblpos.py	2026-09-28	current	26.2.4.2	present	c
 dotnet/probes/slidewrap-r190/widths.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/slidewrap-r190/lines.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/slidewrap-r190/results.md	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/slidewrap-r190/insets.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/slidewrap-r190/score.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/slidewrap-r190/score.tsv	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
