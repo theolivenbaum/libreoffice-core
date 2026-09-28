@@ -3235,11 +3235,38 @@ individual documents (`barChart` 2.81 over 55 with a worst of 28.50, `lineChart`
 
 **A 3-D chart's reach is three documents and all three are pies** — no `bar3DChart`,
 `line3DChart`, `area3DChart` or `surface3DChart` exists anywhere in the corpus — so the 3-D work
-the corpus can witness is the pie alone and a general 3-D scene buys nothing beyond it. All three
-state `c:rAngAx val="0"` and no `c:perspective`, which `View3DConverter::convertFromModel`
-(`oox/source/drawingml/chart/plotareaconverter.cxx`:262-320) turns into
-`RotationHorizontal = clamp(rotX, 0, 90) - 90`, `Perspective = 30/2 = 15`, and therefore
-`ProjectionMode_PERSPECTIVE` rather than parallel.
+the corpus can witness is the pie alone and a general 3-D scene buys nothing beyond it.
+
+***Done, and four things about it are worth more than the fix.*** `ChartLayout.Pie3D` draws the
+extruded solid; `021_Unit_Circle_Chart_3D_Pie_Chart` goes **12.20 → 5.64 `diff%`** and
+`pie-chart-result` 2.76 → 1.66, with **2 of the 168 chart documents moving and 166
+byte-identical**. `probes/pie3d-r187`.
+
+- ***26.2.4.2 rasterises a 3-D chart.*** The solid reaches the page as one `Do` of an RGB image
+  with a soft mask — the labels and the frame are still operators — so its geometry can only be
+  read out of that bitmap's silhouette, and a vector rendering can never be byte-equal to it.
+  **Do not chase a residual on one of these to zero.**
+- ***The projection is parallel in practice and the squash is `sin(rotX)`.*** Over nine
+  elevations the silhouette's upper boundary fits an ellipse to a mean residual of 0.28–0.45
+  pixels on a 1370-pixel image, and `B/A` is within 0.7% of the sine at seven of the nine —
+  although `View3DConverter` asks for `ProjectionMode_PERSPECTIVE`, because a `c:perspective` of
+  30 halves to a non-zero 15 (`plotareaconverter.cxx`:299-308). The camera is far enough away
+  that it does not show.
+- ***`c:depthPercent` is not read.*** Thirty-six variants — nine elevations by four depths — give
+  nine distinct geometries repeated four times each, identical to the hundredth of a point. The
+  thickness comes from `PieChart::getPreferredDiagramAspectRatio`'s `Direction3D(1, 1, 0.10)`.
+- ***A three-dimensional diagram is NOT squared, and that was worth more than the solid.***
+  `VDiagram::adjustPosAndSize` branches on the dimension count (`VDiagram.cxx`:89-101) and
+  `adjustPosAndSize_3d` fits the scene's own *projected* bounding box into the available
+  rectangle (`:409-421`); the preferred ratio never squares anything. With the solid drawn but
+  `ChartLayout.Squared` still squaring the rectangle, `021` came out 274 pt across against the
+  reference's 469 and its `diff%` went **12.20 → 16.33 — worse than before the feature**.
+
+**One instrument warning from the shading measurement.** A colour that is a flat multiple of a
+series' declared colour is not necessarily a *wall*: `(64, 99, 41)` is accent6 × 0.574 and is the
+10% sector's **top face**, in the darker shade `c:varyColors` hands the fourth point. Locate a
+colour's pixels before deciding what surface they are — reading that one as the wall would have
+made every wall 0.57 of its face instead of the measured 0.87.
 
 **What the same review did find is two readers that switch on a record id where the reference
 switches on a field inside it.** Both are closed, and the shape is worth remembering because it

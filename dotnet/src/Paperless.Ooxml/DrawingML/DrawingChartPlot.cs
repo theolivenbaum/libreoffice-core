@@ -283,6 +283,15 @@ public static class DrawingChartPlot
             // A doughnut is a pie of concentric rings; the element name is the whole of the file's
             // statement, since c:holeSize reaches nothing in the reference. See ChartPlot.Rings.
             Rings = group.Name.LocalName == "doughnutChart",
+
+            // The one three-dimensional chart there is anything to measure — see
+            // ChartPlot.Elevation. `c:depthPercent` is deliberately not read: rendering the same
+            // document at 20, 50, 100 and 200 gives 26.2.4.2 byte-identical geometry at every
+            // one of nine elevations, because the pie branch of View3DConverter never passes it
+            // on. probes/pie3d-r187.
+            Elevation = group.Name.LocalName == "pie3DChart"
+                ? Math.Clamp(Number(Child(Child(chart, "view3D"), "rotX")) ?? 15.0, 0.0, 90.0)
+                : null,
             Direction = Value(Child(group, "barDir")) == "bar"
                 ? ChartBarDirection.Bar
                 : ChartBarDirection.Column,

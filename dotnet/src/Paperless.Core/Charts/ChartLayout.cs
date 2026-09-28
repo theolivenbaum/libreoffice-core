@@ -4206,6 +4206,21 @@ public static partial class ChartLayout
     {
         if (plot.Series.Count == 0) return;
 
+        // A three-dimensional pie is an extruded solid fitted to the whole plot area rather than
+        // a circle inscribed in it, and only a pie is ever one — no corpus document states a
+        // three-dimensional doughnut, and a ring's inner wall is not modelled. See
+        // ChartLayout.Pie3D and ChartPlot.Elevation.
+        if (plot.Elevation is { } elevation && !plot.Rings)
+        {
+            Pie3DGeometry pie = Pie3DFit(area, elevation);
+            if (pie.A <= Length.Zero) return;
+
+            AddWedges3D(plot, plot.Series[0], pie, shapes);
+            AddPieLabels(plot, plot.Series[0], pie.Centre, pie.A, pie.B, available,
+                         measurer, shapes, labels);
+            return;
+        }
+
         DocPoint pieCentre = new(area.X + area.Width / 2, area.Y + area.Height / 2);
         Length outer = area.Width < area.Height ? area.Width / 2 : area.Height / 2;
         if (outer <= Length.Zero) return;
@@ -4304,11 +4319,37 @@ public static partial class ChartLayout
 
         if (hole > Length.Zero) return;
 
-        // The pie's own labels, block by block: the legend key is a shape of its own and the text
-        // is placed from the block rather than from the anchor, because the key is inside the box
-        // the best-fit test measures.
+        AddPieLabels(plot, series, centre, radius, radius, available, measurer, shapes, labels);
+    }
+
+    /// <summary>
+    /// A whole pie's own labels, block by block.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The legend key is a shape of its own and the text is placed from the block rather than
+    /// from the anchor, because the key is inside the box the best-fit test measures.
+    /// </para>
+    /// <para>
+    /// The <c>verticalRadius</c> is the rim's vertical semi-axis: it equals the radius for a flat
+    /// pie and is the squashed one for a three-dimensional pie. Only the label anchors take it —
+    /// the wrapping width and the best-fit test are horizontal measures and stay on the full
+    /// radius, which is what the reference's own <c>nOuterX</c> is.
+    /// </para>
+    /// </remarks>
+    private static void AddPieLabels(
+        ChartPlot plot,
+        ChartSeries series,
+        DocPoint centre,
+        Length radius,
+        Length verticalRadius,
+        DocRect available,
+        ChartText measurer,
+        List<ChartShape> shapes,
+        List<ChartLabel> labels)
+    {
         foreach (PiePlacedLabel placed in PieLabels(
-                     plot, series, centre, radius, available, measurer))
+                     plot, series, centre, radius, verticalRadius, available, measurer))
         {
             if (placed.GhostKey is { } ghost && placed.KeyFill is { } ghostFill)
                 shapes.Add(new ChartShape(GraphicsPath.Rectangle(ghost), ghostFill));
@@ -5520,6 +5561,16 @@ public static partial class ChartLayout
     {
         if (plot.Kind is not (ChartPlotKind.Pie or ChartPlotKind.OfPie or ChartPlotKind.Radar))
             return area;
+
+        // A three-dimensional diagram is not squared at all: `adjustPosAndSize` branches on the
+        // dimension count (`VDiagram.cxx`:89-101) and `adjustPosAndSize_3d` fits the *scene's own
+        // projected bounding box* into the available rectangle rather than the preferred ratio
+        // (`:409-421`). `PieChart::getPreferredDiagramAspectRatio` returns `(1, 1, 0.10)` there,
+        // and that 0.10 is the thickness rather than a square. Squaring it anyway is what drew
+        // `021_Unit_Circle_Chart_3D_Pie_Chart` at 274 pt across against the reference's 469: the
+        // rectangle is wide and short, so the square took the short side.
+        if (plot.Elevation is not null && plot.Kind is ChartPlotKind.Pie) return area;
+
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return area;
 
         Length side = area.Width < area.Height ? area.Width : area.Height;

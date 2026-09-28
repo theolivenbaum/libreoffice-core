@@ -120,11 +120,19 @@ public static partial class ChartLayout
     /// wrapping width is measured against.
     /// </param>
     /// <param name="measurer">Measures a line.</param>
+    /// <param name="verticalRadius">
+    /// The rim's vertical semi-axis. It is <paramref name="radius"/> for a flat pie and the
+    /// squashed one for a three-dimensional pie, whose rim is an ellipse — see
+    /// <c>ChartLayout.Pie3D</c>. Only the anchors take it: the wrapping allowance and the
+    /// best-fit test are horizontal measures, and the reference's own wrapping width comes from
+    /// the rim's <em>x</em> alone (<c>nOuterX</c>).
+    /// </param>
     private static List<PiePlacedLabel> PieLabels(
         ChartPlot plot,
         ChartSeries series,
         DocPoint centre,
         Length radius,
+        Length verticalRadius,
         DocRect available,
         ChartText measurer)
     {
@@ -172,7 +180,7 @@ public static partial class ChartLayout
 
             DocPoint at05 = new(
                 centre.X + (radius * 0.5 * Math.Cos(Radians(bisector))),
-                centre.Y - (radius * 0.5 * Math.Sin(Radians(bisector))));
+                centre.Y - (verticalRadius * 0.5 * Math.Sin(Radians(bisector))));
 
             if (placement is not (ChartLabelPlacement.BestFit or ChartLabelPlacement.Outside))
             {
@@ -206,7 +214,8 @@ public static partial class ChartLayout
             // OUTSIDE: the rim point on the bisector, plus a flat 150 in the radius direction, and
             // a wrapping width taken from the room between that point and the diagram's own edge.
             (DocRect outside, string[] outLines, DocSize outBlock) = OutsidePlacement(
-                plot, measurer, text, size, bold, gap, centre, radius, bisector, available);
+                plot, measurer, text, size, bold, gap, centre, radius, verticalRadius,
+                bisector, available);
 
             placed.Add(Assemble(outLines, outside, outBlock, gap, key,
                                 label.ShowLegendKey ? series.FillAt(at) : null, ghost));
@@ -286,6 +295,7 @@ public static partial class ChartLayout
         Length gap,
         DocPoint centre,
         Length radius,
+        Length verticalRadius,
         double bisector,
         DocRect available)
     {
@@ -315,7 +325,7 @@ public static partial class ChartLayout
 
         DocPoint anchor = new(
             centre.X + ((radius + OutsideLabelOffset) * cos),
-            centre.Y - ((radius + OutsideLabelOffset) * sin));
+            centre.Y - ((verticalRadius + OutsideLabelOffset) * sin));
 
         // The eight-way alignment table, as two independent families. `right` puts the block's
         // left edge on the anchor and grows rightward; `top` puts the block's bottom edge on it
@@ -524,8 +534,18 @@ public static partial class ChartLayout
         if (split) pie = plot.SeriesOf(ChartPlotKind.OfPie, 0);
         if (pie.Count == 0) return area;
 
-        DocPoint centre = new(area.X + (area.Width / 2), area.Y + (area.Height / 2));
-        Length radius = Length.Min(area.Width, area.Height) / 2;
+        // A three-dimensional pie is an ellipse fitted to the whole rectangle, so its centre and
+        // its two semi-axes come from the same fit that draws it rather than from the inscribed
+        // circle. Its wall is inside the rectangle by construction, so only the labels can
+        // consume anything beyond it.
+        Pie3DGeometry? solid = plot.Elevation is { } elevation && !split && !plot.Rings
+            ? Pie3DFit(area, elevation)
+            : null;
+
+        DocPoint centre = solid?.Centre
+            ?? new DocPoint(area.X + (area.Width / 2), area.Y + (area.Height / 2));
+        Length radius = solid?.A ?? (Length.Min(area.Width, area.Height) / 2);
+        Length verticalRadius = solid?.B ?? radius;
 
         Length left = area.Left, top = area.Top, right = area.Right, bottom = area.Bottom;
 
@@ -546,7 +566,7 @@ public static partial class ChartLayout
         if (!plot.Rings)
         {
             foreach (PiePlacedLabel placed in PieLabels(
-                         plot, pie[0], centre, radius, available, measurer))
+                         plot, pie[0], centre, radius, verticalRadius, available, measurer))
             {
                 left = Length.Min(left, placed.Block.Left);
                 top = Length.Min(top, placed.Block.Top);
