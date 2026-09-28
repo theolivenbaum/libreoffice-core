@@ -17,14 +17,25 @@ Three separate failures this addresses, all of which produce a confident and use
 
 ## Delegate the reading. It is the only real control.
 
-> **In a Claude Code agent container there is usually no such reader, and this section is then
-> aspirational rather than actionable.** An agent here has no `Task`/subagent tool; the sibling
-> session `mcp__Claude_Code_Remote__create_session` spawns runs in its own container, cannot open
-> `/home/user/...` to see your PNG, and has no channel back. **Six rounds have now reached this
-> section, gone looking for the tool, and reported it missing** — the last of them after a brief
-> that instructed it to delegate two readings.
+> **A reader IS available in this container, and the six rounds that reported otherwise were
+> looking at the wrong tool.** Measured 2026-09-27: the in-process **`Agent`** tool with
+> `subagent_type: "general-purpose"` spawns a subagent in *this* container. It opens
+> `/home/user/...` and reads the PNG, and its report comes back as a hand-back message. Six
+> readings were delegated that way in one session and all six returned usable descriptions —
+> one of them caught a dropped dot leader that the numbers did not show, and four independently
+> named a one-page offset that turned out to be the round's whole finding.
 >
-> **Check once, then stop looking.** If the tool is absent: say so in your write-up, treat every
+> What is genuinely unavailable is the **sibling session**,
+> `mcp__Claude_Code_Remote__create_session`: that runs in its own container, cannot see your
+> PNG, and has no channel back. The earlier rounds checked for that and for a tool called
+> `Task`, found neither, and concluded the section was dead. **It is `Agent`, and it works.**
+>
+> So: compose the pair, then send the path with the brief below. Launch several at once — they
+> are independent, and a class that shows up in three unrelated readings is worth far more than
+> one that shows up in three pages a single reader looked at in sequence.
+>
+> **If `Agent` is genuinely absent in some future container**, then and only then:
+> say so in your write-up, treat every
 > reading as your own and contaminated, and corroborate anything you lean on with arithmetic that
 > does not depend on the reading — content-stream operators, drawing dumps, the gate columns, the
 > reference's own flat ODF. The round that found the Calc drawing clip did exactly that: the
@@ -72,6 +83,7 @@ how to spend the next round.
 
 ```bash
 export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
+export REF_SOFFICE=/opt/libreoffice26.2/program/soffice   # PATH is 24.2.7.2; they disagree
 .claude/skills/page-vision/scripts/pair.sh "<doc>__xlsx" --worst --outdir /abs/pairs
 ```
 
@@ -246,6 +258,11 @@ not:** before believing that a reviewer's "it is absent" is a fact about the doc
 it is not a fact about the pipeline that built their image. Confirm absence in the PDF's own
 operators — `pdf-ops.py dump`, or a thin-wide-fill scan — not in a downscaled raster. A
 missing mark and a mark your instrument threw away look identical to the reader.
+
+**`look.py` renders the reference itself when the bank has no copy, so `REF_SOFFICE` decides
+which binary you are reading against.** It hard-coded PATH — 24.2.7.2 — until round 180, while
+the tree is calibrated to 26.2.4.2, and the two genuinely paginate real documents differently.
+It now prints the binary it resolved; read that line before reading the page.
 
 `pair.sh` chains `look.py` and `compose.py` so the two halves cannot be rendered at
 mismatched dpi by hand. About 20 s per document.

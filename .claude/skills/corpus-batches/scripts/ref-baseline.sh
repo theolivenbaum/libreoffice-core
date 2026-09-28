@@ -43,8 +43,17 @@ WORKERS="${4:-6}"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1700000000}"
 export TZ=UTC
 
-SOFFICE_VERSION="$(soffice --version 2>/dev/null | head -1)"
-[ -n "$SOFFICE_VERSION" ] || { echo "no soffice on PATH" >&2; exit 1; }
+# Which soffice is the reference. `$REF_SOFFICE` wins; otherwise whatever is on PATH.
+#
+# Hard-coding `soffice` is how a comparison silently scores against the wrong binary. On this
+# machine PATH is 24.2.7.2 and the tree is calibrated to 26.2.4.2, and the two genuinely
+# disagree -- `f445896e...docx` is 15 pages under 26.2.4.2 and 16 under 24.2.7.2, so a sweep
+# that took PATH banked a `pages` failure for a document that matches.
+REF="${REF_SOFFICE:-soffice}"
+command -v "$REF" >/dev/null 2>&1 || { echo "no soffice at $REF" >&2; exit 3; }
+SOFFICE_VERSION="$("$REF" --version 2>/dev/null | head -1)"
+[ -n "$SOFFICE_VERSION" ] || { echo "no soffice at $REF" >&2; exit 1; }
+echo "reference $(command -v "$REF") -- $SOFFICE_VERSION" >&2
 echo "reference binary: $SOFFICE_VERSION" >&2
 
 mkdir -p "$OUT/ref"
@@ -89,7 +98,7 @@ one() {  # one <index>
 
     if [ ! -f "$r" ]; then          # resumable: a sweep outlives whatever started it
       rm -rf "${OUT:?}/t$idx"; mkdir -p "$OUT/t$idx"
-      timeout 300 soffice -env:UserInstallation="file://$prof" \
+      timeout 300 "$REF" -env:UserInstallation="file://$prof" \
         --headless --convert-to pdf --outdir "$OUT/t$idx" "$f" >/dev/null 2>&1
       [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
     fi

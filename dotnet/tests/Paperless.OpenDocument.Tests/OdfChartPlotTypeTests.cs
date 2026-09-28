@@ -180,4 +180,77 @@ public class OdfChartPlotTypeTests
     [Fact]
     public void ASurfaceChartReadsAsTheBarChartTheReferenceSubstitutes()
         => Read("chart:surface").ShouldNotBeNull().Kind.ShouldBe(ChartPlotKind.Bar);
+
+    /// <summary>
+    /// Every class the reference does not know is a bar chart, which is nine chart types.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SchXMLChartContext::ParseAttributes</c> sets the chart's type only for a class in the
+    /// <c>chart:</c> namespace that <c>GetChartTypeEnum</c> knows
+    /// (<c>xmloff/source/chart/SchXMLChartContext.cxx</c>:372-395); anything else leaves the
+    /// service name empty and falls through to <c>:474-475</c>, which reads <c>aChartClass_Bar</c>.
+    /// <c>chart2/source/inc/servicenames_charttypes.hxx</c> names nineteen chart types and
+    /// <c>VSeriesPlotter::createSeriesPlotter</c> (<c>VSeriesPlotter.cxx</c>:2882-2907) has a
+    /// plotter for eleven of them, so the nine here are exactly the ones the reference cannot draw
+    /// — and it draws them as bars rather than as nothing.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on 26.2.4.2</strong> (<c>probes/chartclass-r186</c>): one flat ODS whose
+    /// <c>chart:chart/@chart:class</c> alone is varied, its series left at <c>chart:bar</c>. The
+    /// reference draws the same <b>126 path operators</b> for every value here as it does for
+    /// <c>chart:bar</c> itself; we drew <b>6</b> — the sheet's own furniture, no chart at all —
+    /// on fourteen of the fifteen, and draw <b>156</b> on all fifteen now, which is the control
+    /// row's figure before and after.
+    /// </para>
+    /// <para>
+    /// <strong>No corpus document states any of them.</strong> Every class the converted-ODF
+    /// corpus holds is one this reader already drew, so nothing renders differently — this is
+    /// the reference's rule for files the corpus does not contain, which holds no hand-written
+    /// ODF at all.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("chart:histogram")]
+    [InlineData("chart:gantt")]
+    [InlineData("chart:donut")]
+    [InlineData("chart:pyramid")]
+    [InlineData("chart:add-in")]
+    [InlineData("com.sun.star.chart2.TreemapChartType")]
+    [InlineData("com.sun.star.chart2.SunburstChartType")]
+    [InlineData("com.sun.star.chart2.WaterfallChartType")]
+    [InlineData("com.sun.star.chart2.FunnelChartType")]
+    [InlineData("com.sun.star.chart2.BoxWhiskerChartType")]
+    [InlineData("com.sun.star.chart2.ParetoLineChartType")]
+    [InlineData("com.sun.star.chart2.RegionMapChartType")]
+    [InlineData("com.sun.star.chart2.ClusteredColumnChartType")]
+    [InlineData("com.sun.star.chart2.HistogramChartType")]
+    public void AClassTheReferenceCannotDrawIsStillABarChart(string chartClass)
+        => Read(chartClass).ShouldNotBeNull().Kind.ShouldBe(ChartPlotKind.Bar);
+
+    /// <summary>
+    /// The <c>ooo:</c> prefix is the add-in branch and keeps drawing nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The control that stops the rule above from reaching the one spelling it must not.
+    /// <c>:395-402</c> is a separate branch: the prefix marks an add-in, the service name is taken
+    /// verbatim and no fallback runs. Reading it as a bar chart would be a confident wrong answer
+    /// on the only two real files in reach.
+    /// </para>
+    /// <para>
+    /// Those two are <c>corpus-odf/ods/…054_Problem_analysis_with_Pareto_chart</c> and
+    /// <c>…051_Manufacturer_defect_analysis</c>, both
+    /// <c>chart:class="ooo:com.sun.star.chart2.ClusteredColumnChartType"</c> — LibreOffice's own
+    /// ODF of the corpus's two <c>cx:</c> chartex witnesses. On the authored variants the
+    /// reference draws <b>22 paths</b> for this spelling against the fallback's 126, so it is
+    /// not a bar chart; on the two real pages it draws <b>1 and 46</b> against our <b>8 and
+    /// 191</b>, already less than we do, so bars could only take it further away.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("ooo:com.sun.star.chart2.ClusteredColumnChartType")]
+    [InlineData("ooo:com.sun.star.chart2.TreemapChartType")]
+    public void AnAddInClassIsStillNotDrawn(string chartClass)
+        => Read(chartClass).ShouldBeNull();
 }

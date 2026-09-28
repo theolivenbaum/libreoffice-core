@@ -299,6 +299,100 @@ public sealed class PositionedBodyTableTests
         pages.Pages[1].Tables.ShouldHaveSingleItem().Area.Y.ShouldBe(TopMargin);
     }
 
+    /// <summary>
+    /// A paragraph whose only content is an inline picture is ink, so a fly it would land inside stays
+    /// in the flow and the picture is drawn below the table rather than through it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The complement of <see cref="AFlyOverTheFlowDoesNotSwallowATextBearingLine"/>, and it failed
+    /// where that one passed: the test for ink read the paragraph's <em>text</em>, and an as-character
+    /// frame's anchor is <c>U+0001</c>, which that test is deliberately blind to because an anchored
+    /// frame's anchor looks exactly the same. The two are not the same thing — a <c>wp:anchor</c> states
+    /// its own position and is never displaced, a <c>wp:inline</c> is a portion on the line and is
+    /// displaced like a word.
+    /// </para>
+    /// <para>
+    /// Measured on <c>HC-Bulletin-template.docx</c>, whose page 2 is one full-width
+    /// <c>w:vertAnchor="text"</c> fly followed by a paragraph holding nothing but a 496 × 366 pt map.
+    /// 26.2.4.2 draws the map at <b>y = 413.6</b>, immediately under the fly; we drew it at
+    /// <b>63.3</b>, over the table, because the fly floated and the flow never left the top of the
+    /// body. Page ink <b>7.02 % before and 0.44 % after</b>, and the page's verdict goes from MAJOR to
+    /// shifted.
+    /// </para>
+    /// <para>
+    /// The fly here is anchored 36 pt above the top margin and is 400 pt tall, exactly as in the
+    /// text-bearing case, so the only thing separating this test from the one that already passed is
+    /// what the following paragraph holds.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AFlyOverTheFlowDoesNotSwallowAnInlinePicture()
+    {
+        WordProcessingPages pages = Lay(vertAnchor: "page", tblpY: 720, after: InlineDrawing);
+
+        PlacedTable table = pages.Pages[0].Tables.ShouldHaveSingleItem();
+        table.Area.Y.ShouldBe(TopMargin);
+
+        PlacedFrame frame = pages.Pages[0].Frames.ShouldHaveSingleItem();
+        frame.Area.Y.ShouldBeGreaterThan(Length.FromPoints(300));
+    }
+
+    /// <summary>
+    /// An anchored drawing is not: it states its own position, so the fly still floats and the flow
+    /// stays where it was.
+    /// </summary>
+    /// <remarks>
+    /// The control on <see cref="AFlyOverTheFlowDoesNotSwallowAnInlinePicture"/>. Both paragraphs carry
+    /// one drawing and no text, and the old rule — which read the text alone — gave them the same
+    /// answer. Only this one is right: Writer's own DOCX import leaves the paragraph a
+    /// <c>wp:anchor</c> was written in empty, which is what makes it a spacer the fly may cover.
+    /// </remarks>
+    [Fact]
+    public void AFlyOverTheFlowStillSwallowsAnAnchoredDrawing()
+    {
+        WordProcessingPages pages = Lay(vertAnchor: "page", tblpY: 720, after: AnchoredDrawing);
+
+        PlacedTable table = pages.Pages[0].Tables.ShouldHaveSingleItem();
+        table.Area.Y.ShouldBe(Length.FromTwips(720));
+    }
+
+    /// <summary>A 72 × 72 pt <c>wp:inline</c> shape, which needs no image part.</summary>
+    private static readonly string InlineDrawing = Drawing("inline", "");
+
+    /// <summary>The same shape written as a <c>wp:anchor</c>, which is a fly rather than a portion.</summary>
+    private static readonly string AnchoredDrawing = Drawing(
+        "anchor",
+        """ distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="1" behindDoc="0" """
+        + """ locked="0" layoutInCell="1" allowOverlap="1" """);
+
+    /// <summary>Both of the above, which differ only in the element the drawing is placed by.</summary>
+    private static string Drawing(string placement, string attributes) => $"""
+        <w:r><w:drawing
+              xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+              xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+          <wp:{placement}{attributes}>
+            <wp:simplePos x="0" y="0"/>
+            <wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH>
+            <wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>
+            <wp:extent cx="914400" cy="914400"/>
+            <wp:wrapNone/>
+            <wp:docPr id="1" name="Shape 1"/>
+            <a:graphic><a:graphicData
+                  uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+              <wps:wsp>
+                <wps:spPr>
+                  <a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm>
+                  <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                  <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
+                </wps:spPr>
+              </wps:wsp>
+            </a:graphicData></a:graphic>
+          </wp:{placement}>
+        </w:drawing></w:r>
+        """;
+
     /// <summary>An ordinary table is unaffected: it stacks and the flow follows it down.</summary>
     [Fact]
     public void AnUnpositionedTableStillStacks()

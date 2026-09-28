@@ -553,6 +553,85 @@ public static partial class ChartLayout
 
     private const double OfPieBarHeight = 1.0;
 
+    /// <summary>Where an of-pie's main ring opens, counter-clockwise from three o'clock.</summary>
+    /// <remarks>
+    /// <c>createOneRing</c>'s <c>sAngle</c> lambda (<c>PieChart.cxx</c>:1229-1244):
+    /// <c>degAng = compositeVal * 360 / (ringSum * 2)</c>, and the offset is <c>360 − degAng</c>
+    /// because a pie's wedges are clockwise. So the first kept wedge opens at minus half the
+    /// composite sweep and the composite — drawn last — closes back onto it across three
+    /// o'clock, which is what the two connecting lines meet.
+    /// </remarks>
+    /// <param name="composite">The composite wedge's value.</param>
+    /// <param name="total">The ring's total.</param>
+    private static double OfPieStartDegrees(double composite, double total)
+        => total > 0.0 ? -composite / (total * 2.0) * 360.0 : 0.0;
+
+    /// <summary>An of-pie main ring's label schedule: where it opens and how many points it
+    /// labels.</summary>
+    /// <param name="plot">The chart, for its split position.</param>
+    /// <param name="series">The plotted series.</param>
+    private static (double StartDegrees, int Kept) OfPieRingLabels(
+        ChartPlot plot, ChartSeries series)
+    {
+        int points = series.Values.Count;
+        int split = Math.Clamp(plot.SplitPosition, 1, Math.Max(1, points - 1));
+        int kept = points - split;
+
+        double composite = 0.0;
+        for (int at = kept; at < points; at++)
+            if (at >= 0 && series.Values[at] is { } value && double.IsFinite(value))
+                composite += Math.Abs(value);
+
+        return (OfPieStartDegrees(composite, series.Total()), kept);
+    }
+
+    /// <summary>LibreOffice's own twelve default series colours, cycled.</summary>
+    /// <remarks>
+    /// <c>Office.Chart/DefaultColor/Series</c>
+    /// (<c>officecfg/registry/schema/org/openoffice/Office/Chart.xcs</c>:35-36), which
+    /// <c>ConfigColorScheme::getColorByIndex</c> indexes modulo its own length
+    /// (<c>chart2/source/tools/ConfigColorScheme.cxx</c>:126-133).
+    /// </remarks>
+    private static readonly Colour[] DefaultSeriesColours =
+    [
+        new Colour(0x00, 0x45, 0x86), new Colour(0xFF, 0x42, 0x0E),
+        new Colour(0xFF, 0xD3, 0x20), new Colour(0x57, 0x9D, 0x1C),
+        new Colour(0x7E, 0x00, 0x21), new Colour(0x83, 0xCA, 0xFF),
+        new Colour(0x31, 0x40, 0x04), new Colour(0xAE, 0xCF, 0x00),
+        new Colour(0x4B, 0x1F, 0x6F), new Colour(0xFF, 0x95, 0x0E),
+        new Colour(0xC5, 0x00, 0x0B), new Colour(0x00, 0x84, 0xD1),
+    ];
+
+    /// <summary>The colour an of-pie's composite wedge is drawn in.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Not the colour the file states for it, because the reference never sees that
+    /// colour.</strong> The composite wedge's property index is <c>propIndex</c>'s
+    /// <c>pSeries-&gt;getTotalPointCount()</c> (<c>PieChart.cxx</c>:1185-1191) — one past the
+    /// last value, always — and <c>DataSeries::getDataPointByIndex</c> answers an empty
+    /// reference outside <c>0 &lt;= nIndex &lt; getData().getLength()</c>
+    /// (<c>chart2/source/model/main/DataSeries.cxx</c>:312-337). So the import drops the extra
+    /// <c>c:dPt</c> a writer emits for that wedge, <c>hasPointOwnColor</c> answers false, and
+    /// <c>createOneRing</c> falls through to
+    /// <c>m_xColorScheme-&gt;getColorByIndex(nPropIdx)</c> (<c>:1325-1331</c>) — the twelve
+    /// configured defaults above, cycled.
+    /// </para>
+    /// <para>
+    /// <strong>It is a divergence from the writer's intent and is reproduced anyway.</strong>
+    /// <c>028_Unit_Circle_Chart_Optimized_Graph</c> states a seventeenth
+    /// <c>c:dPt idx="16"</c> of <c>accent4 lumMod 50%</c>, which is <c>#806000</c>, for a series
+    /// of sixteen values; 26.2.4.2 draws that wedge <c>#7E0021</c>, which is
+    /// <c>DefaultSeriesColours[16 % 12]</c> and has nothing to do with the document. Reading the
+    /// stated fill instead would disagree with the reference on every of-pie chart that states
+    /// one, and this tree is calibrated to the reference.
+    /// </para>
+    /// </remarks>
+    /// <param name="points">The series' point count, which is the wedge's property index.</param>
+    private static Colour CompositeWedgeColour(int points)
+        => DefaultSeriesColours[
+            ((points % DefaultSeriesColours.Length) + DefaultSeriesColours.Length)
+            % DefaultSeriesColours.Length];
+
     /// <summary>The fewest points an of-pie chart is worth splitting.</summary>
     /// <remarks><c>OfPieDataSrc::minPoints = 4</c> (<c>PieChart.hxx:108</c>): a series with fewer
     /// falls back to an ordinary pie, which is <c>createShapes</c>' own first decision
@@ -644,7 +723,18 @@ public static partial class ChartLayout
 
         // The composite wedge straddles three o'clock, so the ring starts half of it below the
         // axis and runs clockwise. In a y-down space "clockwise" is a negative sweep.
-        double start = composite / (mainTotal * 2.0) * (2 * Math.PI);
+        //
+        // Below the axis, and the sign was the other way round until round 190. createOneRing's
+        // sAngle lambda is `m_aPosHelper.clockwiseWedges() ? 360 - degAng : degAng`
+        // (PieChart.cxx:1229-1244) with `degAng = compositeVal * 360 / (ringSum * 2)`, and a
+        // pie's wedges are clockwise, so the first kept wedge opens at MINUS half the composite
+        // sweep and the composite -- drawn last, after the other 360 - its own degrees -- closes
+        // back onto it across three o'clock. Opening at plus half puts the whole composite above
+        // the axis instead, which is where this tree drew 028's and where its two connecting
+        // lines then met nothing: measured against 26.2.4.2, the reference's composite spans
+        // 416.54 +/- 21.4 pt about a centre at y 416.54 and this tree's ran from the centre
+        // upwards only.
+        double start = Radians(OfPieStartDegrees(composite, mainTotal));
 
         for (int at = 0; at < kept; at++)
         {
@@ -657,9 +747,19 @@ public static partial class ChartLayout
                 series.Line,
                 series.LineWidth));
 
-            AddWedgeLabel(plot, series, at, mainTotal, mainCentre, mainRadius, start, sweep, labels);
             start -= sweep;
         }
+
+        // The main ring's labels go through the pie's own placer -- the wrapping, the inner
+        // best-fit and the outside fallback that createTextLabelShape gives every pie, of-pie
+        // included (PieChart.cxx:1346-1350 skips only the composite wedge). AddWedgeLabel, which
+        // stood here, put each label flat on its bisector at half the radius with no wrapping and
+        // no fit, so an of-pie's labels neither wrapped nor moved out of their slices -- and,
+        // because PieConsumedRect measures the same placement, the diagram's second pass had
+        // nothing to shrink against.
+        AddPieLabels(
+            plot, series, mainCentre, mainRadius, mainRadius, available, measurer, shapes, labels,
+            OfPieStartDegrees(composite, mainTotal), kept);
 
         // The composite wedge itself, which carries no label of its own — createOneRing skips
         // createTextLabelShape for exactly this point (PieChart.cxx:1341-1345).
@@ -668,7 +768,7 @@ public static partial class ChartLayout
         {
             shapes.Add(new ChartShape(
                 Wedge(mainCentre, mainRadius, start, -compositeSweep),
-                series.FillAt(points),
+                CompositeWedgeColour(points),
                 series.Line,
                 series.LineWidth));
         }
@@ -737,12 +837,20 @@ public static partial class ChartLayout
             for (int at = kept; at < points; at++) total += Value(at);
             if (!(total > 0.0)) return;
 
-            Length top = unit.Centre.Y - half;
+            // The first split point is the BOTTOM segment. createOneBar opens at
+            // `fBarTop = -0.5` and adds each share upwards -- "make the bar go from -0.5 to 0.5"
+            // (PieChart.cxx:1416-1430) -- and the value axis points up, so data order runs from
+            // the foot of the bar to its head. Stacking downwards from the top inverts every
+            // bar of more than one segment: on 028 this tree drew Leaf 15 over Leaf 16 where
+            // 26.2.4.2 draws Leaf 16 over Leaf 15, at the same two heights.
+            Length top = unit.Centre.Y + half;
 
             for (int at = kept; at < points; at++)
             {
                 Length height = half * 2 * (Value(at) / total);
                 if (height <= Length.Zero) continue;
+
+                top -= height;
 
                 DocRect segment = new(left, top, right - left, height);
                 shapes.Add(new ChartShape(
@@ -761,8 +869,6 @@ public static partial class ChartLayout
                         plot.DataLabelColour,
                         IsBold: plot.IsDataLabelBold));
                 }
-
-                top += height;
             }
 
             lines.Add(new ChartLine(from, new DocPoint(left, unit.Centre.Y - half), AxisColour));

@@ -93,16 +93,26 @@ public class DrawingChartDateAxisTests
         // And the values travelled with them: the 10 that was cell three is now point one.
         plot.Series[0].Values.Select(v => v ?? 0).ShouldBe([10.0, 20.0, 30.0]);
 
-        // Which is the whole point: the points now run left to right along the axis. The ends are
-        // not exactly 0 and 1 because a year resolution snaps the scale to 1 January, and the
-        // oldest cell is the 12th.
+        // Which is the whole point: the points now run left to right along the axis.
         double first = axis.FractionOf(0).ShouldNotBeNull();
         double last = axis.FractionOf(2).ShouldNotBeNull();
 
         first.ShouldBeLessThan(axis.FractionOf(1).ShouldNotBeNull());
         axis.FractionOf(1).ShouldNotBeNull().ShouldBeLessThan(last);
+
+        // The oldest point is at the start; a year resolution snaps the minimum to 1 January and
+        // the cell is the 12th, so it is not exactly zero.
         first.ShouldBeLessThan(0.05);
-        last.ShouldBeGreaterThan(0.95);
+
+        // And the newest is two thirds along, not at the end, because the axis carries a fourth
+        // year that no point sits in. This part states no `c:crossBetween`, and an absent one is
+        // `true` for a line group — `AxisConverter::convertFromModel`'s fallback,
+        // `oox/source/drawingml/chart/axisconverter.cxx`:298-301 — which adds one resolution
+        // unit to the maximum. Measured rather than inferred: `044_Cash_flow_forecast` rendered
+        // by 26.2.4.2 with its `c:crossBetween` deleted is identical to the authored `between`,
+        // 13 ticks at a 35.23 pt pitch with the first bar at 15.16, while the same file rewritten
+        // to `midCat` gives 12 ticks at 38.46 and no extension. `probes/bardate-r189` §2.
+        last.ShouldBe(2.0 / 3.0, 0.02);
     }
 
     /// <summary>

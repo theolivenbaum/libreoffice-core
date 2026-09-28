@@ -1127,6 +1127,66 @@ python3 $S/make-batches.py /c/sandbox/workdir/sample-files /tmp/triage/complexit
 
 ## Traps
 
+### Set `REF_SOFFICE`, and read the line the sweep prints back
+
+`/usr/bin/soffice` is 24.2.7.2 and the tree is calibrated to 26.2.4.2. Both sweeps here now
+resolve `${REF_SOFFICE:-soffice}` and announce the version they got; until round 180
+`track-ink-sweep.sh` and `ref-baseline.sh` hard-coded PATH while `batch-check.sh` did not, so
+an ink sweep and a gate sweep run side by side measured different binaries in silence.
+Measured on `words/done-005`: `TOTAL 10 MATCH 9` against PATH, `MATCH 10` against 26.2.4.2.
+See `libreoffice-reference/SKILL.md` for the full note.
+
+### The two sweeps ran two different gates under one column name
+
+`batch-check.sh` moved its `words` check from **tokens, floor 3** to **alphanumeric characters,
+floor 15** on 2026-09-05. `track-ink-sweep.sh` carried its own older copy of `words_of` and of
+the verdict block and was never moved with it, so for its whole life its `verdict` column was
+the *previous* gate — and its `rows.tsv` had no `glyphs` column at all, so nothing showed it.
+
+Measured on the words track at `22cca57dc`: **322 rows `match` under the old rule against 329
+under the new one.** Seven rows of disagreement that are the rule and not the tree, in a column
+both files call `verdict`.
+
+Fixed in round 181 — `words_of`, the verdict block and the `glyphs` column are now verbatim
+from `batch-check.sh`, and the two files are joinable row for row. **If you copy a check out of
+one sweep into another, copy it verbatim and say so**; this is the third time two measurements
+have circulated in this skill under one name, after the signed/unsigned ink pair that the
+header of `track-ink-sweep.sh` still records.
+
+### Rank on the `worst` page, not on `abs_ink` — the sum is weighted by length
+
+`abs_ink` is the per-page `|ink|%` column **summed**, so a long document outranks a badly wrong
+short one just for having more pages. `ink.tsv` therefore also carries `worst` — the worst single
+page's figure — and `mean`, and the ranking to work is the one on `worst`.
+
+**Measured, at the cost of most of a round.** `docs-quality-MA.IMS.00001-Integrated-Management-System-manual.docx`
+headed round 182's `drift`-free ranking at `abs_ink` **10.22**. Its `mean` is **0.23** over 44
+pages, which is the raster floor for text that dense, and its `worst` page is 2.77 — **seventh**
+in the same track. The three one-page chart templates it outranked are 5.18, 4.64 and 4.25 on
+their only page. Round 183 went after the 44-page document, found a real 11.5 pt footer offset on
+37 of its pages, and measured it at **0.29 of the 10.22** — the rest was length. See
+`probes/footerlink-r183/`, and `probes/wordsink-r183/` for the re-ranked track.
+
+`mean` is the companion screen: **below about 0.3 says the document holds no defect at all**, only
+antialiasing and hairline placement. A row whose `mean` is at the floor and whose `abs_ink` is high
+is a long document, not a broken one.
+
+### `ink.tsv` has a `drift` column, and a non-zero value voids that row's ink
+
+Ink is compared page against page. Two documents can hold the same number of pages and still
+carry different content on them, where a block lost early is made up later — and every page
+between is then compared against its neighbour. `drift` counts the pages holding content the
+reference puts elsewhere, read from the text layer rather than from the pixels, so it is an
+independent channel.
+
+**One lost page reads as hundreds of defects.** It has misread three documents in one session:
+`02_mcar_part-2_and_IS_v2.10` ranked first on a track at 881.67, and both FAA Holdover Tables
+at 321.27 and 93.02 — every one of them one page. Explain the pagination before ranking such a
+row.
+
+It is a screen and not a verdict: a page of dense numerals can fall below the threshold while
+being the right page.
+
 **`soffice` exits 0 having converted nothing.** Decide success by the output file existing,
 never by the exit code. Every script here does.
 

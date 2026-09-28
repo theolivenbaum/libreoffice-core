@@ -4206,6 +4206,21 @@ public static partial class ChartLayout
     {
         if (plot.Series.Count == 0) return;
 
+        // A three-dimensional pie is an extruded solid fitted to the whole plot area rather than
+        // a circle inscribed in it, and only a pie is ever one — no corpus document states a
+        // three-dimensional doughnut, and a ring's inner wall is not modelled. See
+        // ChartLayout.Pie3D and ChartPlot.Elevation.
+        if (plot.Elevation is { } elevation && !plot.Rings)
+        {
+            Pie3DGeometry pie = Pie3DFit(area, elevation);
+            if (pie.A <= Length.Zero) return;
+
+            AddWedges3D(plot, plot.Series[0], pie, shapes);
+            AddPieLabels(plot, plot.Series[0], pie.Centre, pie.A, pie.B, available,
+                         measurer, shapes, labels);
+            return;
+        }
+
         DocPoint pieCentre = new(area.X + area.Width / 2, area.Y + area.Height / 2);
         Length outer = area.Width < area.Height ? area.Width / 2 : area.Height / 2;
         if (outer <= Length.Zero) return;
@@ -4304,11 +4319,44 @@ public static partial class ChartLayout
 
         if (hole > Length.Zero) return;
 
-        // The pie's own labels, block by block: the legend key is a shape of its own and the text
-        // is placed from the block rather than from the anchor, because the key is inside the box
-        // the best-fit test measures.
+        AddPieLabels(plot, series, centre, radius, radius, available, measurer, shapes, labels);
+    }
+
+    /// <summary>
+    /// A whole pie's own labels, block by block.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The legend key is a shape of its own and the text is placed from the block rather than
+    /// from the anchor, because the key is inside the box the best-fit test measures.
+    /// </para>
+    /// <para>
+    /// The <c>verticalRadius</c> is the rim's vertical semi-axis: it equals the radius for a flat
+    /// pie and is the squashed one for a three-dimensional pie. Only the label anchors take it —
+    /// the wrapping width and the best-fit test are horizontal measures and stay on the full
+    /// radius, which is what the reference's own <c>nOuterX</c> is.
+    /// </para>
+    /// <para>
+    /// <c>startDegrees</c> and <c>limit</c> are <see cref="PieLabels"/>'s, and an of-pie's main
+    /// ring is the only caller that passes either.
+    /// </para>
+    /// </remarks>
+    private static void AddPieLabels(
+        ChartPlot plot,
+        ChartSeries series,
+        DocPoint centre,
+        Length radius,
+        Length verticalRadius,
+        DocRect available,
+        ChartText measurer,
+        List<ChartShape> shapes,
+        List<ChartLabel> labels,
+        double startDegrees = 90.0,
+        int? limit = null)
+    {
         foreach (PiePlacedLabel placed in PieLabels(
-                     plot, series, centre, radius, available, measurer))
+                     plot, series, centre, radius, verticalRadius, available, measurer,
+                     startDegrees, limit))
         {
             if (placed.GhostKey is { } ghost && placed.KeyFill is { } ghostFill)
                 shapes.Add(new ChartShape(GraphicsPath.Rectangle(ghost), ghostFill));
@@ -4522,23 +4570,51 @@ public static partial class ChartLayout
         double denominator = series + outer + inner * (series - 1);
         if (!(denominator > 0.0)) return;
 
-        double slotFraction = 1.0 / (categories * denominator);
+        // A date axis' category is one unit of its own time resolution wide and sits at the
+        // point's own date; a category axis' is one n-th of the plot and sits at the point's
+        // index. Only the width and the centre differ — the share of the category each series
+        // takes inside it is the same arithmetic either way.
+        ChartDateAxis? dates = plot.DateAxis;
+        double categoryFraction = dates?.SlotFraction ?? (1.0 / categories);
+
+        double slotFraction = categoryFraction / denominator;
         double baseline = Math.Clamp(scale.Fraction(0.0), 0.0, 1.0);
+
+        // A date axis can carry more points than the axis has categories, and it drops the ones
+        // off its own ends rather than squeezing them in.
+        int points = dates is null
+            ? categories
+            : Math.Max(categories, dates.CategoryValues.Count);
 
         // A stacked chart's series pile onto a running total per category rather than each
         // starting from the baseline, and positives and negatives pile separately so that a
         // mixed category does not cancel itself out.
-        double[] positive = new double[categories];
-        double[] negative = new double[categories];
+        double[] positive = new double[Math.Max(categories, points)];
+        double[] negative = new double[Math.Max(categories, points)];
 
         for (int index = 0; index < series; index++)
         {
             ChartSeries one = plot.Series[index];
 
-            for (int at = 0; at < categories; at++)
+            for (int at = 0; at < points; at++)
             {
                 if (at >= one.Values.Count) continue;
                 if (one.Values[at] is not { } value || !double.IsFinite(value)) continue;
+
+                // `BarChart::createShapes` rasterises the point's own x to the axis' resolution
+                // and then skips it outright when it is off the axis — three `continue`s before
+                // any geometry (chart2/source/view/charttypes/BarChart.cxx:694-704). Laying these
+                // out by index instead put 171128IPAP page 40's 67 drawn bars into the left
+                // two-thirds of a plot where 26.2.4.2 draws 44 across the whole of it.
+                double? dated = null;
+                if (dates is not null)
+                {
+                    if (at >= dates.CategoryValues.Count) continue;
+                    if (dates.CategoryValues[at] is not { } serial) continue;
+                    if (dates.SlotStart(serial) is not { } placed) continue;
+
+                    dated = placed;
+                }
 
                 double from;
                 double to;
@@ -4578,8 +4654,20 @@ public static partial class ChartLayout
                 from = Math.Clamp(from, 0.0, 1.0);
                 to = Math.Clamp(to, 0.0, 1.0);
 
-                // The slot the bar sits in, as a fraction of the plot area's long side.
-                double slotStart = (double)at / categories
+                // The slot the bar sits in, as a fraction of the plot area's long side. A
+                // category begins at its own point and runs one unit — on an index axis that is
+                // `at/categories`, and on a date axis it is where the rasterised date falls.
+                //
+                // It is NOT centred on the point, although
+                // `CategoryPositionHelper::getScaledSlotPos` subtracts half a category width:
+                // the axis' own maximum carries one extra interval for the same reason, so the
+                // subtraction and the extension cancel and every category sits to the right of
+                // its tick. Solved rather than assumed — 044_Cash_flow_forecast's date axis was
+                // rendered by 26.2.4.2 three times, as authored and with two different explicit
+                // ranges, and the plot's left edge comes out at 414.3 pt under the left-aligned
+                // reading in both patched cases and at two different values under the centred
+                // one. probes/bardate-r189.
+                double slotStart = (dated ?? ((double)at / categories))
                     + (outer / 2.0 + index * (1.0 + inner)) * slotFraction;
 
                 // A reversed category axis mirrors the whole bar, not its slot — so the series
@@ -5520,6 +5608,16 @@ public static partial class ChartLayout
     {
         if (plot.Kind is not (ChartPlotKind.Pie or ChartPlotKind.OfPie or ChartPlotKind.Radar))
             return area;
+
+        // A three-dimensional diagram is not squared at all: `adjustPosAndSize` branches on the
+        // dimension count (`VDiagram.cxx`:89-101) and `adjustPosAndSize_3d` fits the *scene's own
+        // projected bounding box* into the available rectangle rather than the preferred ratio
+        // (`:409-421`). `PieChart::getPreferredDiagramAspectRatio` returns `(1, 1, 0.10)` there,
+        // and that 0.10 is the thickness rather than a square. Squaring it anyway is what drew
+        // `021_Unit_Circle_Chart_3D_Pie_Chart` at 274 pt across against the reference's 469: the
+        // rectangle is wide and short, so the square took the short side.
+        if (plot.Elevation is not null && plot.Kind is ChartPlotKind.Pie) return area;
+
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return area;
 
         Length side = area.Width < area.Height ? area.Width : area.Height;

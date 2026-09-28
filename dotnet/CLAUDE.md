@@ -312,9 +312,18 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    gets no mark of its own. On `171128IPAP.pptx` slide 38 the three series now run 119.55 … 615.56
    against 26.2.4.2's 119.54 … 615.49, where they ran −866.50 … 758.03 on a 720 pt page; all four
    renderings improve and no page or alphanumeric count moves. **The area, net/radar and regression
-   clips are still open**, and so is the splined line: that chart's three series state
-   `c:smooth val="1"` and 26.2.4.2 draws 801 segments through 132 points where we draw 131.
-   `probes/chart-resid-r75/results.md` §1.
+   clips are still open.** `probes/chart-resid-r75/results.md` §1.
+
+   ***The splined line that stood beside them is closed and this paragraph said otherwise for
+   eleven rounds.*** *"That chart's three series state `c:smooth val="1"` and 26.2.4.2 draws 801
+   segments through 132 points where we draw 131"* was true when it was written and round 102
+   closed it: `ChartSpline` is the natural cubic spline over the point index at
+   `CurveResolution` 20, reproducing 26.2.4.2's own flattened polyline to **0.0495 pt**, which is
+   1.75 hundredths of a millimetre. Its reach is **12 documents by markup and 2 in drawn
+   geometry** — nine of the eleven that state `c:smooth` carry arithmetic-progression data, whose
+   spline *is* the straight line, and one suppresses its line altogether.
+   `probes/chart-smooth-r102`. A round briefed off the old sentence would re-derive a feature the
+   tree already has; `171128IPAP`'s residual is real and is not this.
 
    **And a chart's range excludes the cells of hidden rows and columns, which is not a chart rule
    the record had.** `ScChart2DataSequence::BuildDataCache` asks `ColHidden` and `RowHidden` per
@@ -635,16 +644,20 @@ whatever you already believed. A reviewer that has never seen the document and i
 to grep the repo is the only reader whose agreement is evidence. The `page-vision` skill has
 the brief to give it, the pixel-budget arithmetic that decides your dpi, and when to crop.
 
-**In this container there is no such reader, and the check is two calls rather than a guess.**
-An agent here has no `Task`/subagent tool; what it does have is
-`mcp__Claude_Code_Remote__create_session`, which spawns a *sibling session* — and that is not a
-substitute, for two independent reasons measured 2026-09-06. The sibling runs in its own
-`anthropic_cloud` container, so it cannot open `/home/user/...` and there is no way to hand it the
-composed PNG; and this session has no `list_events`, while `SendMessage` answers *"No agent named
-… is reachable"* and `get_session` returns the session record without its transcript — so even a
-sibling that could see the image could not report back. Four rounds have now said "no such tool",
-which was right. **Say so explicitly, treat your own readings as contaminated, and corroborate
-anything you lean on with arithmetic that does not depend on the reading.**
+**That reader IS available, and the paragraph that stood here for four rounds was looking at the
+wrong tool.** Measured 2026-09-27: the in-process **`Agent`** tool with
+`subagent_type: "general-purpose"` spawns a subagent in *this* container, which opens
+`/home/user/...`, reads the composed PNG, and hands its report back. Six readings were delegated
+that way in one session and all six came back usable — four independently named a one-page offset
+that turned out to be the round's whole finding, and one caught a dropped tab leader the numbers
+could not show.
+
+What is not available is the **sibling session**, `mcp__Claude_Code_Remote__create_session`: it
+runs in its own container, cannot see the PNG, and has no channel back. Four rounds checked for
+*that*, and for a tool called `Task`, found neither, and wrote off the whole practice. **Delegate
+the reading.** Only if `Agent` is absent in some future container does the old advice apply — say
+so explicitly, treat your own readings as contaminated, and corroborate anything you lean on with
+arithmetic that does not depend on the reading.
 
 Three things this changes about how a round is run:
 
@@ -940,6 +953,41 @@ Comparing against LibreOffice — use the skills, they encode hard-won details:
 | `page-vision` | Actually looking at a page — resolution, cropping, and getting it read by someone uncontaminated |
 | `extraction-comparison` | Comparing extracted text; also the right first step for a visual bug |
 | `paperless-corpus` | Building and curating test documents |
+
+**`render-comparison/SKILL.md` opens with a router — which tool answers which question — and
+four rules that each cost a round.** Read it before writing any comparison of your own.
+
+- **Set `REF_SOFFICE=/opt/libreoffice26.2/program/soffice`.** PATH here is 24.2.7.2 and this
+  tree is calibrated to 26.2.4.2, and they disagree on real documents:
+  `f445896eb008d14c1746fc37d412dc22.docx` is 16 pages under one and 15 under the other, so a
+  sweep on PATH banks a `pages` failure for a document that matches. Until round 180 only
+  `batch-check.sh` and `verdict.py` honoured the variable; the other eight scripts — the *ink*
+  sweep, the reference *bank*, and `look.py`, which `page-vision` names for every page reading
+  — hard-coded `soffice` and said nothing. All ten now resolve it and **print the resolved path
+  and version as their first line of output.** Read that line before the numbers.
+- **Do not write your own scorer.** Twice now a hand-rolled mean absolute difference has
+  produced a wrong *published* call: one scored a page 11.04 pt out of place as agreement, and
+  one ranked a whole track, putting `02_mcar` first at 881.67 for a one-page offset it could
+  not see and `Annex-10` first among passing documents for one part in 255 of grey.
+  `track-ink-sweep.sh` already does this and already guards both traps.
+- **Check page alignment before reading an ink figure.** Ink is compared page against page, so
+  one lost page reads as hundreds of defects — it has misread three documents in one session,
+  every one of them a single page. Equal page counts do **not** prove alignment: two documents
+  can carry different content on the same-numbered pages where a block lost early is made up
+  later. `ink.tsv`'s `drift` column counts it, from the text layer rather than the pixels.
+- **Rank on the worst page, not on summed ink.** `abs_ink` is the per-page figure *summed*, so a
+  long document outranks a badly wrong short one for being long. `ink.tsv` also carries `worst`
+  and `mean`; rank on `worst`, and read a `mean` below about 0.3 as "no defect, only
+  antialiasing". Round 183 spent most of a round on a 44-page document that headed the ranking at
+  10.22 and whose mean is 0.23 — the raster floor — while three one-page charts it outranked were
+  5.18, 4.64 and 4.25 on their only page.
+- **A raw mean difference is biased by colour quantisation**, at one grey level across every
+  flat fill, because the two writers emit colour to different decimal precision and the
+  rasteriser floors. `differing_fraction`, `differing_tiles` and `ink_delta` are safe; a raw
+  mean is not.
+- **For an import question, `soffice --convert-to fodt`/`fods`/`fodp` is the first
+  instrument**, not the last: it prints the reference's own resolved view with no rasteriser
+  and no tolerance in it.
 
 ### The sample corpus
 
@@ -3160,6 +3208,635 @@ date changes *which* characters are drawn and not *how many* — `4/14/2017` and
 eight alphanumerics — so a volatile workbook drifts in ink and barely at all in the column the gate
 scores. The corollary is the useful half: **`TODAY()` can be frozen at the file's own cached serial**,
 which makes the reference recompute what the author saw and turns a decaying row into a stable one.
+
+### A chart type LibreOffice "supports" is not one it draws, and two readers decided a type after reading a record
+
+**`chart2/source/inc/servicenames_charttypes.hxx` declares nineteen chart types and
+`VSeriesPlotter::createSeriesPlotter` (`chart2/source/view/charttypes/VSeriesPlotter.cxx`
+:2882-2907) has a plotter for eleven.** The other eight reach `UnsupportedChart`, which draws
+`STR_UNSUPPORTED_CHART_TYPE` and nothing else (`UnsupportedChart.cxx`:88-111). So *"the reference
+supports a treemap"* and *"the reference draws a treemap"* are different statements, and
+reproducing the eight means reproducing a string rather than a plot. `oox` says the same thing in
+its own words: `SERVICE_CHART2_SURFACE` is `"com.sun.star.chart2.ColumnChartType"; // Todo`
+(`oox/source/drawingml/chart/typegroupconverter.cxx`:79).
+
+**The whole corpus was swept by chart type to find out where that matters, and the first cut of
+that sweep published a wrong conclusion because `|ink|%` is the wrong instrument for a chart.**
+168 documents holding a `c:` or `cx:` chart part, rendered both ways and grouped by the *set* of
+plot elements their parts state. Ranked on unsigned ink, no type looked systematically wrong.
+That was false, and twice over:
+
+- **`|ink|%` and `diff%` are both fractions of the whole PAGE**, and a chart is a small part of
+  one. `pie-chart-result.docx` scores **0.30** unsigned ink while the reference draws an extruded
+  3-D pie there and this tree draws a flat circle — as wrong as a pie can be.
+- **`|ink|%` is signed per region before the page's absolute value is taken**, so ink we add
+  where the reference removes it cancels *within* the page. A wrong-shaped pie in the right
+  colours is exactly the shape that cancels. `diff%` — the fraction of pixels that differ at all
+  — has neither property, and reads 2.76 on that same document.
+
+**Rank a chart on `diff%`.** (The standing *rank on the worst page, not on summed ink* rule is
+not what failed here; the quantity is.) On that column the types separate into three groups:
+right (`cx:` chartex 0.16, `areaChart` 0.39, `bubbleChart` 0.58), right in the main with bad
+individual documents (`barChart` 2.81 over 55 with a worst of 28.50, `lineChart` 2.59,
+`scatterChart` 2.93, `doughnutChart` 3.32, `pieChart` 3.57), and **wrong wherever they appear:
+`ofPieChart` 11.00 over both its documents and `pie3DChart` 5.06 over all three of its.**
+`probes/chartsweep-r186`.
+
+**A 3-D chart's reach is three documents and all three are pies** — no `bar3DChart`,
+`line3DChart`, `area3DChart` or `surface3DChart` exists anywhere in the corpus — so the 3-D work
+the corpus can witness is the pie alone and a general 3-D scene buys nothing beyond it.
+
+***Done, and four things about it are worth more than the fix.*** `ChartLayout.Pie3D` draws the
+extruded solid; `021_Unit_Circle_Chart_3D_Pie_Chart` goes **12.20 → 5.64 `diff%`** and
+`pie-chart-result` 2.76 → 1.66, with **2 of the 168 chart documents moving and 166
+byte-identical**. `probes/pie3d-r187`.
+
+- ***26.2.4.2 rasterises a 3-D chart.*** The solid reaches the page as one `Do` of an RGB image
+  with a soft mask — the labels and the frame are still operators — so its geometry can only be
+  read out of that bitmap's silhouette, and a vector rendering can never be byte-equal to it.
+  **Do not chase a residual on one of these to zero.**
+- ***The projection is parallel in practice and the squash is `sin(rotX)`.*** Over nine
+  elevations the silhouette's upper boundary fits an ellipse to a mean residual of 0.28–0.45
+  pixels on a 1370-pixel image, and `B/A` is within 0.7% of the sine at seven of the nine —
+  although `View3DConverter` asks for `ProjectionMode_PERSPECTIVE`, because a `c:perspective` of
+  30 halves to a non-zero 15 (`plotareaconverter.cxx`:299-308). The camera is far enough away
+  that it does not show.
+- ***`c:depthPercent` is not read.*** Thirty-six variants — nine elevations by four depths — give
+  nine distinct geometries repeated four times each, identical to the hundredth of a point. The
+  thickness comes from `PieChart::getPreferredDiagramAspectRatio`'s `Direction3D(1, 1, 0.10)`.
+- ***A three-dimensional diagram is NOT squared, and that was worth more than the solid.***
+  `VDiagram::adjustPosAndSize` branches on the dimension count (`VDiagram.cxx`:89-101) and
+  `adjustPosAndSize_3d` fits the scene's own *projected* bounding box into the available
+  rectangle (`:409-421`); the preferred ratio never squares anything. With the solid drawn but
+  `ChartLayout.Squared` still squaring the rectangle, `021` came out 274 pt across against the
+  reference's 469 and its `diff%` went **12.20 → 16.33 — worse than before the feature**.
+
+**And closing it turned up a four-round-old gap one layer down: a chart's bold text was drawn
+light on the whole words track.** `FrameChart.ChartFace` resolved one face and shaped every
+label through it, so a chart's bold title, axis labels, axis titles, legend and data labels were
+all light on a DOCX, a DOC and an RTF while the model carried the right value — `SlideChart` and
+`SheetChart` having acted on `ChartLabel.IsBold` since they were written. The class's own remarks
+named the gap and deferred it for want of a words sweep. **The face set is the instrument, not
+`diff%`**: on `021_Unit_Circle_Chart_3D_Pie_Chart` the page went from embedding `Carlito-Regular`
+to embedding `Carlito-Bold`, which is what 26.2.4.2 embeds, while its `diff%` went 5.64 → 5.68
+because bold labels are wider and move where a label wraps. Reach **5 of the 10 chart-bearing
+words documents — exactly the 5 that state a `b="1"` in a chart part** — and nothing on the other
+two tracks, `ChartFace` having one consumer. `probes/chartbold-r188`.
+
+**A per-point override has to be counted against what it inherits.** The first reading of that
+defect was that `021` states its weight only on each per-point `c:dLbl`, which no reader reads —
+taken from the first `c:dLbls` in document order, which is the per-point one nested inside the
+series-level one. Censused properly, a per-point `c:dLbl` states a size, weight or colour
+*beyond its enclosing `c:dLbls`* in **4 of the corpus's 699 chart parts**, and `021` is not one
+of them: its series-level `c:dLbls` carries the same `<a:defRPr sz="1400" b="1">` after its four
+`c:dLbl` children. An override that repeats its parent cannot be seen on the page, and a census
+that does not subtract the parent sends a round after a reader gap that is not there.
+
+**One instrument warning from the shading measurement.** A colour that is a flat multiple of a
+series' declared colour is not necessarily a *wall*: `(64, 99, 41)` is accent6 × 0.574 and is the
+10% sector's **top face**, in the darker shade `c:varyColors` hands the fourth point. Locate a
+colour's pixels before deciding what surface they are — reading that one as the wall would have
+made every wall 0.57 of its face instead of the measured 0.87.
+
+**What the same review did find is two readers that switch on a record id where the reference
+switches on a field inside it.** Both are closed, and the shape is worth remembering because it
+is invisible to a `grep` of type names:
+
+- **ODF: an unrecognised `chart:class` is a bar chart, not nothing.**
+  `SchXMLChartContext::ParseAttributes` sets the service name only for a `chart:`-namespace class
+  `GetChartTypeEnum` knows, or for the `ooo:` add-in branch
+  (`xmloff/source/chart/SchXMLChartContext.cxx`:372-402); everything else falls through to
+  `:470-478`, which reads `aChartClass_Bar`. Measured on 26.2.4.2 over fifteen one-attribute
+  variants, the reference draws the same 126 path operators for every one of them as it does for
+  `chart:bar` itself, and `OdfChartPlot` drew nothing. The `ooo:` spelling is the exception and is
+  left returning null. `probes/chartclass-r186`.
+- **BIFF: a doughnut and a bubble chart have no record id.** `XclImpChType::Finalize`
+  (`sc/source/filter/excel/xichart.cxx`:2288-2303) reads the body first —
+  `(mnPieHole > 0) ? DONUT : PIE` and `mnFlags & EXC_CHSCATTER_BUBBLES` — and a bubble series'
+  sizes arrive on source-link destination **3**, `EXC_CHSRCLINK_BUBBLES`, beside title 0, values 1
+  and categories 2. `XlsChartReader` read none of the three. On 26.2.4.2's own
+  `--convert-to 'xls:MS Excel 97'` of the corpus chart workbooks, worst-page `|ink|%` falls
+  0.88 → 0.37 and 0.36 → 0.16 with six controls unmoved to the hundredth.
+  `probes/chartbiff-r186`.
+
+**Three fields of those two records are read by the reference and then used by nothing**, so
+reproducing them would be a disagreement rather than a refinement: `CHPIE`'s `anStart` becomes a
+`StartingAngle` that `ChartPlot` does not model (and neither does `c:firstSliceAng`), and
+`CHSCATTER`'s `pcBubble`/`wBubble` are the BIFF spellings of `c:bubbleScale` and
+`c:sizeRepresents`, which `oox` also parses and ignores. `pcDonut` is dropped once the type is
+chosen, because a ring's hole is always half the radius.
+
+**And the reach of both is nil on this corpus, which is the point rather than a disappointment.**
+Every `chart:class` the converted-ODF corpus states is one the reader already drew; exactly one of
+the corpus's 180 OLE2 files states a `CHPIE` or `CHSCATTER` at all, and it is a plain scatter that
+was already right. The corpus is seven OOXML and MS-binary extensions and holds no hand-written
+ODF, so a reach census is the wrong instrument for an ODF reader rule — the right one is the
+reference's own answer to an authored file, which is what both probes measure.
+
+**Two census traps recurred here and both are already in this file under other headings.** A
+chart census keyed on `.xlsx`/`.pptx`/`.docx` misses a `.xlsm` — the first cut of the sweep above
+was 167 documents and is 168 — and one keyed on *zip parts* misses every BIFF chart substream,
+which is the same error that made an older reach figure short by eight. **Census the package's
+contents and walk OLE2 files, not extensions.**
+
+### A bar on a date axis is placed by its date, and for years it was placed by its index
+
+**`ChartLayout.AddBars` put every bar at `(double)at / categories`, whatever the axis was.** A
+line series has gone through `ChartDateAxis` since it was written, so on a date-axis combination
+chart the line spanned the plot and the bars did not: on `171128IPAP.pptx` page 40 this tree drew
+**67 bars across the left two-thirds of a plot where 26.2.4.2 draws 44 across the whole of it**,
+at a pitch that changed partway along — which is the signature of a layout that does not know
+what its x coordinate means. Page 40 is now **16.01 → 7.94 `diff%`** and MAJOR → shifted, with
+its bars at 350.07…635.85 pt against the reference's 350.05…635.75. `probes/bardate-r189`.
+
+Four rules, and only the first two are readable from the source alone:
+
+- **A category is one unit of the axis' own time resolution wide**, not one n-th of the points —
+  `PlottingPositionHelper::setTimeResolution` sets it to 1, and to 12 at year resolution because
+  the scaling counts months (`PlottingPositionHelper.cxx`:670-690).
+- **The axis is linear in that unit and not in days.** `DateScaling::doScaling`
+  (`chart2/source/view/axes/DateScaling.cxx`:56-91) returns `year × 12 + month` plus the fraction
+  of the month elapsed. Over 132 months the difference is under a tenth of a percent; over eleven
+  it is 5%, and 26.2.4.2 spaces `044_Cash_flow_forecast`'s twelve monthly bars at a flat 35.26 pt
+  where days give 30.2 to 33.4. **A date span measured in days over 30.44 is not the span in
+  months.**
+- **A shifted axis carries one extra interval** — `"for explicit scales we need one interval more
+  (maximum excluded)"`, `ScaleAutomatism.cxx`:565-597 — **whether or not the range is stated**,
+  and the interval is chosen from the span *after* the extension, so it moves every tick too.
+- **And a shifted axis' categories lead their own dates**, where an unshifted axis' straddle
+  them. That half is *not* in the source: `CategoryPositionHelper::getScaledSlotPos` subtracts
+  half a category width unconditionally and something adds it back. It was solved instead.
+
+***The experiment that solved it is the one to copy.*** One rendering cannot separate "centred on
+the date" from "running from the date", because the plot's left edge is unknown and both readings
+fit at different edges. Render the same file twice with two *different stated ranges* and the
+edge has to come out the same — and, better, **read the plot's own rule out of the page instead
+of inferring it**: the widest horizontal is the plot rectangle, 414.31 in both variants. The
+first cut of this probe inferred the edge from the bars, concluded "centred", and was refuted by
+the tick row in the same PDF.
+
+**Which arm applies is the crossing *value* axis' `c:crossBetween`**, read as `== "between"` with
+a fallback of true for a bar, line or stock group
+(`oox/source/drawingml/chart/axisconverter.cxx`:292-301). Measured: the same file with the
+attribute deleted renders identically to `between`, and rewritten to `midCat` loses the extra
+interval and straddles. **`ChartDateScale.Resolve`'s own default is `false`**, because that OOXML
+fallback belongs to the OOXML reader — the BIFF reader passes nothing and keeps the geometry it
+had, `CHVALUERANGE`'s crossing flag being unmeasured.
+
+**Reach 7 chart parts in 5 documents by markup; 8 of the 168 chart-bearing documents move and 160
+are byte-identical**, the three extra being charts whose *lines and ticks* moved with the
+month-linear axis. Two improve (16.01 → 12.91 and 2.57 → 2.12), five are level, one worsens by
+0.05 on a chart already within 0.13 pt.
+
+### An of-pie's composite wedge, its bar and its opening angle are `PieChart`'s, not the file's
+
+**Read a pie's geometry out of the page's fill operators.** `pdf-ops.py dump --only fill` gives
+every filled path's colour and bounding box, and a wedge's path runs centre → rim → centre, so
+the boxes fix the centre, the radius and each wedge's span exactly and the colour is read rather
+than sampled. A blind reading of the same page named five differences and **two were wrong** — it
+read the reference's legend as 12 entries where the operators show all 16, and the bar's split as
+75/25 where they give 47.7/52.3. It had the *direction* right on the rest, which is what a
+reading is for.
+
+Three things the reference decides for itself on `028_Unit_Circle_Chart_Optimized_Graph`, the
+corpus's one drawn `c:ofPieChart`:
+
+- **The composite wedge's colour is not in the document, and the document states one.** That
+  series carries sixteen values and *seventeen* `c:dPt`, the last of them `accent4 lumMod 50%` =
+  `#806000`; 26.2.4.2 draws `#7E0021`. `propIndex` gives the composite the property index
+  `getTotalPointCount()` (`PieChart.cxx`:1185-1191) — one past the last value, **always** — and
+  `DataSeries::getDataPointByIndex` answers an empty reference outside
+  `0 <= nIndex < getData().getLength()` (`DataSeries.cxx`:312-337), so the import drops that
+  `c:dPt`, `hasPointOwnColor` is false, and `createOneRing` falls through to
+  `m_xColorScheme->getColorByIndex` (`:1325-1331`). That is
+  `Office.Chart/DefaultColor/Series` — twelve values in
+  `officecfg/registry/schema/org/openoffice/Office/Chart.xcs`:35-36, indexed `nIndex % 12` — and
+  `16 % 12 = 4` is `0x7E0021`. Reproduced deliberately; it disagrees with the writer's intent and
+  agrees with the reference.
+- **The bar stacks upward in data order**, so the *first* split point is its foot:
+  `createOneBar` opens at `fBarTop = -0.5` and adds each share, `// make the bar go from -0.5 to
+  0.5` (`:1416-1430`), against a value axis that points up.
+- **The main ring opens at minus half the composite sweep**, so the composite closes across three
+  o'clock where the two connecting lines meet it — `sAngle`'s
+  `clockwiseWedges() ? 360 - degAng : degAng` (`:1229-1244`). Opening at plus half puts the whole
+  composite above the axis.
+
+**What the of-pie constants already had right, measured the same way:** the unit centre to 0.6 pt,
+`bar width / unit radius` 0.747 against 0.750, `bar height / unit radius` 1.495 against 1.499. So
+`m_fLeftShift`, `m_fLeftScale` and the three bar constants are exact and **only the unit radius is
+wrong, by 1.37×** — round 104's figure, still open.
+
+**And the labels went through a placer of their own, which is also why the radius is stuck.**
+`AddOfPie` put each label flat on its bisector at half the radius where a plain pie goes through
+`PieLabels`, and `PieConsumedRect` — which is what the pie's second pass shrinks against —
+measured them **on the unit circle**, which nothing is drawn on, rather than on the main ring at
+two thirds of it. Both are now the same placer at the same place, and on `028` it changes nothing,
+because that chart states `<c:dLblPos val="inEnd"/>` and both placers take the fixed branch. The
+arithmetic says what is missing: for the reference's final square to be 270.9 rather than 370.68
+its pass-1 consumed rectangle must be **268.27** tall against our 168.49, about 50 pt of label
+overflow each way — and `INSIDE` is not half the radius, it is **the rim less a flat 150** in the
+radius direction (`PieChart.cxx`:439-452). That is the next measurement.
+
+**Reach 1 of the 168 chart documents and 167 byte-identical.** `029`, the other `c:ofPieChart`,
+is exploded and both renderers draw it as a plain pie. `probes/ofpie-r190`.
+
+***And a page-fraction metric cannot see any of it on that document, because the chart is 71.6 pt
+out of place.*** `028` goes **16.48 → 16.72 `diff%`**; scored against a reference rendered from a
+variant that puts 26.2.4.2's chart where ours is and changes nothing else, the same two
+renderings give **15.21 → 14.47**. When a chart is displaced by more than its own features, the
+headline number measures the displacement and nothing else — **render the reference with the
+displacement removed and score against that.**
+
+### An autofitted slide body shrinks its text and not its bullet's label, and the first line moves
+
+**The width half of a rule this file already had the height half of.** `Outliner::ImplGetBulletSize`
+measures the bullet once and caches the whole `Size` on the paragraph, and the autofit search formats
+the outliner once *unscaled* before it walks `constScaleLevels` — so the cached width, like the
+cached height `SlideFittedBulletBoxTests` already pins, is the unfitted one. EditEngine then takes
+that width for the first line alone, `nStartX = max(textLeft + firstLineOffset, bulletX)`
+(`editeng/source/editeng/impedit3.cxx`:846-851 over the `BulletX` set at `:798-802`), while
+`StripBullet` asks `ImpCalcBulletFont` again and *does* scale what it draws. So a hanging indent wide
+enough for the shrunk bullet can still be too narrow for the cached one:
+
+```
+firstLineTextX = max(marL, marL + indent + advance(bullet at the run's STATED size))
+```
+
+`Sector_Skills_Insights_Advanced_Manufacturing_summary_slide_pack.pptx` page 13 is the witness. Its
+master states `lvl2 marL="742950" indent="-285750"` — a 58.5 pt margin with the bullet 22.5 pt to its
+left — and its runs state **56 pt** under a `normAutofit` that draws them at 14. Its en-dash bullet is
+0.5562 em, so 31.13 pt at 56 and 7.79 at 14: 26.2.4.2 starts every second-level first line 31.13 pt
+past the bullet and this tree started it at the 22.5 pt margin. **Pinned over twelve one-attribute
+variants of that one master** (`probes/slidebullet-r191`): four hanging indents and two margins give
+five first-line positions exact and two clamped as predicted; three bullet characters give `–` 31.13,
+`W` 52.87 and `i` clamped; three stated run sizes give 28 pt clamped, 56 → 31.13 and 112 → 62.25
+against 15.57, 31.14 and 62.29 predicted.
+
+**Two variants that decide nothing and are worth knowing.** The bullet's own stated size — the
+`<a:defRPr sz="2800">` on the same `lvl2pPr` — moves the offset not at all at 14, 28 or 56 pt, so the
+label takes the *run's* size and not the level's. And **rewriting `fontScale` or deleting it outright
+changes nothing, because LibreOffice recomputes the autofit rather than honouring the stated scale** —
+all three variants draw the text at 14.00 pt. A probe cannot vary the shrink through the file; the
+unshrunk size has to be read off the runs.
+
+***A generated NUMBER is the exception, and the confinement sweep is what found it.*** Of the ten
+documents the unrestricted rule moved, nine improved and
+`30-04-2021 merged NDoH and NICD_Presentation…pptx` went 85.02 → 90.72 summed `diff%`, all of it on
+page 9, whose second level is numbered: its five first lines moved from 63.01 to 65.74 where 26.2.4.2
+draws **62.90**. The cache's own key explains it — `Paragraph::IsBulletInvalid` compares the bullet's
+**text** as well as the scaling parameters, so a number, whose text differs per paragraph, refills the
+cache while the search already has a scale. Restricting the rule to a fixed character keeps every gain
+and removes the loss. **So the one-line version of this is: a character bullet's label is measured
+before the fit and a generated number's after it.**
+
+**It is a cascade, which is what makes it worth more than its 8.63 pt.** Page 13 was `diff%` **15.93**
+at `|ink|%` **0.14** — the signature of a page where nothing is drawn differently and a great deal is
+drawn in the wrong place: our line fitted 94 glyphs where the reference's fitted 92, so a two-line
+paragraph took three, everything below dropped a pitch, and the reference's last line is clipped by
+the slide's edge. After the fix the reach is **31.15 against 31.13**, the two sides draw the same 49
+text records, and the page is **15.93 → 13.13** — the rest of that page being a 0.4 pt baseline drift
+and the reference's own clipped last line.
+
+**Reach: 9 of the 302 slides documents move and 293 are byte-identical, and all nine improve** —
+summed `diff%` over them 1148.05 → **1121.17**, MAJOR pages 14 → 14. One worst page rises,
+`5b_upasana_dasgupta` 9.98 → 10.27, while that document's sum falls by 3.04. The slides track is the
+whole reach by construction: `SlideTextLayout` has no consumer outside `Paperless.Presentations`, and
+the two mentions of it from `Paperless.Text` and `Paperless.WordProcessing` are doc comments. **No
+gate column can see any of it** — a changed wrap keeps the same characters and a slide's page count
+is its slide count.
+
+**And the same page taught a census rule again**: that deck heads the chart ranking at 15.93 and its
+worst page holds **no chart at all**. Census which page the feature is on before working the number.
+
+***A second lead from the same deck, read blind and not measured: our drop shadow ignores its blur and
+its lateral offset.*** On page 11 ours is a uniform RGB 153 band 4 rows deep offset straight down by
+~2.2 pt with **zero** spread to the left, the right or above, where 26.2.4.2 ramps 157 → 249 over
+about 11 rows below, 8 px right, 7 px left and 3 px above — a 4–6 pt blur offset down *and* to the
+right. That is what an ignored `a:outerShdw/@blurRad` with a substituted vertical `@dist` looks like.
+It is not only cosmetic: this file already records that **LibreOffice rasterises a blurred shadow**,
+so its PDF holds a picture with no words where a hard one stays vector and searchable — which makes
+the text layer the cheap instrument for it. The same reading found a shadowed white container the
+reference draws and we appear not to, plausibly the same defect (under a no-blur no-lateral shadow the
+only visible strip is covered by the box below), and one difference where **the reference is the wrong
+one**: its first teal box is 11 px shorter than ours and its last line's white glyphs fall onto white
+paper.
+
+### A hatch's distance is a number and the drawing layer decides the unit — Writer's is twips
+
+**Measured, implemented, and withdrawn; the patch is banked at `probes/charthatch-r191/withdrawn.patch`
+and nothing in `dotnet/src` carries it.** Read this before sending a round after a chart's pattern
+fill: the feature works, the reach is three documents, and what blocks it is a *hatch phase* rule
+shared with every slide shape.
+
+**`a:pattFill` on a chart's own backdrop is real ink the reference draws and we draw none of.** On
+`028_Unit_Circle_Chart_Optimized_Graph.docx` 26.2.4.2's page carries **298 strokes, of which 295
+are the `dkDnDiag` hatch** of the chart area. `ChartPlot.Background` and `ChartPlot.PlotBackground`
+are `Colour?` and have nowhere to put one.
+
+**Census the element the fill sits on, not the string.** Parsing all 947 documents' chart parts:
+`c:chartSpace/c:spPr` holds 161 `noFill`, 113 `solidFill`, **1 `gradFill`** (`Intersil_Italy_CAN_Bus…pptx`)
+and **1 `pattFill`** (`028`); `c:plotArea/c:spPr` holds 222, 47, 0 and **1** (`065_Weight_loss_tracker.xlsx`).
+That is the whole non-solid chart-backdrop surface of the corpus: **three fills in three documents**.
+A `grep` for `a:pattFill` finds 13 in 6 documents and **11 of them are in `style1.xml`**, the chart
+*style* part, which LibreOffice does not read at all.
+
+***The transferable finding is not about charts: a Writer document's drawing layer works in twips,
+so a hatch's stated hundredths of a millimetre are drawn as twips — 2540/1440 = 1.7639 times as far
+apart.*** Measured over four one-attribute variants of that document's `a:pattFill/@prst`: `dkDnDiag`
+states 50 and draws 88.4, `wdDnDiag` 100 → 176.3, `ltHorz` 50 → 88.4, `dkHorz` 25 → 45.9 — flat
+1.76–1.77 with **no dependence on the angle**. Confirmed out of VCL as well:
+`CalcHatchValues`' `nDist = fround(nDist / cos(45°))` gives `round(50/cos45) = 71`, and **71 twips
+is 3.55 pt, which is exactly the corner step on the reference's page**; in hundredths of a
+millimetre the same arithmetic gives 125 = 3.5433 pt, which the page does not hold. **The other two
+tracks do not do it**, which is what makes it the unit and not the chart: on
+`slide-pattern-fill.pptx` this tree already draws 112/70/70/70/28 hairlines against 26.2.4.2's
+115/71/71/70/28 with no correction, and on `065`'s hatched wall the reference draws 238 lines where
+the stated 100 predicts about 219.
+
+**What blocks it is the phase, and there are two phases in evidence.** With the twips correction the
+implementation drew **296 lines against the reference's 295** — and in the reference's *gaps*. Read
+out of the raw content streams: our family's invariant `x + y` runs `218.045 + 3.5356k` and
+26.2.4.2's `1259.239 − 3.55k`, and a line through the chart rectangle's **top-left corner** is
+`k = 167` exactly in theirs and `k = 126.81` in ours. `CalcHatchValues` phases on
+`rRect.TopLeft()`; `Hatching.Family` deliberately phases on the box's *centre*, reproducing
+`GeoTexSvxHatch`, and **that has its own measurement behind it** (its remark records
+`BMFE-06-03 (Gerflor)` page 3 at 3.28 of unaccounted ink centred against 0.00 in phase). Re-checked
+here: on the slide fixture the two phases agree to **0.296 pt out of a 3.97 pt step** and a
+corner-phased family would be a half-step out. So one rule does not fit both, and choosing needs the
+corpus's 65 pattern fills in 7 decks re-measured — which is the next round's, not a line of
+arithmetic.
+
+**What it scored, which is why it is withdrawn**: `028` against the `incell0` reference 14.42 →
+14.43 `diff%` with `|ink|%` 3.58 → 3.95, and `065` page 1 26.71 → 26.70 with 2.88 → 3.24. Flat both
+ways and about 0.36 of `|ink|%` worse on each — exactly what a correct hatch half a step out of
+phase costs. The third document is the gradient, which the patch leaves collapsing to one colour
+because `DrawingGradient.Paint` needs the rectangle it fills and a chart's frame is not known until
+layout.
+
+**Two instrument warnings from it.** A `pdf-ops.py` stroke record is a **bounding box**, and for one
+of the two diagonal senses its corners are *not* the segment's endpoints — so a midpoint-based
+reading reports 295 strokes as 42 lines and 522 as 3. Count strokes and divide the box's projected
+extent by them (`probes/charthatch-r191/spacing.py`), or read the content stream's own `m`/`l`. And
+**LibreOffice draws a gradient chart background as a Form XObject of band fills where this tree
+writes one shading**, so a fill count is not comparable on the gradient document either.
+
+### A chart label's width includes its trailing blank, and an accounting axis puts one on every tick
+
+**A chart label is an EditEngine text shape autogrown around its paragraph whole, so its trailing
+blanks are part of its width** — and the value axis reserves its widest label's width, so a lost
+blank makes the band narrow and the plot area that much too wide, with every gridline and every bar
+in it displaced. Excel's accounting formats end their positive and zero subformats in `_)`, a blank
+the width of a closing parenthesis, so this fires on every currency axis.
+
+**Only the slides path had it, and the reason is the mechanism rather than the track.**
+`SlideChart.Measurer` sums the advances `SlideTextLayout.Place` emitted, and `Emit` runs to
+`TextLine.VisibleEnd` — which exists precisely to keep a line's trailing blanks out of its width,
+because they hang past the right edge rather than pushing a word onto the next line. That is right
+for a wrapped body and wrong for a label that never wraps. `SheetBandText.ChartShape` and
+`FrameChart.ChartFace.Shape` shape the string and sum every advance, so both were already right.
+**This is not the rule round 190 refuted** — *"a slide line break charges its trailing blank"* is
+about where a line **breaks** and stays refuted; this is the width of a paragraph that does not
+break at all.
+
+**Measured by deleting one token of one format and nothing else** on `Demick_JetBlue.pptx` page 5
+(`probes/chartblank-r191`), reading the plot rectangle out of the extent of the major gridlines with
+`pdf-ops.py dump --only stroke` grouped by colour:
+
+| rendering | plot left | widest label's ink right | gap |
+|---|---:|---:|---:|
+| ours, base | 161.99 | 159.33 | **2.66** |
+| 26.2.4.2, as authored | 165.71 | 159.80 | **5.91** |
+| 26.2.4.2, `_)` deleted | 162.65 | 159.80 | **2.85** |
+| 26.2.4.2, the zero row's `??` deleted | 165.71 | 159.80 | 5.91 |
+
+The base tree renders the reference's *`_)`-deleted* answer, and the `??` control does not move
+because the zero row is not the widest label. Deleting `_(` instead moves the edge by the same blank
+again — **both ends count and only the trailing one was lost.** On the authored fixture
+`slide-chart-accounting-axis.pptx` the wall's left edge goes **128.70 → 131.41 against 26.2.4.2's
+131.41**, exact with no free parameter; `SlideChartTrailingBlankTests` pins it.
+
+**Reach: 4 of the 67 chart-bearing decks move and 63 are byte-identical.** Three improve and none
+worsens — `Demick_JetBlue` worst 20.31 → 19.03 and summed 86.78 → 82.14 over four pages,
+`southern-classic-kennesaw-state-university-final` 75.64 → 74.94, `Sector_Skills_Insights` 139.85 →
+139.74, `171128IPAP` level in pixels although its bytes moved. **No gate column can see it** and
+that is checked: the four movers' alphanumeric and page counts are identical before and after,
+because a blank is not an alphanumeric character.
+
+**Two traps.** Replacing `_)` with `)` leaves a literal closing parenthesis behind and answers a
+different question — delete both characters. And a glyph-count difference between the two sides is
+*not* evidence here: our PDF draws 14 glyphs for `" $1,200,000.00 "` and the reference 15, but that
+is the writer declining to emit an inkless trailing space and it is true before and after the fix.
+**Measure the gap from the last glyph's ink to the plot's edge, not the glyph count.**
+
+***What is still open on that page, measured and not taken.*** The chart's text is drawn at 10.01 pt
+where the reference draws 9.89 at a horizontal scale of 9.92 — the anisotropic fit squeezing a chart
+whose labels overflow — which is 0.6% of every advance and the whole of the residual 0.62 pt. The
+plot is 190.58 pt tall against 186.98 with the top edges 0.46 pt apart, so the reference gives up
+4.06 pt more below it: the category axis is interior here (the `$-` gridline) and `PlotAreaOf`
+reserves nothing for an interior axis' labels, which is right as far as it goes —
+`VDiagram::adjustInnerSize` then shrinks the inner rectangle by how far the drawn labels *overflow*
+the available one, and we do not. Our rotated labels also hang about 3.3 pt further below the axis
+line than the reference's, so **the overflow shrink and the label depth have to be separated before
+either is worth implementing.** The legend sits 4.20 pt lower in the reference and the rotated axis
+title 4.09 pt further right. And 26.2.4.2 **outlines** that page's 26 turned category labels — 156
+glyph-sized fills, no text records at all — so part of the page is the shear ceiling.
+
+***And the tiled ground is not the answer, which a round could easily have spent itself on.*** That
+page's theme repeats a 5 × 5 px bitmap through `<a:tile sx="65000" sy="65000"/>` about 37 000 times
+and our pitch is 3.25 pt against the reference's ≈ 3.2325, so the phase drifts across the page — but
+the plot rectangle is what the 20.31 was, and the blind reader called the tiled ground *"the closest
+match on the page"*. Censused for whoever takes it: **91 documents, 400 `a:tile` elements** — by part
+`theme` 171, `slides` 160, `document.xml` 41, `slideLayouts` 16, `slideMasters` 8, `charts` 4 — the
+heaviest being `048_Visual_Product_Roadmap_Template_Quality_Layout` (26) and
+`082_Infographic_Funnel_with_4_Stages_for_PowerPoint` (24). `Demick_JetBlue` is not in the top
+fifteen.
+
+### An `inEnd` pie label is at the rim, and an of-pie's radius is its BAR's labels
+
+**`INSIDE` and `OUTSIDE` share one anchor and differ only in a sign.**
+`PolarLabelPositionHelper::getLabelScreenPositionAndAlignmentForUnitCircleValues` takes the
+ring's *outer* radius for both and the middle of the ring for everything else — `bCenter` is
+exactly `nLabelPlacement != OUTSIDE && != INSIDE` (`PolarLabelPositionHelper.cxx`:68-76), and
+`AVOID_OVERLAP` has already become `CENTER` by the time it is asked
+(`PieChart.cxx`:434-437) — and `createTextLabelShape` then pulls an `INSIDE` anchor **back**
+along the radius by the same flat 150 hundredths of a millimetre it pushes an `OUTSIDE` one out
+by (`:439-452`, applied at `:490-497`). The eight-row alignment table is `bOutside ? A : B` with
+B the opposite of A on every row (`:112-137`), so the block hangs back over the slice instead of
+away from it; the wrapping width stays the default `0.8 * fPieRadius`, the room-to-the-edge arm
+being guarded by `nLabelPlacement == OUTSIDE` (`:544-576`). This tree treated `inEnd` as
+`CENTER` and drew it at half the radius.
+
+Measured on `029_Unit_Circle_Chart_Pie_Theme`, each label's distance from the pie's centre as a
+fraction of its radius — the ratio, because the two pies differ by 2 pt:
+
+```
+reference  0.804  0.839  0.917  0.953  0.890  0.923  0.841
+before     0.414  0.451  0.563  0.588  0.527  0.549  0.467
+after      0.806  0.841  0.918  0.953  0.891  0.924  0.842
+```
+
+**Seven of seven within 0.002 with no free parameter**, and the distance is to the *block*
+rather than to the anchor, so it fixes the mirrored alignment as well. Reach: the corpus's pie
+charts state `inEnd` on **76 points in 5 documents** and `outEnd` on 37 in 4, against 188 points
+in 19 that state nothing; **5 of the 168 chart documents move and 163 are byte-identical**, four
+improving or level.
+
+***And the of-pie radius is not the ring's labels — it is the bar's, through a unit bug.*** All
+sixteen of `028`'s ring labels sit within 93 pt of a centre whose radius is 90.3 in the
+reference's own rendering, so they never leave the ring and cannot consume anything. The bar's
+do: `createBarLabelShape` sets
+`fTextMaximumFrameWidth = 0.8 * (m_fBarRight - m_fBarLeft)` (`PieChart.cxx`:780) where those two
+are `1.25` and `0.75` in **unit-circle logic** units, so the wrapping width is `ceil(0.4)` = **1
+hundredth of a millimetre** and every bar label is drawn one character per line. Measured on the
+reference's page: two columns at x ≈ 437.8, pitch 10.47, of **17 and 25 rows**, centred on the
+two segments to 2.4 and 3.2 pt. That is what makes the pie's second pass shrink the diagram, and
+`AddOfPieBar` emits the label unwrapped while `PieConsumedRect` does not measure it at all.
+**Do not model the line count from either obvious guess** — "one line per non-space character"
+predicts 17 and 21 and "one per character" 19 and 26, so one is exact on one label and wrong on
+the other and neither is settled.
+
+### A `relativeFrom="page"` vertical anchor counts from the page — unless the object is EMBEDDED, and then it counts from the page BODY
+
+***Closed. The missing variable was the object kind, and the section below is kept because its
+refutation is what a round would otherwise re-derive.*** An embedded object — a chart or an OLE
+object — follows the text flow whatever its anchor, so *the page* means the page body frame for it
+and not the sheet. The seat is **one unguarded line**: a chart's `a:graphicData` becomes a
+`com.sun.star.drawing.OLE2Shape` (`oox/source/drawingml/shape.cxx`:348-358), `DomainMapper_Impl`
+replaces that with a `SwXTextEmbeddedObject` (`:5096-5112`), and `:9792` then sets
+`IsFollowingTextFlow` straight from `layoutInCell` **with no `IsInTable()` test** — where both of
+`GraphicImport`'s own writes of the property have one (`:1316-1318`, `:1859-1861`). So a census of
+`PROP_FOLLOW_TEXT_FLOW`'s writers that finds "always false outside a table" is a census of the two
+guarded seats, and this project carried that conclusion for three rounds. And `m_bLayoutInCell` is
+initialised **true** (`GraphicImport.cxx`:340), so an anchor stating nothing follows the text flow too.
+
+`SwEnvironmentOfAnchoredObject::GetVertEnvironmentLayoutFrame`
+(`environmentofanchoredobject.cxx`:64-95) is where it all comes from: `FindPageFrame()` when the object
+does not follow the text flow, otherwise a walk up to the first cell, fly, header, footer, footnote,
+**page body** or page frame. Four things follow, and only the first is the 71.6 pt: the `PAGE_FRAME`
+base (`tocntntanchoredobjectposition.cxx`:590-596); the object being captured at all, since
+`mbDoNotCaptureAnchoredObj` is a product with `!mbFollowTextFlow` in it; and its being captured in the
+**sheet** rather than the body, because the `compatibilityMode` 15 narrowing needs
+`rPageAlignLayFrame.IsPageFrame()` (:562-566) — the opposite of what the flag's name suggests. The
+**horizontal** is untouched, and that is the same file's own doing:
+`GetHoriEnvironmentLayoutFrame`'s walk stops at a cell, a fly or a page and has no body frame in it.
+
+***A fourth consequence was implemented on a correct reading of the source and the corpus refuted it in
+one document — read this before trusting a `bCheckBottom` argument you have found.***
+`bCheckBottom = !DoesObjFollowsTextFlow()` really is written at `tocntntanchoredobjectposition.cxx`:457,
+:678 and :718 — and the offset arm has a **fourth** `AdjustVertRelPos` call, at :810-813, which
+**omits the argument** and so takes the `= true` default (`anchoredobjectposition.hxx`:185-192). That
+call is under *"do not follow text flow respectively align at 'page areas', but stay inside given
+environment"* and is the path an offset which does not fit its upper's print area takes, which is the
+path a page-relative chart reaches. `027_Unit_Circle_Chart_Graphical_Chart` decides it: 470.30 pt of
+chart at a body base of 156.95 + 111.65 would reach 738.90 on a 595.30 pt landscape page and 26.2.4.2
+draws its top at **125.00**, exactly `595.30 − 470.30`. Skipping the correction drew it at 268.60 and
+took the document from 9.48 to **28.42** `diff%`; keeping it draws 470.30 against the reference's
+470.30. **Grep for every call of a function whose guard you are modelling, not for the guard.**
+
+**The experiment is the one to copy, because the refuted fixture below differs from it by one
+variable.** Eight minimal DOCX stating the same `wp:anchor` at the same 180 pt offset, varying the
+object kind, `w:pgMar/@w:top` and `layoutInCell` (`probes/pagev-r192/fixture.py`). 26.2.4.2 draws the
+**shape at 180.00 at every margin** and the **chart at 252.35** (`w:top="1440"`), **324.35**
+(`w:top="2880"`) and **180.35** (`layoutInCell="0"`), with an absent `layoutInCell` matching
+`"1"` — so the kind decides it, the base tracks the top margin one for one, and the attribute
+switches it. This tree reproduces **8 of 8** within the two writers' own 0.36 pt border-origin
+constant. Reach by markup: **5 embedded-object anchors in 5 documents**, all five `Unit_Circle`
+charts, `page` on two and `margin` on three — and `margin` is `PAGE_PRINT_AREA`, which resolves to the
+body either way, so the base moves two documents and the capture rules reach all five. Measured
+rather than censused: **2 of the words track's 337 renderings move and 335 are byte-identical**, the two
+being exactly the `page` pair, `027` going 9.48 → **4.61** worst-page `diff%` and `028` 16.78 →
+**14.18**. No gate column can see a frame's position, and `|ink|%` rises on both (0.56 → 0.73, 3.32 →
+3.60) because it is signed per region before the page's absolute value — a frame moving *into* place
+cancels less than one sitting 72 pt away, which is worth knowing before reading that column as a
+regression.
+**`PAGE_PRINT_AREA_TOP` shares `PAGE_FRAME`'s branch and is deliberately left**: no corpus DOCX pairs
+a `topMargin` relation with an embedded object, and the band's height under following is unmeasured.
+`probes/pagev-r192/results.md`.
+
+---
+
+*What follows is the round that measured the displacement and could not explain it. Read it for the
+refutation in its second paragraph, which is correct and is exactly why the rule is not "page means
+margin".*
+
+Measured, mechanism not found, **not implemented**. On `028_Unit_Circle_Chart_Optimized_Graph`
+26.2.4.2 places the chart's `<wp:positionV relativeFrom="page"><wp:posOffset>` **71.6 pt lower
+than the offset states** — the frame is the same size and every line of body text agrees to a
+twentieth of a point, so only the frame moves. One-attribute variants
+(`probes/ofpie-r190/variants.py`) put the rule beyond doubt: `margin` renders identically to
+`page`; offset 0 gives 72.36 and offset −36 gives 36.36, so it is linear and not a clamp at the
+margin; offset −200 gives 0.36, so it *is* clamped to the page; and the base tracks
+`w:pgMar/@w:top` one for one — `w:top="0"` renders it exactly where this tree does.
+**`layoutInCell="0"` also renders it exactly where this tree does**, although the object is not
+in a table and `IsInTable()` guards every place `GraphicImport` acts on that attribute
+(`GraphicImport.cxx`:777-788, `:1315-1317`).
+
+**The general rule is the page edge and this tree is right about it**, which is what kept this
+from being "fixed": `probes/ofpie-r190/page-anchor-fixture.py` builds a minimal DOCX — one
+`wps:wsp` at `relativeFrom="page"`, `layoutInCell="1"`, and a `word/settings.xml` so the OOXML
+compatibility defaults apply — and 26.2.4.2 draws it at the page's own top edge at both
+`w:top="1440"` and `w:top="2880"`. So `028` meets a second condition the fixture does not
+reproduce. Reach if anyone takes it: **16 corpus DOCX, 41 page-relative vertical offsets**
+(`probes/ofpie-r190/census-pagev.py`). **Do not implement "page means margin" from the corpus
+document alone** — the fixture refutes it.
+
+*That second condition is the object kind, and the 41-offset figure is the wrong denominator for it:
+the rule needs an **embedded** object, of which the corpus holds 5. And one row of that round's variant
+table does not reconcile — it gives `layoutInCell="0"` a frame top of 214.94 and `w:top="0"` one of
+175.86 while annotating both "i.e. ours", where 247.86 − 175.86 is exactly the 72.00 the mechanism
+predicts and 247.86 − 214.94 is 32.92. The `w:top` linearity is sound and the 214.94 is not settled;
+re-measure it from the PDFs before using the `incell0` variant as a control.*
+
+### A chart sweep's worst page is not the chart's, and "the line break charges its trailing blank" is refuted
+
+**Two findings from one page, and the first is about instruments.** The chart-type sweep ranked
+`Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final.pptx` at 18.08 `diff%` and a task carried
+that as a `barChart` seat. **The deck's one chart is on slide 30, which scores 5.38**; the 18.08
+is slide **37**, a bulleted text slide, and 15.91 is slide 13. *A sweep that ranks a document on
+its worst page attributes that page to whatever the document was selected for* — census which
+page the feature is on before working the number.
+
+**The second is a negative result, and it was implemented and measured before it was refuted, so
+do not re-derive it.** Slide 37's body placeholder is
+`<a:off x="609599"/><a:ext cx="11012681"/>`, right edge **915.14 pt**. Our line
+`One transceiver will be active while the other transceiver` ends at 906.82 and we keep it; the
+reference breaks before the last word. It is not metrics at the scale of a word — five identical
+lines measure the same on the two sides to **0.6 pt**. Rewriting `cx` alone
+(`probes/slidewrap-r190/widths.py`) puts the boundary between a right edge of **915.0**, where the
+reference still breaks, and **915.6**, where it keeps the word; the kept line's own extent with its
+trailing blank is **915.70** and without it 906.82. **Read alone that says the blank is charged.
+It is wrong, and the reason is that the placeholder is not the text area.**
+
+***The master states a 7.2 pt right inset and both renderers honour it.***
+`<a:bodyPr vert="horz" lIns="0" tIns="45720" rIns="91440" bIns="45720" rtlCol="0">` on the
+master's body placeholder; the slide's own and the layout's are bare `<a:bodyPr/>`. So the
+available width is **859.94**, our visible candidate is 858.83, it fits by **1.11 pt**, and the
+reference breaks it anyway. Sweeping that one attribute (`insets.py`) brackets how much more than
+its visible text a line must be given: the reference keeps the word at `rIns` 6.3 pt and breaks it
+at 7.2, so the residue is **1.11 to 2.01 pt — about 0.2% of the line**, against a trailing blank
+of **8.26 pt**. Four times too small.
+
+***And charging the blank regresses the slides track, which is the measurement that settles it.***
+`LineFiller.chargesTrailingBlanks` was written, `SlideTextLayout` set it, and on slide 37 it is
+exact — all thirteen of our baselines become the reference's to the hundredth. Over the track:
+**210 of 302 documents move**, and against a freshly rendered 26.2.4.2 the summed worst-page
+`diff%` goes **1750.8 → 1950.8**, every page's summed `diff%` **15405.8 → 16839.0**, MAJOR pages
+**280 → 401**, and **16 documents improve against 109 worse**. Both formats regress and the worst
+movers are large (4.79 → 16.01, 8.45 → 18.68, 9.63 → 19.30) — an extra line tipping a body into
+autofit where the reference does not shrink. **Reverted; nothing in `dotnet/src` carries it.** The
+residue may not be a rule at all: 0.2% on one line is the same order as the ±0.6 pt spread the
+five agreeing lines already show, and "the reference measured this line a little wider" would
+explain the track result exactly.
+
+***The leading difference on that page is a consequence, not a second defect.*** The extra line
+tips the body past its autofit box, so the reference takes `constScaleLevels[0]` —
+`{1.000, 1.000, 1.0, 0.9}`, font unscaled and **spacing 0.9**, applied as
+`nHeight = round(GetHeight() * fSpacingY)` in the `InterLineSpaceRule::Off` arm
+(`editeng/source/editeng/impedit3.cxx`:1584-1600) — and draws a 28.15 pt pitch where we draw
+31.27 at the same 25.99 pt size, `31.27 × 0.9 = 28.14`. Widen the placeholder by 1 pt and the
+reference draws our two lines at our exact baselines, 241.97 and 274.68. **A page that reads as
+wholly displaced can be one word's worth of wrap plus an autofit that followed it; measure the
+line count before the pitch.**
 
 ### Stored evidence decays silently, and the prose knows it while the data does not
 

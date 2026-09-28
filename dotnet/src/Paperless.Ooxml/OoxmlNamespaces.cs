@@ -15,6 +15,20 @@ public static class OoxmlNamespaces
     /// <summary>WordprocessingML, transitional.</summary>
     public const string WordprocessingML = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
+    /// <summary>
+    /// Office MathML — the namespace a formula's own elements live in.
+    /// </summary>
+    /// <remarks>
+    /// Worth a constant of its own because an OMML subtree sits <em>inside</em> a
+    /// <see cref="WordprocessingML"/> paragraph and shares local names with it: <c>m:r</c> and
+    /// <c>m:t</c> against <c>w:r</c> and <c>w:t</c>. A walk that switches on the local name alone
+    /// therefore reads a formula as ordinary text, draws the concatenation of its leaves on the body
+    /// baseline, and silently loses every mark a construct generates rather than states — a fraction's
+    /// rule, a radical sign, an n-ary operator, a delimiter. Measured on
+    /// <c>ABCD-FE-01-00 Flight Envelope</c>, which holds 54 <c>m:oMath</c> and 22 <c>m:oMathPara</c>.
+    /// </remarks>
+    public const string OfficeMath = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+
     /// <summary>SpreadsheetML, transitional.</summary>
     public const string SpreadsheetML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 

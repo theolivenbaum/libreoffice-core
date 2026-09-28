@@ -610,8 +610,10 @@ internal static class WordParagraphFormats
             styles.ResolveRunProperty("smallCaps", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty highlight =
             styles.ResolveRunProperty("highlight", runProperties, styleId, characterStyleId, tableStyleRunProperties);
-        WordProperty underline =
-            styles.ResolveRunProperty("u", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        // Not `ResolveRunProperty`: a `w:u` stating no `w:val` is transparent rather than an
+        // underline, so the search has to see every layer. See `WordCharacterFormat.UnderlineOf`.
+        List<XElement> underline = styles.RunPropertyLayers(
+            "u", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty strike =
             styles.ResolveRunProperty("strike", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty doubleStrike =

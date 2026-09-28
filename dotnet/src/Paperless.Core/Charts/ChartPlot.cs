@@ -1559,6 +1559,34 @@ public sealed partial record ChartPlot
     public bool Rings { get; init; }
 
     /// <summary>
+    /// The elevation a three-dimensional pie is seen from, in degrees, or null for a flat one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:view3D/c:rotX</c> on a <c>c:pie3DChart</c>. <c>View3DConverter::convertFromModel</c>
+    /// clamps it to <c>[0, 90]</c>, defaults it to <strong>15</strong> and subtracts 90 to get
+    /// chart2's <c>RotationHorizontal</c>
+    /// (<c>oox/source/drawingml/chart/plotareaconverter.cxx</c>:273-278, this tree); the value
+    /// kept here is the OOXML one, so 90 is straight down and 0 is edge on.
+    /// </para>
+    /// <para>
+    /// <strong>Only a pie has one.</strong> The corpus holds no <c>bar3DChart</c>,
+    /// <c>line3DChart</c>, <c>area3DChart</c> or <c>surface3DChart</c> at all — three documents
+    /// carry a <c>pie3DChart</c> and nothing else is three-dimensional — so this models the one
+    /// 3-D chart there is anything to measure against. See <c>probes/pie3d-r187</c>.
+    /// </para>
+    /// <para>
+    /// <strong>26.2.4.2 rasterises a 3-D chart</strong>, which is why its geometry had to be read
+    /// out of a bitmap rather than out of the PDF's operators: the whole solid arrives as one
+    /// <c>Do</c> of an RGB image with a soft mask, and only the labels and the chart's frame are
+    /// drawn as operators. The consequence for a comparison is that our vector rendering can
+    /// never be byte-equal to it, and the consequence for this property is that the measurement
+    /// behind it is a silhouette fit.
+    /// </para>
+    /// </remarks>
+    public double? Elevation { get; init; }
+
+    /// <summary>
     /// The chart's own coordinate space, when the file states one.
     /// </summary>
     /// <remarks>

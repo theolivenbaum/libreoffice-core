@@ -54,6 +54,20 @@ mkdir -p "$OUT" && OUT="$(cd "$OUT" && pwd)"
 DIFF="$REPO/.claude/skills/render-comparison/scripts/pdf-image-diff.py"
 [ -f "$DIFF" ] || { echo "no pdf-image-diff.py at $DIFF" >&2; exit 1; }
 
+# Which soffice is the reference. `$REF_SOFFICE` wins; otherwise whatever is on PATH.
+#
+# This script hard-coded `soffice` for its whole life while its sibling `batch-check.sh`
+# honoured the variable and announced the resolved version -- so an ink sweep run beside a
+# gate sweep silently scored against a DIFFERENT BINARY, and said nothing. On this machine
+# PATH is 24.2.7.2 and the tree is calibrated to 26.2.4.2: measured on `words/done-005`,
+# `f445896e…docx` is 15 pages against 24.2.7.2's 16 and against 26.2.4.2's 15, so the sweep
+# banked a `pages` failure for a document that matches. The wrong reference does not fail; it
+# answers a different question fluently. Announce it, so the run says which one it is.
+REF="${REF_SOFFICE:-soffice}"
+command -v "$REF" >/dev/null || { echo "no soffice at $REF" >&2; exit 1; }
+echo "measuring $CLI" >&2
+echo "reference $(command -v "$REF") -- $("$REF" --version 2>/dev/null | head -1)" >&2
+
 mkdir -p "$OUT/ours" "$OUT/ref" "$OUT/cmp"
 : > "$OUT/rows.tsv"
 : > "$OUT/ink.tsv"
@@ -65,11 +79,20 @@ mkdir -p "$OUT/ours" "$OUT/ref" "$OUT/cmp"
 # with every batch-check sweep. A sweep whose verdict column is a different metric from the
 # scoreboard's looks exactly like a regression. Emits "<words> <rawwords>"; the raw figure is
 # kept as the last TSV column so an old run under this script is still reconcilable.
-words_of() {  # words_of <pdf> -> "<words> <rawwords>"
+words_of() {  # words_of <pdf> -> "<words> <rawwords> <glyphs>"
+  # Verbatim from `batch-check.sh`, and it has to stay verbatim: for its whole life this
+  # script carried its own older copy, returning tokens alone, and its verdict column was
+  # therefore the PRE-2026-09-05 gate -- the token rule with a floor of 3 -- while the
+  # scoreboard had moved to alphanumeric characters with a floor of 15. Two gates under one
+  # column name, which is the trap this file's own header warns about for the ink columns.
+  # Measured on the words track: 322 rows `match` under the old rule against 329 under the
+  # new one, a seven-row disagreement that is the rule and not the tree.
   pdftotext "$1" - 2>/dev/null | python3 -c '
 import sys
-t = sys.stdin.buffer.read().decode("utf-8", "replace").split()
-print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t))'
+b = sys.stdin.buffer.read().decode("utf-8", "replace")
+t = b.split()
+print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t),
+      sum(1 for c in b if c.isalnum()))'
 }
 
 # shellcheck disable=SC2086  # the glob is meant to expand
@@ -155,21 +178,21 @@ one() {  # one <index>
       cp -f "$REFDIR/$id.pdf" "$r"
     else
       rm -rf "$OUT/t$idx"; mkdir -p "$OUT/t$idx"
-      timeout 300 soffice -env:UserInstallation="file://$prof" \
+      timeout 300 "$REF" -env:UserInstallation="file://$prof" \
         --headless --convert-to pdf --outdir "$OUT/t$idx" "$f" >/dev/null 2>&1
       [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
     fi
 
-    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"
+    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"; og="-"; rg="-"
     if [ -f "$o" ]; then
       op=$(pdfinfo "$o" 2>/dev/null | awk '/^Pages/{print $2}')
-      read -r ow owraw < <(words_of "$o")
+      read -r ow owraw og < <(words_of "$o")
       of=$(pdffonts "$o" 2>/dev/null | tail -n +3 | grep -c .)
       un=$(pdffonts "$o" 2>/dev/null | tail -n +3 | awk 'NF>=8 && $(NF-4)=="no"' | wc -l)
     fi
     if [ -f "$r" ]; then
       rp=$(pdfinfo "$r" 2>/dev/null | awk '/^Pages/{print $2}')
-      read -r rw rwraw < <(words_of "$r")
+      read -r rw rwraw rg < <(words_of "$r")
       rf=$(pdffonts "$r" 2>/dev/null | tail -n +3 | grep -c .)
     fi
 
@@ -179,23 +202,27 @@ one() {  # one <index>
     else
       v=""
       [ "$op" = "$rp" ] || v="pages"
-      if [ "$rw" -gt 0 ] 2>/dev/null; then
-        awk -v a="$ow" -v b="$rw" 'BEGIN{d=(a>b?a-b:b-a); exit !(d > b*0.02 && d > 3)}' \
+      # The gate's own rule, `batch-check.sh`:298-302: alphanumeric CHARACTERS, band
+      # max(2%, 15). Not tokens with a floor of 3, which is what stood here.
+      if [ "$rg" -gt 0 ] 2>/dev/null; then
+        awk -v a="$og" -v b="$rg" 'BEGIN{d=(a>b?a-b:b-a); exit !(d > b*0.02 && d > 15)}' \
           && v="${v:+$v,}words"
-      elif [ "${ow:-0}" -gt 3 ]; then v="${v:+$v,}words"
+      elif [ "${og:-0}" -gt 15 ]; then v="${v:+$v,}words"
       fi
       [ "${un:-0}" = "0" ] || v="${v:+$v,}unembedded"
       [ -n "$v" ] || v="match"
     fi
 
-    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\n" \
+    # `glyphs` last, after `rawwords`, exactly as `batch-check.sh` appends it: every reader
+    # that reaches for an existing column keeps working and the two files stay joinable.
+    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\t%s/%s\n" \
       "${f#"$ROOT_DIR"/}" "${ext,,}" "$op" "$rp" "$ow" "$rw" "$of" "$rf" "$un" "$v" \
-      "$owraw" "$rwraw" >> "$OUT/rows.tsv"
+      "$owraw" "$rwraw" "$og" "$rg" >> "$OUT/rows.tsv"
 
     # Ink, whenever both sides rendered and the page counts agree. The tool refuses a
     # document whose counts differ, and rightly: page 3 against a different page 3 makes
     # every region it reports an artefact.
-    ink="-"; sink="-"; major="-"; pages="-"
+    ink="-"; sink="-"; major="-"; pages="-"; drift="-"; worst="-"; mean="-"
     if [ -f "$o" ] && [ -f "$r" ] && [ "$op" = "$rp" ]; then
       rm -rf "$OUT/c$idx"
       timeout 900 python3 "$DIFF" "$o" "$r" --outdir "$OUT/c$idx" > "$OUT/cmp/$id.txt" 2>&1
@@ -205,14 +232,34 @@ one() {  # one <index>
             "$OUT/cmp/$id.txt")
       sink=$(awk -F'\t' '$1 ~ /^[0-9]+$/ && $3 ~ /^-?[0-9.]+$/ {s+=$3} END{printf "%.2f", s}' \
             "$OUT/cmp/$id.txt")
+      # `abs_ink` is a SUM, so it is weighted by length: a 44-page document averaging 0.23 %
+      # a page outranks a one-page chart that is 5.18 % wrong. Round 183 spent most of a
+      # round on `docs-quality-MA.IMS.00001` for that reason -- it headed the `drift`-free
+      # ranking at 10.22 and its mean is 0.23, which is the raster floor. So the worst single
+      # page and the mean are written beside the sum, and the worst page is what says whether
+      # a document holds a defect worth chasing.
+      worst=$(awk -F'\t' '$1 ~ /^[0-9]+$/ && $4 ~ /^[0-9.]+$/ {if ($4+0 > m) m=$4+0}
+                           END{printf "%.2f", m}' "$OUT/cmp/$id.txt")
+      mean=$(awk -F'\t' '$1 ~ /^[0-9]+$/ && $4 ~ /^[0-9.]+$/ {s+=$4; n++}
+                          END{printf "%.2f", (n ? s/n : 0)}' "$OUT/cmp/$id.txt")
       major=$(awk '/pages, .* with major differences/{print $3}' "$OUT/cmp/$id.txt")
+      # How many pages hold content the reference puts on a different page. Equal page counts
+      # do not prove alignment: a block lost early and made up later leaves every page between
+      # compared against its neighbour, and its ink is then measuring the offset. The warning
+      # is on stderr, which the redirect above already folds into the report.
+      drift=$(awk '/^WARNING: [0-9]+ of [0-9]+ pages hold different content/{print $2; exit}' \
+              "$OUT/cmp/$id.txt")
+      [ -n "$drift" ] || drift=0
       pages="$op"
       [ -n "$ink" ] || ink="?"
       [ -n "$sink" ] || sink="?"
       [ -n "$major" ] || major="?"
+      [ -n "$worst" ] || worst="?"
+      [ -n "$mean" ] || mean="?"
     fi
-    printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
-      "${f#"$ROOT_DIR"/}" "$pages" "$ink" "$sink" "$major" "$v" >> "$OUT/ink.tsv"
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+      "${f#"$ROOT_DIR"/}" "$pages" "$worst" "$mean" "$ink" "$sink" "$major" "$drift" "$v" \
+      >> "$OUT/ink.tsv"
   done
 }
 
@@ -221,13 +268,22 @@ wait
 
 {
   printf "# words = tokens carrying at least one Unicode letter or digit; rawwords = pdftotext | wc -w\n"
-  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\n"
+  printf "# glyphs = alphanumeric characters, ours/reference -- THIS is what the verdict uses\n"
+  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\tglyphs\n"
   sort "$OUT/rows.tsv"
 } > "$OUT/parity.tsv"
 {
-  printf "# abs_ink = sum of the per-page UNSIGNED |ink|%% column -- rank the track on this one\n"
+  printf "# worst = the WORST single page's unsigned |ink|%% -- RANK THE TRACK ON THIS ONE\n"
+  printf "# mean  = the same column averaged over the pages. Below about 0.3 is the raster\n"
+  printf "#         floor for a text-heavy document and says the document holds no defect.\n"
+  printf "# abs_ink = the same column SUMMED, so it is weighted by length: a 44-page document\n"
+  printf "#         at 0.23 a page outranks a one-page chart that is 5.18%% wrong, and it is\n"
+  printf "#         the chart that has the defect. Use it for a track total, not for a ranking.\n"
   printf "# signed_ink = sum of the per-page SIGNED ink%% column -- decide direction on this one\n"
-  printf "path\tpages\tabs_ink\tsigned_ink\tmajor\tverdict\n"
+  printf "# drift = pages holding content the reference puts elsewhere. NON-ZERO VOIDS THE INK:\n"
+  printf "#         those pages are compared against the wrong page, so one lost page reads as\n"
+  printf "#         hundreds of defects. Explain the pagination before ranking such a row.\n"
+  printf "path\tpages\tworst\tmean\tabs_ink\tsigned_ink\tmajor\tdrift\tverdict\n"
   sort "$OUT/ink.tsv"
 } > "$OUT/ink.tsv.tmp" && mv -f "$OUT/ink.tsv.tmp" "$OUT/ink.tsv"
 
@@ -241,8 +297,9 @@ echo "TOTAL $total  MATCH $match  REF-CANNOT-RENDER $reffail"
 # page figures can never exceed the sum of the same pages taken unsigned; if it does, the
 # two columns were not read off the same pages and no ranking built on them means anything.
 awk -F'\t' '/^#/ || $1=="path" {next}
-            $3!="-" && $3!="?" {a+=$3; s+=$4; m+=$5; n++}
-            END{printf "ABS-INK %.2f (unsigned |ink|%%, ranks)  SIGNED-INK %.2f (ink%%, direction)  MAJOR PAGES %d  over %d documents\n", a, s, m, n;
+            $5!="-" && $5!="?" {a+=$5; s+=$6; m+=$7; n++; if ($3+0 > w) { w=$3+0; wd=$1 }}
+            END{printf "ABS-INK %.2f (unsigned |ink|%%, a track total)  SIGNED-INK %.2f (ink%%, direction)  MAJOR PAGES %d  over %d documents\n", a, s, m, n;
+                printf "WORST PAGE %.2f (unsigned |ink|%%, RANKS) on %s\n", w, wd;
                 if ((s<0?-s:s) > a + 0.01)
                   printf "INVARIANT VIOLATED: |signed| %.2f > unsigned %.2f\n", (s<0?-s:s), a}' "$OUT/ink.tsv"
 echo "TSV $OUT/parity.tsv  $OUT/ink.tsv"

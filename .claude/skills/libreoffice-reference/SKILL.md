@@ -54,6 +54,39 @@ It checks four things, in order of how badly each will mislead you:
 4. **A PDF rasteriser exists.** `pdftoppm` from `poppler-utils`. Only needed for image
    comparison, not for text.
 
+## Which soffice: `REF_SOFFICE`, and every script here honours it
+
+**This machine has two, they disagree, and PATH is the wrong one.** `/usr/bin/soffice` is
+**24.2.7.2**; the tree is calibrated to **26.2.4.2**, which is the TDF tarball at
+`/opt/libreoffice26.2/program/soffice`. Set the variable for anything whose number you intend
+to keep:
+
+```sh
+export REF_SOFFICE=/opt/libreoffice26.2/program/soffice
+```
+
+Every script in this skill, in `render-comparison` and in `corpus-batches` now reads it and
+**prints the resolved path and version as its first line of output**. Read that line before
+you read the numbers.
+
+**Until round 180 only two of them did.** `batch-check.sh` and `verdict.py` honoured an
+override; `track-ink-sweep.sh`, `ref-baseline.sh`, `corpus-parity.sh`, `look.py`,
+`first-divergence.py`, `line-anatomy.py`, `lo-convert.sh` and `lo-extract.sh` hard-coded
+`soffice` and said nothing — so the *ink* sweep, the reference *bank*, and the tool the
+`page-vision` skill tells you to use for every page reading all silently scored against
+24.2.7.2 beside a gate sweep scoring against 26.2.4.2.
+
+The two really do disagree, so this is not hygiene:
+
+| | 24.2.7.2 | 26.2.4.2 |
+|---|---:|---:|
+| `f445896eb008d14c1746fc37d412dc22.docx` | **16 pages** | **15** |
+
+`track-ink-sweep.sh` over `words/done-005` reported `TOTAL 10 MATCH 9` on PATH and
+`TOTAL 10 MATCH 10` with the variable set — one banked failure for a document that matches —
+and that document's summed unsigned ink went 5.47 to 0.04 on a neighbouring row.
+**The wrong reference does not fail; it answers a different question fluently.**
+
 ## The four gotchas that will cost you an hour each
 
 These are all verified behaviours of `soffice --convert-to`, not folklore.

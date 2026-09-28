@@ -874,6 +874,35 @@ public static partial class SlideTextLayout
     /// pen and the two overlap — legible on the page, and one word short per line to anything
     /// reading the text back, because the bullet and the first word extract as one token.
     /// </para>
+    /// <para>
+    /// <strong>The width is the marker's at its UNSCALED size, although it is drawn at the fit's.
+    /// </strong> <c>Outliner::ImplGetBulletSize</c> measures the bullet once and caches it on the
+    /// paragraph (<c>editeng/source/outliner/outliner.cxx</c>:1386-1424,
+    /// <c>pPara->SetBulletSize(aSize, aScalingParameters)</c>), and that cache is filled before the
+    /// autofit search runs — so the <em>whole</em> cached size, width as well as height, is the
+    /// unfitted one. <see cref="BulletBoxHeight"/> already takes the height that way, for the same
+    /// reason and with its own measurement; this is the width half of one rule.
+    /// </para>
+    /// <para>
+    /// Measured on <c>Sector_Skills_Insights_Advanced_Manufacturing_summary_slide_pack.pptx</c>
+    /// page 13, whose master states <c>lvl2 marL="742950" indent="-285750"</c> — a 58.5 pt margin
+    /// with the bullet 22.5 pt to its left — and whose runs state <strong>56 pt</strong> under a
+    /// <c>normAutofit</c> that draws them at 14. Its en-dash bullet is 0.5562 em, so 31.13 pt at 56
+    /// and 7.79 at 14: 26.2.4.2 starts every second-level first line 31.13 pt past the bullet, and
+    /// this tree started it at the 22.5 pt margin. Pinned over twelve one-attribute variants of that
+    /// one master (<c>probes/slidebullet-r191</c>): four hanging indents, two margins, three bullet
+    /// characters (<c>–</c> 31.13, <c>W</c> 52.87, <c>i</c> clamped to the margin) and three stated
+    /// run sizes (28 pt clamped, 56 → 31.13, 112 → 62.25, against 15.57, 31.14 and 62.29 predicted)
+    /// — every one exact, and the bullet's own stated <c>sz</c> and the file's <c>fontScale</c> both
+    /// decide nothing, the latter because LibreOffice recomputes the autofit rather than honouring
+    /// it.
+    /// </para>
+    /// <para>
+    /// It is a cascade rather than a shift: on that page our line fits 94 glyphs where the
+    /// reference's fits 92, so a two-line paragraph becomes three and everything below drops one
+    /// pitch — <c>diff%</c> 15.93 at <c>|ink|%</c> 0.14, which is the signature of a page where
+    /// nothing is drawn differently and a great deal is drawn in the wrong place.
+    /// </para>
     /// </remarks>
     private static Length MarkerReach(
         SlideParagraph paragraph, Scaling scaling, SlideFonts fonts)
@@ -886,7 +915,7 @@ public static partial class SlideTextLayout
         }
         else if (Shaped(paragraph, scaling, fonts) is { Shaped: { } shaped } marked)
         {
-            width = shaped.Width(marked.Size);
+            width = shaped.Width(Unscaled(paragraph, marked));
         }
         else
         {
@@ -898,6 +927,33 @@ public static partial class SlideTextLayout
         Length reach = paragraph.FirstLineIndent + width;
         return reach > Length.Zero ? reach : Length.Zero;
     }
+
+    /// <summary>
+    /// The size the marker's cached width was measured at, which is its size before the fit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A generated number takes the size it is drawn at, and one corpus deck says so.</strong>
+    /// <c>30-04-2021 merged NDoH and NICD_Presentation HBV BD meeting 05May2021_1.pptx</c> page 9
+    /// numbers its second level, and 26.2.4.2 starts those five first lines at the margin — 62.90 pt,
+    /// which is what this tree drew before the rule and 2.84 pt left of what it drew after it. The
+    /// reading that fits is <c>Paragraph::IsBulletInvalid</c>, which compares the bullet's own text
+    /// as well as the scaling parameters: a generated number differs per paragraph, so the cache is
+    /// refilled while the search already has a scale, where a fixed character never changes and is
+    /// measured once, before it.
+    /// </para>
+    /// <para>
+    /// Falls back to the size the marker is drawn at when the paragraph has no run to take a size
+    /// from, which <see cref="Shaped"/> has already made impossible — it returns null for an empty
+    /// run list — so the fallback is there to keep this total rather than to be reached.
+    /// </para>
+    /// </remarks>
+    /// <param name="paragraph">The paragraph the marker labels.</param>
+    /// <param name="marked">Its shaped marker.</param>
+    private static Length Unscaled(SlideParagraph paragraph, MarkedParagraph marked)
+        => marked.Marker.IsSymbol && paragraph.Runs.Count > 0
+            ? ScaledMarker(Scaling.None, paragraph.Runs[0].Size, marked.Marker.Scale)
+            : marked.Size;
 
     /// <summary>
     /// The picture a paragraph's marker is, when it has one and the paragraph draws it.

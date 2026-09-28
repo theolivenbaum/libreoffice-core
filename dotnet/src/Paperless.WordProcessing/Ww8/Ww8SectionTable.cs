@@ -106,7 +106,24 @@ internal static class Ww8SectionTable
     /// sections are different in following properties, Word will interpret a continuous section break
     /// between them as if it was a section break next page."</em> An incompatible continuous section does
     /// get its own page descriptor, and giving a node a page descriptor in Writer starts a page — so the
-    /// break is promoted rather than honoured.
+    /// break is promoted rather than honoured. <b>That promotion is the whole of what this does.</b>
+    /// </para>
+    /// <para>
+    /// <strong>Carrying the sheet and the vertical margins forward is <see cref="Layout.ContinuousPageDescriptors"/>'s
+    /// job and not this one</strong>, and doing it here as well was wrong rather than merely redundant.
+    /// A continuous section that states furniture of its own <em>does</em> get a descriptor — hung on the
+    /// first hard page break inside it, which is the <em>"nightmare scenario"</em> arm of
+    /// <c>InsertSegments</c> — and that descriptor carries the section's own vertical margins.
+    /// <c>Resolve</c> already declines to inherit in exactly that case, and this pass had overwritten the
+    /// margins before it could.
+    /// </para>
+    /// <para>
+    /// Measured on <c>words/done-014/doc/PK_FlugzeugeStricken.doc</c>, whose second section is
+    /// continuous, states its own running head and states <c>sprmSDyaTop</c> = 1701 twips against the
+    /// first section's 1417. Patching that 1701 to 2500 moves the reference's body from 85.08 pt to
+    /// 125.03 and repaginates it from 7 pages to 11, and moved <b>nothing at all</b> here: the squash had
+    /// already replaced it with 1417, and our body sat at 70.88 pt on every one of pages 3 to 7 — 14.20 pt
+    /// too high, which is two extra lines by page 6.
     /// </para>
     /// <para>
     /// Measured on <c>foca_form_1.doc</c>, whose second section is continuous, begins inside the opening
@@ -129,31 +146,7 @@ internal static class Ww8SectionTable
             if (!SameSheet(section.Page, carried))
             {
                 sections[i] = section with { Break = SectionBreak.NextPage };
-                continue;
             }
-
-            sections[i] = section with
-            {
-                Page = section.Page with
-                {
-                    Size = carried.Size,
-                    IsLandscape = carried.IsLandscape,
-                    HasMirroredMargins = carried.HasMirroredMargins,
-                    HeaderDistance = carried.HeaderDistance,
-                    FooterDistance = carried.FooterDistance,
-                    HeaderHeight = carried.HeaderHeight,
-                    FooterHeight = carried.FooterHeight,
-
-                    // The left and right margins are the exception, and they are an exception in
-                    // LibreOffice too: a text section takes them as an indent relative to the page's own,
-                    // which narrows the text area by exactly the difference.
-                    Margins = section.Page.Margins with
-                    {
-                        Top = carried.Margins.Top,
-                        Bottom = carried.Margins.Bottom,
-                    },
-                },
-            };
         }
     }
 

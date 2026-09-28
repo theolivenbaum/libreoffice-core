@@ -249,7 +249,8 @@ public static class DrawingChartPlot
         IReadOnlyList<string?> orderedCategories = categories;
         IReadOnlyList<ChartSeries> orderedSeries = series;
 
-        ChartDateAxis? dateAxis = DateAxisOf(chartSpace, axes.Category, categoryValues);
+        ChartDateAxis? dateAxis =
+            DateAxisOf(chartSpace, axes.Category, axes.Crossing, categoryValues);
         if (dateAxis is not null)
         {
             (dateAxis, orderedCategories, orderedSeries) =
@@ -283,6 +284,15 @@ public static class DrawingChartPlot
             // A doughnut is a pie of concentric rings; the element name is the whole of the file's
             // statement, since c:holeSize reaches nothing in the reference. See ChartPlot.Rings.
             Rings = group.Name.LocalName == "doughnutChart",
+
+            // The one three-dimensional chart there is anything to measure — see
+            // ChartPlot.Elevation. `c:depthPercent` is deliberately not read: rendering the same
+            // document at 20, 50, 100 and 200 gives 26.2.4.2 byte-identical geometry at every
+            // one of nine elevations, because the pie branch of View3DConverter never passes it
+            // on. probes/pie3d-r187.
+            Elevation = group.Name.LocalName == "pie3DChart"
+                ? Math.Clamp(Number(Child(Child(chart, "view3D"), "rotX")) ?? 15.0, 0.0, 90.0)
+                : null,
             Direction = Value(Child(group, "barDir")) == "bar"
                 ? ChartBarDirection.Bar
                 : ChartBarDirection.Column,
@@ -843,9 +853,12 @@ public static class DrawingChartPlot
     /// </remarks>
     /// <param name="chartSpace">The <c>c:chartSpace</c>, for <c>c:date1904</c>.</param>
     /// <param name="axis">The category axis element, or null when the chart has none.</param>
+    /// <param name="crossing">
+    /// The value axis this one crosses, which is where <c>c:crossBetween</c> is stated.
+    /// </param>
     /// <param name="values">The category cells read as numbers.</param>
     private static ChartDateAxis? DateAxisOf(
-        XElement chartSpace, XElement? axis, double?[] values)
+        XElement chartSpace, XElement? axis, XElement? crossing, double?[] values)
     {
         if (axis is null || !Is(axis, "dateAx") || values.Length == 0) return null;
 
@@ -875,8 +888,28 @@ public static class DrawingChartPlot
             TimeUnitOf(Value(Child(axis, "baseTimeUnit"))),
             Flag(chartSpace, "date1904") == true
                 ? SpreadsheetDateSystem.Date1904
-                : SpreadsheetDateSystem.Date1900);
+                : SpreadsheetDateSystem.Date1900,
+            ShiftedCategoriesOf(crossing));
     }
+
+    /// <summary>
+    /// Whether the categories sit between the ticks rather than on them.
+    /// </summary>
+    /// <remarks>
+    /// <c>AxisConverter::convertFromModel</c> reads it off the *crossing* axis — the value axis —
+    /// as <c>mnCrossBetween == XML_between</c>, and defaults it to true for a bar, line or stock
+    /// group when the attribute is absent
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx</c>:292-301). The two type overrides
+    /// above that test, a 3-D bar and a radar, are not modelled here: no corpus chart pairs
+    /// either with a date axis.
+    /// </remarks>
+    private static bool ShiftedCategoriesOf(XElement? crossing)
+        => Value(Child(crossing, "crossBetween")) switch
+        {
+            "between" => true,
+            "midCat" => false,
+            _ => true,
+        };
 
     /// <summary>The three <c>ST_TimeUnit</c> spellings, or null when the element is absent.</summary>
     private static ChartTimeUnit? TimeUnitOf(string? stated) => stated switch

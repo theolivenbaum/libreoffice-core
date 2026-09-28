@@ -270,10 +270,19 @@ Across the whole document **156 tokens are ours alone against 39 the reference's
 **`words` cannot be won on this document**, and ours is the better output: a reader can search our
 formulas and cannot search LibreOffice's.
 
-**It also fails `pages`, 14 against 15, and that is NOT excused by this.** A ceiling explains an
-extractable-text difference, not a pagination one. The page-4 row pitch is identical in both
-(13.4 pt), so the formulas are not taller or shorter there; where the pagination actually diverges
-has not been established. Recording it here is a statement about the `words` column only.
+**It also fails `pages`, and that is NOT excused by this.** A ceiling explains an
+extractable-text difference, not a pagination one.
+
+***Established, and half of it is closed.*** *Where the pagination diverges is the OMML line
+height, and the page-4 row pitch that said otherwise was measured on the one page whose formulas
+are all single rows — the rule is that the reference reserves the StarMath **object's** height and
+we reserved our own text's, which agree for a bare `x` and are 15 pt apart for a fraction.
+`OfficeMathBox` is that height; the document goes **14 pages to 15** against the reference's 16,
+pages 1 to 10 now align, and the near-empty page 7 the reference draws is drawn. See
+`probes/mathheight-r165/results.md` and `probes/blankpage-r163/results.md` §4. **The remaining page
+is a different defect** — the reference keeps the gust-load table whole on its page 12 and we split
+it across ours 11 and 12 (`blankpage-r163` §6) — and the `words` column is still a ceiling and
+still cannot be won.*
 
 One real defect was found and fixed while measuring this and is *not* part of the ceiling: the
 document's heading list carries no `w:start`, whose default is zero rather than one, so we numbered

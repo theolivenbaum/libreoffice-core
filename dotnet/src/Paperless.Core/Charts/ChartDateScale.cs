@@ -53,6 +53,13 @@ public readonly record struct ChartTimeInterval(int Number, ChartTimeUnit Unit);
 /// Each category's serial, or null where the category has no value and the chart leaves a gap.
 /// </param>
 /// <param name="Format">The number format the tick labels are written through.</param>
+/// <param name="ShiftedCategories">
+/// Whether a category occupies the unit <em>after</em> its own date rather than straddling it —
+/// <c>ScaleData.ShiftedCategoryPosition</c>, which OOXML states as the crossing value axis'
+/// <c>c:crossBetween</c>. It also decides whether a point exactly at
+/// <paramref name="Maximum"/> is drawn: <c>isStrongLowerRequested</c> makes the upper bound
+/// strict for a shifted axis (<c>chart2/source/view/inc/PlottingPositionHelper.hxx</c>:321-338).
+/// </param>
 public sealed record ChartDateAxis(
     double Minimum,
     double Maximum,
@@ -60,13 +67,39 @@ public sealed record ChartDateAxis(
     ChartTimeInterval MajorInterval,
     IReadOnlyList<double> Ticks,
     IReadOnlyList<double?> CategoryValues,
-    NumberFormatCode? Format)
+    NumberFormatCode? Format,
+    bool ShiftedCategories = false)
 {
     /// <summary>The span the axis covers, never zero.</summary>
     public double Span => Maximum - Minimum == 0.0 ? 1.0 : Maximum - Minimum;
 
     /// <summary>Where a serial sits along the axis, 0 at its start and 1 at its end.</summary>
-    public double Fraction(double value) => (value - Minimum) / Span;
+    /// <remarks>
+    /// <para>
+    /// <strong>A date axis is linear in its own resolution unit and not in days.</strong>
+    /// <c>DateScaling::doScaling</c> (<c>chart2/source/view/axes/DateScaling.cxx</c>:56-91, this
+    /// tree) returns the serial itself only at <see cref="ChartTimeUnit.Day"/>; at
+    /// <see cref="ChartTimeUnit.Month"/> and <see cref="ChartTimeUnit.Year"/> it returns
+    /// <c>year × 12 + month</c> plus the fraction of the month elapsed, under the comment
+    /// <em>"assuming equal count of months in each year"</em>. Months are not of equal length, so
+    /// the two mappings genuinely differ.
+    /// </para>
+    /// <para>
+    /// <strong>How much depends on the span, which is why it hid.</strong> On
+    /// <c>171128IPAP.pptx</c>, 132 months, the difference is under a tenth of a percent and
+    /// invisible. On <c>044_Cash_flow_forecast</c>, twelve monthly points over eleven months,
+    /// 26.2.4.2 spaces the bars at a flat <strong>35.26 pt</strong> and days would give 30.2 to
+    /// 33.4 — measured on the reference's own rendering of the file and of a variant whose axis
+    /// states its range explicitly.
+    /// </para>
+    /// </remarks>
+    public double Fraction(double value)
+    {
+        double from = Units(Minimum);
+        double span = Units(Maximum) - from;
+
+        return span == 0.0 ? 0.0 : (Units(value) - from) / span;
+    }
 
     /// <summary>
     /// Where the category at <paramref name="index"/> sits, or null when it has no value.
@@ -82,6 +115,108 @@ public sealed record ChartDateAxis(
 
     /// <summary>The label a tick carries.</summary>
     public string LabelOf(double tick) => ChartDateScale.Label(tick, Format);
+
+    /// <summary>
+    /// One category's width on this axis, as a fraction of its whole span.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A date axis' category is <strong>one unit of its own time resolution</strong>, not one
+    /// n-th of the points: <c>PlottingPositionHelper::setTimeResolution</c> sets the category
+    /// width to 1 and, at <see cref="ChartTimeUnit.Year"/>, to 12
+    /// (<c>chart2/source/view/main/PlottingPositionHelper.cxx</c>:670-690, this tree) — twelve
+    /// because the axis' own scaling counts months, under that function's comment
+    /// <em>"assuming equal count of months in each year"</em>. Both cases are therefore one
+    /// resolution unit, and this is that unit divided by the span measured in the same unit.
+    /// </para>
+    /// <para>
+    /// Measured on <c>171128IPAP.pptx</c> page 40, whose axis states
+    /// <c>c:min="39814"</c> and <c>c:max="43831"</c> — 132 months — and whose bars 26.2.4.2 draws
+    /// <strong>2.21 pt wide on a 288 pt plot</strong>, which is 288/132 = 2.18 at the chart's own
+    /// gap width. A bar one n-th of 145 points wide would be 1.99 and would be drawn at the wrong
+    /// place besides.
+    /// </para>
+    /// </remarks>
+    public double SlotFraction
+    {
+        get
+        {
+            double units = Units(Maximum) - Units(Minimum);
+            return units > 0.0 ? 1.0 / units : 1.0;
+        }
+    }
+
+    /// <summary>The axis' span, in its own resolution unit.</summary>
+    internal double UnitSpan => Units(Maximum) - Units(Minimum);
+
+    /// <summary>
+    /// Where a point's own date puts the start of its category, or null when it is off the axis.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>BarChart::createShapes</c> rasterises the point's x to the axis' resolution and then
+    /// drops it outright when it falls outside the axis' range — three consecutive
+    /// <c>continue</c>s, before any geometry
+    /// (<c>chart2/source/view/charttypes/BarChart.cxx</c>:694-704). A point on the axis is placed
+    /// at that rasterised date and its category is centred there
+    /// (<c>CategoryPositionHelper::getScaledSlotPos</c>), which is the difference between a date
+    /// axis and an index one.
+    /// </para>
+    /// <para>
+    /// <strong>Where the category sits relative to the point was solved from the reference's own
+    /// renderings, not derived.</strong> <c>CategoryPositionHelper::getScaledSlotPos</c>
+    /// subtracts half a category width unconditionally, but on a shifted axis something adds it
+    /// back — <c>AllowShiftXAxisPos</c> and <c>isStrongLowerRequested</c> are the territory and
+    /// the exact line is not pinned here. What is measured is the result:
+    /// <c>044_Cash_flow_forecast</c> rendered by 26.2.4.2 three times — as authored, with its
+    /// range stated as the data's own, and with a month's margin either side — puts the plot's
+    /// left edge at <strong>414.31 pt in all three</strong> under the leading-edge reading and
+    /// at two different values under the centred one, and its first bar lands within
+    /// <strong>0.02 pt</strong> of the leading-edge prediction. <c>171128IPAP.pptx</c>'s page-40
+    /// chart states <c>midCat</c> instead and is centred, its bars agreeing to 0.06 pt.
+    /// </para>
+    /// <para>
+    /// The rasterisation is <c>DateHelper::RasterizeDateValue</c>
+    /// (<c>chart2/source/view/axes/DateHelper.cxx</c>:69-89): at
+    /// <see cref="ChartTimeUnit.Month"/> the day of month becomes 1 and at
+    /// <see cref="ChartTimeUnit.Year"/> the month does too. It is not cosmetic — a quarterly
+    /// series whose dates are month-ends would otherwise sit most of a category out of place.
+    /// </para>
+    /// </remarks>
+    /// <param name="serial">The point's own date, in the workbook's serial numbering.</param>
+    /// <returns>Where the category's leading edge sits, 0 at the axis' start and 1 at its end.</returns>
+    public double? SlotStart(double serial)
+    {
+        if (!double.IsFinite(serial)) return null;
+
+        double rasterised = ChartDateScale.Rasterise(serial, TimeResolution);
+        if (rasterised < Minimum) return null;
+
+        // A shifted axis excludes a point sitting exactly on its maximum, because that maximum
+        // is the extra interval the shift added and nothing belongs in it.
+        if (ShiftedCategories ? rasterised >= Maximum : rasterised > Maximum) return null;
+
+        double at = Fraction(rasterised);
+
+        // A shifted category runs from its own date; an unshifted one straddles it. Measured on
+        // 26.2.4.2 rather than derived — see the remarks on this member.
+        return ShiftedCategories ? at : at - (SlotFraction / 2.0);
+    }
+
+    /// <summary>A serial expressed in the axis' own resolution unit, as the scaling counts it.</summary>
+    /// <remarks>
+    /// <c>DateScaling::doScaling</c> (<c>chart2/source/view/axes/DateScaling.cxx</c>:56-91): a day
+    /// axis counts days, and a month or year axis counts <c>year × 12 + month</c> plus the
+    /// fraction of the month elapsed. A year axis counts months too and takes its width as
+    /// twelve of them, which is why this divides by twelve rather than counting years.
+    /// </remarks>
+    private double Units(double serial)
+    {
+        if (TimeResolution == ChartTimeUnit.Day) return serial;
+
+        double months = ChartDateScale.Months(serial);
+        return TimeResolution == ChartTimeUnit.Year ? months / 12.0 : months;
+    }
 }
 
 /// <summary>
@@ -200,6 +335,48 @@ public static class ChartDateScale
         => ChartDataLabel.Write(tick, format);
 
     /// <summary>
+    /// A serial snapped back to the start of its own resolution unit.
+    /// </summary>
+    /// <remarks>
+    /// <c>DateHelper::RasterizeDateValue</c> (<c>chart2/source/view/axes/DateHelper.cxx</c>
+    /// :69-89): a day axis leaves the value alone, a month axis sets the day of month to 1, and a
+    /// year axis sets the month to January as well. The 1900 null date is assumed, which is what
+    /// every corpus chart uses; a 1904 workbook would shift each snap by the same four years in
+    /// both directions and the axis' own minimum with it, so the placement is unaffected and only
+    /// a date exactly on a month boundary could land differently.
+    /// </remarks>
+    public static double Rasterise(double serial, ChartTimeUnit resolution)
+    {
+        if (resolution == ChartTimeUnit.Day || !double.IsFinite(serial)) return serial;
+
+        DateOnly date = DateOf(serial, SpreadsheetDateSystem.Date1900);
+        DateOnly start = resolution == ChartTimeUnit.Year
+            ? new DateOnly(date.Year, 1, 1)
+            : new DateOnly(date.Year, date.Month, 1);
+
+        return SerialOf(start, SpreadsheetDateSystem.Date1900);
+    }
+
+    /// <summary>
+    /// A serial counted in months, as <c>DateScaling::doScaling</c> counts them.
+    /// </summary>
+    /// <remarks>
+    /// <c>year × 12 + month</c> plus the fraction of the month elapsed
+    /// (<c>chart2/source/view/axes/DateScaling.cxx</c>:68-89). The months are not of equal
+    /// length, so this is not a linear function of the serial and a span measured in it is not
+    /// the span in days over 30.44.
+    /// </remarks>
+    public static double Months(double serial)
+    {
+        if (!double.IsFinite(serial)) return serial;
+
+        DateOnly date = DateOf(serial, SpreadsheetDateSystem.Date1900);
+        double months = (date.Year * 12.0) + date.Month;
+
+        return months + ((date.Day - 1.0) / DateTime.DaysInMonth(date.Year, date.Month));
+    }
+
+    /// <summary>
     /// The finest unit two of the axis' dates fall inside — LibreOffice's automatic time
     /// resolution.
     /// </summary>
@@ -262,6 +439,22 @@ public static class ChartDateScale
     /// <param name="statedInterval">The stated major interval, or null for automatic.</param>
     /// <param name="statedResolution">The stated base unit, or null for automatic.</param>
     /// <param name="system">The workbook's date epoch.</param>
+    /// <param name="shifted">
+    /// Whether the categories sit <em>between</em> the ticks rather than on them, which is
+    /// <c>ScaleData.ShiftedCategoryPosition</c>. It adds one resolution unit to the axis'
+    /// maximum, stated or automatic alike — <c>"for explicit scales we need one interval more
+    /// (maximum excluded)"</c>, <c>ScaleAutomatism.cxx</c>:565-597 — and it does so
+    /// <em>before</em> the major interval is chosen from the span, so it moves every tick too.
+    /// OOXML states it as the value axis' <c>c:crossBetween</c>, which
+    /// <c>AxisConverter::convertFromModel</c> reads as <c>== XML_between</c> and otherwise
+    /// defaults to true for a bar, line or stock group
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx</c>:292-301).
+    /// <strong>That default belongs to the format reader and not here</strong>, so this
+    /// parameter defaults to false: a caller that does not know keeps the geometry it had. The
+    /// DrawingML reader passes the real value, fallback included; the BIFF reader does not yet,
+    /// because <c>CHVALUERANGE</c>'s own crossing flag has not been measured against the
+    /// reference and guessing it would move every legacy date chart on a hunch.
+    /// </param>
     /// <returns>The axis, or null when no category holds a value at all.</returns>
     public static ChartDateAxis? Resolve(
         IReadOnlyList<double?> categoryValues,
@@ -270,7 +463,8 @@ public static class ChartDateScale
         double? statedMaximum = null,
         ChartTimeInterval? statedInterval = null,
         ChartTimeUnit? statedResolution = null,
-        SpreadsheetDateSystem system = SpreadsheetDateSystem.Date1900)
+        SpreadsheetDateSystem system = SpreadsheetDateSystem.Date1900,
+        bool shifted = false)
     {
         ArgumentNullException.ThrowIfNull(categoryValues);
 
@@ -301,9 +495,14 @@ public static class ChartDateScale
         // units so that the axis has somewhere to put a tick (ScaleAutomatism.cxx:565-597).
         switch (resolution)
         {
+            case ChartTimeUnit.Day:
+                if (shifted) maximum = maximum.AddDays(1);
+                break;
+
             case ChartTimeUnit.Month:
                 minimum = new DateOnly(minimum.Year, minimum.Month, 1);
                 maximum = new DateOnly(maximum.Year, maximum.Month, 1);
+                if (shifted) maximum = AddMonths(maximum, 1);
                 if (maximum < AddMonths(minimum, 1))
                 {
                     if (autoMaximum || !autoMinimum) maximum = AddMonths(minimum, 1);
@@ -315,6 +514,7 @@ public static class ChartDateScale
             case ChartTimeUnit.Year:
                 minimum = new DateOnly(minimum.Year, 1, 1);
                 maximum = new DateOnly(maximum.Year, 1, 1);
+                if (shifted) maximum = AddYears(maximum, 1);
                 if (maximum < AddYears(minimum, 1))
                 {
                     if (autoMaximum || !autoMinimum) maximum = AddYears(minimum, 1);
@@ -350,7 +550,8 @@ public static class ChartDateScale
         }
 
         return new ChartDateAxis(
-            axisMinimum, axisMaximum, resolution, interval, ticks, categoryValues, format);
+            axisMinimum, axisMaximum, resolution, interval, ticks, categoryValues, format,
+            shifted);
     }
 
     /// <summary>

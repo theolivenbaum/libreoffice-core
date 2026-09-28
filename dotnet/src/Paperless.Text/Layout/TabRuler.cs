@@ -23,9 +23,16 @@ namespace Paperless.Text.Layout;
 /// <c>SwTabPortion::PostFormat</c> rather than in <c>PreFormat</c>, so the text after such a tab is
 /// fitted to the line while the tab is still one twip wide. See <see cref="TabRuler.WidthOf"/>.
 /// </param>
+/// <param name="Stop">
+/// Where the stop that placed the stretch was declared, before any clamping — which is not
+/// recoverable from <paramref name="Left"/>, since an aligned stop's text is placed relative to it
+/// and a stop past the frame's edge is honoured at the edge instead. Null for the first stretch of a
+/// line, which no stop placed. <see cref="TabRuler.WidthOf"/> needs it to tell a stop inside the
+/// line from one out in the paragraph's end indent, which Writer fits differently.
+/// </param>
 public readonly record struct TabbedSegment(
     int Start, int End, Length Left, Length Width, Length GapLeft = default, char Leader = '\0',
-    bool Deferred = false)
+    bool Deferred = false, Length? Stop = null)
 {
     /// <summary>Where the segment ends.</summary>
     public Length Right => Left + Width;
@@ -138,7 +145,8 @@ public static class TabRuler
 
             segments.Add(new TabbedSegment(
                 at, stretchEnd, left - origin, width, pen - origin, leader,
-                Deferred: pending is { Alignment: not TabAlignment.Left }));
+                Deferred: pending is { Alignment: not TabAlignment.Left },
+                Stop: pending?.Position));
             pen = left + width;
 
             if (stretchEnd >= last) break;
@@ -193,7 +201,59 @@ public static class TabRuler
             return last.GapLeft;
         }
 
-        return countsDeferredStretch || !last.Deferred ? last.Right : last.GapLeft + last.Width;
+        if (countsDeferredStretch || !last.Deferred) return last.Right;
+
+        // Never below `GapLeft`: the give-back is the trailing stretch's alone. Writer reaches the
+        // wider limit only once the right tab is the pending one, so everything in front of that tab
+        // was already fitted against the line's own width and a long title cannot borrow the indent
+        // to stay on the line. Reported as a width rather than as a limit, so the floor is where the
+        // tab began.
+        return Length.Max(
+            last.GapLeft, last.GapLeft + last.Width - GivenBack(last, format, rightEdge));
+    }
+
+    /// <summary>
+    /// How much of the paragraph's end indent the text after a trailing aligned stop may use.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A right, centred or decimal stop declared past the line's own end gives the end indent
+    /// back to the text that follows it.</strong> <c>SwTextFormatInfo::GetLineWidth</c>
+    /// (<c>sw/source/core/text/inftxt.cxx</c>:2132-2182) answers <c>Width() - X()</c> until there is
+    /// a pending tab whose stop is past <c>Width()</c>, and then answers
+    /// <c>nTextFrameWidth - X()</c> instead — where <c>nTextFrameWidth</c> is the frame's width less
+    /// the paragraph's <em>left</em> margin alone, under the comment <em>"text is allowed to use the
+    /// full text frame area to the right (RR above, but not LL)"</em>. The two differ by exactly the
+    /// end indent. The <c>TabLeft</c> special case below it does not apply here, because that arm is
+    /// guarded on the pending tab being a left one and a left stop is never deferred.
+    /// </para>
+    /// <para>
+    /// <strong>Measured, on the document it costs a page.</strong> <c>02_mcar_part-2_and_IS_v2.10</c>
+    /// declares its <c>TOC1</c>–<c>TOC9</c> with a dot-leadered right stop at 9360 twips — the frame's
+    /// right edge — over <c>w:ind w:right="720"</c>, so the stop is 720 twips past the line. A dozen
+    /// of its entries' page numbers wrapped onto a second line here and stay on the line in 26.2.4.2,
+    /// which shrinks the leader to nothing to keep them there. Deleting the right indent from those
+    /// styles and nothing else takes this tree from 313 pages to the reference's 312; moving the stop
+    /// back to the line's end instead takes <em>the reference</em> to 313, which is this tree's
+    /// answer. One attribute, both directions. <c>probes/tocwrap-r175</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Only the <c>TabOverSpacing</c> arm is modelled.</strong> <c>GetLineWidth</c> needs
+    /// <c>TAB_OVER_MARGIN</c> or <c>TAB_OVER_SPACING</c>, and a binary <c>.doc</c> carries the first
+    /// rather than the second — under which the limit is not the frame's edge at all but a flat
+    /// 558 mm (<c>tdf#158658</c>, <em>"Put content after tab into margin like Word"</em>). That is a
+    /// far wider give-back and it is deliberately left: no corpus <c>.doc</c> is known to need it, and
+    /// reproducing it would move every <c>.doc</c> with a trailing right tab at once.
+    /// </para>
+    /// </remarks>
+    private static Length GivenBack(TabbedSegment last, ParagraphFormat format, Length? rightEdge)
+    {
+        if (!format.TabsOverSpacing || format.EndIndent <= Length.Zero) return Length.Zero;
+        if (rightEdge is not { } edge || last.Stop is not { } stop) return Length.Zero;
+
+        // `rightEdge` is the frame's, which is the line's plus the end indent, so this is
+        // `GetTabPos() > Width()` in the coordinates the stops are stated in.
+        return stop > edge - format.EndIndent ? format.EndIndent : Length.Zero;
     }
 
     /// <summary>

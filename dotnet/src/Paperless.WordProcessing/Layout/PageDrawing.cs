@@ -421,9 +421,52 @@ public static class PageDrawing
         // *anchor's* background, which is the other limb of round 62's rule and the one `012`'s white
         // title needs. The anchor is not reachable from here — frames are drawn from a per-page list —
         // so that limb is still open.
-        Turned(sink, text);
-        DrawFlow(frame.Content, sink, frame.Frame.Fill ?? default);
-        Upright(sink, text);
+        // A fixed-height body whose text does not fit is CLIPPED to its text area, and the clip is
+        // what the reference's text layer is missing rather than the text itself.
+        //
+        // `EditEngine` paints under a scissor whenever the content range leaves the clip range —
+        // `if (!aClipRange.isInside(aContentRange))`, `editeng/source/editeng/impedit3.cxx`:4174-4181
+        // — so an overflowing shape's spill is drawn and then masked away. Ours was painted through.
+        //
+        // [bin] Measured on eight corpus diagram templates against 26.2.4.2. Our text is
+        // character-for-character identical to the reference's on all eight: read with `pdftotext`,
+        // which ignores clip paths, the alphanumeric multisets match exactly and the word multisets
+        // match on seven of eight. Read with MuPDF, which honours them, the reference is 18 to 102
+        // characters shorter — and those characters are precisely the caps and ascenders poking above
+        // a clip edge, at the same font, size and x to 0.1 pt. That is a mask, not a layout
+        // difference, and it is why this reads to a text-extraction gate as *we draw too much*.
+        //
+        // The rectangle is measured rather than assumed, on a 100 x 24 pt box at three inset pairs:
+        // the VERTICAL insets apply and the HORIZONTAL ones do not, so it is the shape's full width
+        // between the text area's top and bottom. It is emitted outside `Turned`/`Upright` because
+        // the reference's scissor is axis-aligned in page space even for turned text.
+        //
+        // Conditional on purpose, for the reason `DrawPicture` gives below: an unconditional clip
+        // would be a visual no-op that changed the bytes of every rendering carrying a shape. A body
+        // that fits is not clipped and neither is an autofitting one — `a:spAutoFit` measured as
+        // never clipped, `a:normAutofit` measured as not shrinking and behaving as `a:noAutofit`.
+        DocRect inside = frame.Area.Deflate(frame.Frame.Padding);
+        bool clips = frame.Frame.HasFixedHeight
+                     && frame.Content is { } overflowing
+                     && FlowLayouter.Extent(overflowing) > inside.Height;
+
+        if (clips)
+        {
+            sink.Save();
+            sink.ClipPath(GraphicsPath.Rectangle(
+                new DocRect(frame.Area.X, inside.Y, frame.Area.Width, inside.Height)));
+        }
+
+        try
+        {
+            Turned(sink, text);
+            DrawFlow(frame.Content, sink, frame.Frame.Fill ?? default);
+            Upright(sink, text);
+        }
+        finally
+        {
+            if (clips) sink.Restore();
+        }
 
         if (frame.Frame.BorderColour is not { } colour) return;
         if (frame.Frame.BorderWidth <= Length.Zero) return;

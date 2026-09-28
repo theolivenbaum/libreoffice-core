@@ -130,6 +130,67 @@ public static class FrameLayout
 
         Length lineTop = anchorLineTop ?? anchorTop;
 
+        // An object that follows the text flow is positioned against a different frame, and for a body
+        // anchor that frame is the page *body* rather than the page.
+        //
+        // One function decides it for every vertical question below:
+        // `SwEnvironmentOfAnchoredObject::GetVertEnvironmentLayoutFrame`
+        // (`sw/source/core/objectpositioning/environmentofanchoredobject.cxx`:64-95) answers
+        // `FindPageFrame()` when the object does not follow the text flow, and otherwise walks up from the
+        // anchor to the first cell, fly, header, footer, footnote, **page body** or page frame. So for a
+        // paragraph in the body the answer is the page body frame, whose top is `w:pgMar/@w:top` below the
+        // sheet's.
+        //
+        // Three things follow, all in the offset arm of
+        // `SwToContentAnchoredObjectPosition::CalcPosition`
+        // (`tocntntanchoredobjectposition.cxx`:533-620) and in `ImplAdjustVertRelPos`:
+        //
+        //   * a `PAGE_FRAME` offset is measured from that frame's top (:590-596), which is the whole of
+        //     the 71.6 pt below;
+        //   * the object is captured at all, because `mbDoNotCaptureAnchoredObj` is
+        //     `bConsidered && !mbFollowTextFlow && DO_NOT_CAPTURE_DRAW_OBJS_ON_PAGE` — see
+        //     `FrameObjectKind` — and the middle term is now false; and
+        //   * it is captured in the **page**, not in the body: `ImplAdjustVertRelPos`:544-573 takes the
+        //     page frame's own rectangle whenever the anchor is outside a table, and its
+        //     `compatibilityMode` 15 narrowing needs `rPageAlignLayFrame.IsPageFrame()`, which a body
+        //     frame is not.
+        //
+        // **`bCheckBottom = !DoesObjFollowsTextFlow()` is NOT a fourth, and the corpus refuted it.** That
+        // expression is real, at `tocntntanchoredobjectposition.cxx`:457 in the *alignment* arm and at
+        // :678 and :718 in the offset one — and the offset arm has a third call, at :810-813, which
+        // **omits the argument** and so takes its `= true` default (`anchoredobjectposition.hxx`:185-192).
+        // That is the path an offset which does not fit its upper's print area takes, under the comment
+        // *"do not follow text flow respectively align at 'page areas', but stay inside given
+        // environment"*, and it is the one a page-relative chart reaches.
+        // `027_Unit_Circle_Chart_Graphical_Chart` is the witness: 470.30 pt of chart at a body base of
+        // 156.95 + 111.65 would reach 738.90 on a 595.30 pt landscape page, and 26.2.4.2 draws its top at
+        // **125.00**, which is `595.30 - 470.30` to the hundredth. Skipping the bottom correction drew it
+        // at 268.60 and took that document from 9.48 to 28.42 `diff%`.
+        //
+        // The horizontal is untouched, and that is a property of the same file rather than an omission:
+        // `GetHoriEnvironmentLayoutFrame`'s walk stops at a cell, a fly or a page and has no body frame in
+        // it (:34-61), so a body anchor's horizontal environment is the page either way.
+        //
+        // Measured on `028_Unit_Circle_Chart_Optimized_Graph.docx`, whose chart is an embedded object with
+        // `layoutInCell="1"` and a `relativeFrom="page"` `wp:posOffset` of 175.52 pt on a page whose
+        // `w:pgMar/@w:top` is 1440 twips: 26.2.4.2 draws it **71.6 pt lower than the offset states**, which
+        // is that margin. `probes/ofpie-r190/variants.py`'s ten one-attribute rewrites are where that is
+        // measured: `w:top="0"` renders the chart where an unfollowing frame goes and `w:top="2880"` moves
+        // it by the extra 72 pt, so the base tracks that margin one for one; `margin` renders identically
+        // to `page`; and an offset of -200 pt is drawn at 0.36 — the **sheet's** own top rather than the
+        // body's, which is the third bullet above. That table's `layoutInCell="0"` row is the one to
+        // re-measure before it is built on; `probes/pagev-r192/results.md` §4 says why.
+        //
+        // `probes/pagev-r192/fixture.py` is the experiment that separates the object kind from everything
+        // else: two minimal DOCX identical but for whether the anchored object is a `wps:wsp` or a chart.
+        // `probes/ofpie-r190/page-anchor-fixture.py` built the shape half alone, 26.2.4.2 drew it at the
+        // sheet's top edge, and that refuted "page means margin" without explaining the document.
+        //
+        // Only a body anchor is modelled. The walk's other stops are a header or footer frame, a footnote
+        // and a table cell, and this tree has a rectangle for none of them here — `FrameAnchorPlace` is as
+        // far as it goes. A header-anchored embedded object therefore keeps the page, which is what it had.
+        bool followsTextFlow = frame.FollowsTextFlow && anchorPlace == FrameAnchorPlace.Body;
+
         // The margin-relative area runs from the *header frame's bottom to the footer frame's top*, not
         // from `w:top` to `w:bottom`. `RelOrientation::PAGE_PRINT_AREA` takes the page's print area and
         // then walks the page frame's lowers, subtracting each header frame's height from the area and
@@ -175,7 +236,20 @@ public static class FrameLayout
         //   v-bottommargin-bottom         821.75        750.00
         DocRect vertical = frame.VerticalOrigin switch
         {
-            FrameVerticalOrigin.Page => page,
+            // `PAGE_FRAME` against the vertical environment frame, which is the body for an object that
+            // follows the text flow. `PAGE_PRINT_AREA` needs no such branch: the C++ takes
+            // `rPageAlignLayFrame.getFramePrintArea()` and only reaches for
+            // `PrtWithoutHeaderAndFooter()` when that frame is the page (:597-607, :336-342), so a body
+            // frame's own area is the answer either way and `body` already is it.
+            //
+            // `PAGE_PRINT_AREA_TOP` — `TopMarginArea` below — *does* share `PAGE_FRAME`'s branch in both
+            // places the C++ decides this (:590-591 and `anchoredobjectposition.cxx`:327-334), so the same
+            // substitution is its rule too, and it is deliberately left: it would collapse the band this
+            // tree measured against 26.2.4.2 (`probes/frame-area-r85`, six fixtures) to nothing, that
+            // measurement was taken on a *shape* and so says nothing about the following case, and the
+            // corpus cannot decide it — `census-embedded.py` finds **5 embedded-object anchors in 5
+            // documents, stating `page` twice and `margin` three times and `topMargin` not once**.
+            FrameVerticalOrigin.Page => followsTextFlow ? body : page,
             FrameVerticalOrigin.PageMargin => body,
             FrameVerticalOrigin.TopMarginArea =>
                 new DocRect(page.X, page.Y, page.Width, body.Y - page.Y),
@@ -223,16 +297,21 @@ public static class FrameLayout
         // see `FrameObjectKind`. So under DOCX's flag a picture and a shape carrying a text box are
         // captured unless they wrap through, and a shape with no text box never is.
         //
-        // `mbFollowTextFlow` is left out on purpose: its pool default is false
-        // (`sw/source/core/bastyp/init.cxx`:437) and every writerfilter write of
-        // `PROP_FOLLOW_TEXT_FLOW` is gated on the anchor being inside a table
-        // (`GraphicImport.cxx`:1316-1318 and :1859-1861, `OOXMLFastContextHandler.cxx`:1879-1883), so
-        // outside a table it is false and the term drops out. Inside one it would make the object
-        // captured where this leaves it alone, and it is captured in a *cell* rather than in the page
-        // — a different area this does not model. 552 of the corpus's 6055 positioned objects, in 40
-        // of 272 documents; `probes/words-seat-r94/anchor-census.txt`.
+        // `mbFollowTextFlow` is the middle term and it is the *embedded object's* escape from the whole
+        // product: false for a shape and for a picture, because both of `GraphicImport`'s writes of
+        // `PROP_FOLLOW_TEXT_FLOW` are gated on the anchor being inside a table
+        // (`GraphicImport.cxx`:1316-1318 and :1859-1861) and the pool default is false
+        // (`sw/source/core/bastyp/init.cxx`:437) — and true for a chart or an OLE object whatever its
+        // anchor, since `DomainMapper_Impl.cxx`:9792 sets it from `layoutInCell` with no such guard. See
+        // `PageFrame.FollowsTextFlow` and `followsTextFlow` above.
+        //
+        // A *table cell's* own capture is still not modelled: inside a table the object is held in its
+        // cell (`anchoredobjectposition.cxx`:576-591), an area this tree does not have. 552 of the
+        // corpus's 6055 positioned objects are inside a `w:tbl`, in 40 of 272 documents;
+        // `probes/words-seat-r94/anchor-census.txt`.
         bool considered = frame.Wrap == TextWrap.Through || frame.ObjectKind == FrameObjectKind.Shape;
-        bool captured = capturesOnPage || (capturesWrappedObjects && !considered);
+        bool captured = capturesOnPage
+            || (capturesWrappedObjects && (!considered || followsTextFlow));
 
         // And the area it is captured in. `ImplAdjustVertRelPos`:562-573 narrows it from the page to
         // the page *body* frame under its own comment — "Instead of using the top of the page as the
@@ -250,8 +329,16 @@ public static class FrameLayout
         //
         // The horizontal capture never narrows: `ImplAdjustHoriRelPos` (:674-722) takes the page
         // frame's own rectangle with no such branch.
+        //
+        // And an object following the text flow is not narrowed either, which is the opposite of what the
+        // name suggests: the narrowing sits inside `if (!bVert && bCompat15 && ... &&
+        // rPageAlignLayFrame.IsPageFrame() && ...)` (:562-566), and for such an object that frame is the
+        // page *body* rather than the page, so the test fails and the area stays the sheet. The branch it
+        // is in was already entered, because the alternative needs `bFollowTextFlow && IsInTab()`
+        // (:544-546) and this tree models no in-table capture.
         DocRect verticalArea = narrowsCaptureToBody
             && anchorPlace == FrameAnchorPlace.Body
+            && !followsTextFlow
             && frame.VerticalOrigin is not (FrameVerticalOrigin.Page or FrameVerticalOrigin.PageMargin)
                 ? body
                 : page;
@@ -589,7 +676,7 @@ public static class FrameLayout
             : FlowLayouter.HeightOf(
                 frame.Blocks, width, 0, collapsesSpacing, addsCellLineSpacing);
 
-        inside = Length.Max(inside, frame.Size.Height - insets);
+        inside = Length.Max(inside, (frame.HeightFloor ?? frame.Size.Height) - insets);
         inside = Length.Max(inside, MinimumFlyHeight);
 
         Length height = inside + insets;

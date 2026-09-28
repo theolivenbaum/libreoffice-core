@@ -104,15 +104,21 @@ public sealed record PaginationOptions
     /// <see cref="NarrowsCaptureToBody"/> now carries. <c>probes/words-close-r95</c>.
     /// </para>
     /// <para>
-    /// <c>mbFollowTextFlow</c> is deliberately not modelled: its pool default is <em>false</em>
-    /// (<c>sw/source/core/bastyp/init.cxx</c>:437) and each of the three writerfilter seats that write
-    /// <c>PROP_FOLLOW_TEXT_FLOW</c> is gated on the anchor being inside a table
-    /// (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
-    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883), so outside a table the term drops out. Inside one
-    /// it would make the object captured — in its <em>cell</em> rather than in the page
-    /// (<c>anchoredobjectposition.cxx</c>:576-591), which is an area this does not model. 552 of the
-    /// corpus's 6055 positioned objects, in 40 of 272 documents;
-    /// <c>probes/words-seat-r94/anchor-census.txt</c>.
+    /// <c>mbFollowTextFlow</c> <b>is modelled now, for an embedded object and nothing else</b> — see
+    /// <see cref="PageFrame.FollowsTextFlow"/>. This used to say it was not modelled at all, on the
+    /// grounds that its pool default is <em>false</em> (<c>sw/source/core/bastyp/init.cxx</c>:437) and
+    /// that each writerfilter seat writing <c>PROP_FOLLOW_TEXT_FLOW</c> is gated on the anchor being
+    /// inside a table (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
+    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883). Both halves are true and the census was one seat
+    /// short: <c>DomainMapper_Impl.cxx</c>:9792 sets it on a <c>SwXTextEmbeddedObject</c> straight from
+    /// <c>layoutInCell</c> with no table test, so a chart's own anchor follows the text flow wherever it
+    /// sits.
+    /// </para>
+    /// <para>
+    /// What stays unmodelled is the <em>in-table</em> half: inside a table such an object is captured in
+    /// its <em>cell</em> rather than in the page (<c>anchoredobjectposition.cxx</c>:576-591), an area
+    /// this tree does not have. 552 of the corpus's 6055 positioned objects are inside a <c>w:tbl</c>,
+    /// in 40 of 272 documents; <c>probes/words-seat-r94/anchor-census.txt</c>.
     /// </para>
     /// <para>
     /// Set for every DOCX, since <c>WriterFilter.cxx</c>:332 sets the flag for every writerfilter
@@ -3487,14 +3493,27 @@ public sealed class Paginator
     /// Whether a block would draw anything a fly could displace.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A table always would — except a positioned one, which the caller skips before asking, because it
     /// is not in the flow at all. A paragraph counts only when it holds a character that is neither
     /// whitespace nor a control — the anchor character a frame, a field or a note citation occupies is
     /// <c>U+0001</c>, and a paragraph holding nothing else is the empty spacer this has to let past.
+    /// </para>
+    /// <para>
+    /// <b>An as-character frame is that paragraph's ink even though its anchor is a control.</b> It is a
+    /// portion on the line, so <c>SwTextFly</c> moves it exactly as it moves a word, while a frame
+    /// anchored to the paragraph or to a character states its own position and is not in the flow to be
+    /// displaced. Reading only <see cref="PageParagraph.Text"/> cannot tell the two apart, and calling a
+    /// paragraph whose whole content is one inline picture an empty spacer is what drew
+    /// <c>HC-Bulletin-template.docx</c>'s map over its own table: the fly was floated because nothing
+    /// after it appeared to hold ink, the flow stayed at the top of the body, and the picture landed
+    /// there. 26.2.4.2 puts the same picture below the frame, at y = 413.6 against our 63.3.
+    /// </para>
     /// </remarks>
     private static bool HasInk(PageBlock block)
         => block is not PageParagraph paragraph
-           || paragraph.Text.Any(c => !char.IsWhiteSpace(c) && !char.IsControl(c));
+           || paragraph.Text.Any(c => !char.IsWhiteSpace(c) && !char.IsControl(c))
+           || paragraph.Frames.Any(frame => frame.Anchor is FrameAnchor.AsCharacter);
 
     /// <summary>
     /// Places a body table that names a position on the page rather than a place in the text, and
@@ -3936,7 +3955,7 @@ public sealed class Paginator
             for (int row = 0; row < start; row++) skipped += heights[row];
 
             cells.AddRange(TableLayouter.Offset(
-                laid.Cells.Where(cell => cell.Row >= start && cell.Row < end),
+                ClampSpans(laid.Cells.Where(cell => cell.Row >= start && cell.Row < end), heights, end),
                 body.X,
                 body.Y + top + placed - skipped));
 
@@ -3944,9 +3963,12 @@ public sealed class Paginator
         }
 
         // Finally the first part of the row that does not fit, when the document lets it break.
+        // A row a merge reaches into may still be cut. `SliceRow` asks only about the row's own cells —
+        // `RowCells` filters on `cell.Row == end`, and the covering cell's row is above that — so its
+        // `RowSpan > 1` guard is not tripped by the cover, and `ClampSpans` has already cut the covering
+        // rectangle to the rows this part holds.
         if (end < heights.Count
-            && MaySplit(table, end, heights[end], body.Height)
-            && !IsCoveredByAMerge(laid, end))
+            && MaySplit(table, end, heights[end], body.Height))
         {
             List<PlacedTableCell> rowCells = RowCells(laid, end);
 
@@ -3960,6 +3982,12 @@ public sealed class Paginator
                     TableLayouter.BoundaryBand(table, end))
                 is { } head)
             {
+                // A cell the merge carries into the row that was just cut reaches the foot of the part,
+                // not the foot of the last whole row — `ClampSpans` could not know that, because the
+                // slice had not been attempted when it ran. Writer recomputes the same height after its
+                // own split for the same reason.
+                ExtendSpansOverTheCut(cells, end, head.Height);
+
                 cells.AddRange(TableLayouter.Offset(head.Cells, body.X, body.Y + top + placed));
                 placed += head.Height;
 
@@ -4064,13 +4092,90 @@ public sealed class Paginator
         => [.. laid.Cells.Where(cell => cell.Row == row)];
 
     /// <summary>
+    /// A vertically merged cell cut short at the last row this part holds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A cell was laid out as tall as all the rows it spans, so a part ending inside that span would
+    /// otherwise draw the whole rectangle — hanging below the rest of the table by however much of the
+    /// span is on the next page. Measured on <c>OM template for non-complex NCC operators</c>, whose
+    /// column-4 cell spans rows 8 to 10 across a page boundary: ours ran to y = 43.65 where the table's
+    /// other columns stop at 148.60 and the reference's bottom rule is at 67.84, about 105 pt of cell
+    /// below the table it belongs to.
+    /// </para>
+    /// <para>
+    /// This is Writer's <c>lcl_AdjustRowSpanCells</c> (<c>sw/source/core/layout/tabfrm.cxx</c>:909-931),
+    /// which recomputes every cell of layout row span above one as <c>lcl_GetHeightOfRows(pRow,
+    /// nLayoutRowSpan)</c> — the rows present in <em>that</em> frame — and is called from
+    /// <c>SwTabFrame::Split</c>. It is what lets the reference split such a row at all rather than what
+    /// keeps it from doing so.
+    /// </para>
+    /// </remarks>
+    /// <param name="cells">The cells this part places.</param>
+    /// <param name="heights">Every row's height, as the table's own layout measured it.</param>
+    /// <param name="end">One past the last row this part holds.</param>
+    private static IEnumerable<PlacedTableCell> ClampSpans(
+        IEnumerable<PlacedTableCell> cells, List<Length> heights, int end)
+    {
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.Row + Math.Max(1, cell.Cell.RowSpan) <= end)
+            {
+                yield return cell;
+                continue;
+            }
+
+            Length height = Length.Zero;
+            for (int row = cell.Row; row < end && row < heights.Count; row++) height += heights[row];
+
+            // Never grow a cell: a turned cell's rectangle and a cell the table already shortened are
+            // both shorter than the rows they cover, and the clamp is a ceiling rather than a value.
+            yield return height < cell.Area.Height
+                ? cell with { Area = cell.Area with { Height = height } }
+                : cell;
+        }
+    }
+
+    /// <summary>
+    /// Gives back to a clamped merged cell the height of the sliced row's own part.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ClampSpans"/> runs before the row under the last whole one has been offered to
+    /// <c>SliceRow</c>, so it can only clamp to the whole rows. When that row is then cut, the merge
+    /// reaches down through the part it left behind and the rectangle has to grow by exactly that much.
+    /// Measured on the OM template's page 30, where the reference rules column 4 at y = 774.3 and
+    /// clamping to the whole rows alone rules it at 693.3 — the 81 pt of the sliced row's master part.
+    /// </remarks>
+    /// <param name="cells">The cells placed so far, modified in place.</param>
+    /// <param name="cut">The row that was sliced.</param>
+    /// <param name="height">How tall the sliced row's first part is.</param>
+    private static void ExtendSpansOverTheCut(List<PlacedTableCell> cells, int cut, Length height)
+    {
+        for (int index = 0; index < cells.Count; index++)
+        {
+            PlacedTableCell cell = cells[index];
+            if (cell.Row >= cut || cell.Row + Math.Max(1, cell.Cell.RowSpan) <= cut) continue;
+
+            cells[index] = cell with { Area = cell.Area with { Height = cell.Area.Height + height } };
+        }
+    }
+
+    /// <summary>
     /// Whether a cell starting further up the table reaches into this row.
     /// </summary>
     /// <remarks>
-    /// Such a row cannot be broken here: the merged cell is one rectangle drawn with the row it starts in,
-    /// and a break inside it would leave half of it on a page it was never placed on. Writer keeps the
-    /// same case out of its own split by re-formatting the line that a row span crosses
-    /// (<c>lcl_AdjustRowSpanCells</c>); declining is the same answer with none of the machinery.
+    /// Used by <see cref="MinimumRowsBeforeASplit"/>, where Writer counts the row-span line before it
+    /// starts its keep chain: a row the cell above reaches into cannot be the first on a page of its own.
+    /// <para>
+    /// <strong>It no longer decides whether such a row may be cut, and the reasoning that said so was
+    /// refuted.</strong> This remark used to read "Writer keeps the same case out of its own split by
+    /// re-formatting the line that a row span crosses (<c>lcl_AdjustRowSpanCells</c>); declining is the
+    /// same answer with none of the machinery." That function is what <em>enables</em> the split — it
+    /// recomputes a spanning cell's height as the rows present in the frame, and
+    /// <c>SwTabFrame::Split</c> calls it for exactly that reason. Declining instead left the covering
+    /// cell at its full height on the page the table broke on and drew nothing of it on the next, so the
+    /// row moved whole and one column went missing. <see cref="ClampSpans"/> is that port.
+    /// </para>
     /// </remarks>
     private static bool IsCoveredByAMerge(LaidBlock laid, int row)
     {

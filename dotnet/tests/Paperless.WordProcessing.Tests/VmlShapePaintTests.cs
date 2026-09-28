@@ -252,4 +252,95 @@ public sealed class VmlShapePaintTests
         frames[1].Size.Width.Points.ShouldBe(0, 0.001);
         frames[1].Size.Height.Points.ShouldBe(100, 0.01);
     }
+
+    /// <summary>
+    /// A shape naming a geometry is drawn as that geometry, and therefore painted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The fourth rule above — paint only a <c>v:rect</c> and a <c>v:roundrect</c> — was right
+    /// about not filling a pentagon's bounding box and wrong about the consequence: the pentagon
+    /// went undrawn. A <c>v:shape</c> names its geometry by Escher's <c>MSO_SPT</c> number, and
+    /// <see cref="PageFrame.Preset"/> already routes a DrawingML preset name through
+    /// <c>CustomShapeGeometry</c>. <c>#_x0000_t15</c> is <c>homePlate</c> — the mapping is the
+    /// reference's own <c>GETVMLShapeType</c> table, <c>filter/source/msfilter/util.cxx</c>:1072.
+    /// </para>
+    /// <para>
+    /// Measured on <c>090_Business_Case_Template_Blue_Theme</c>, whose three section headings are
+    /// each a <c>type="#_x0000_t15" fillcolor="#002060"</c> band with the heading inside it. A
+    /// blind reading of the composed page, given no numbers, reported the reference drawing "a
+    /// solid dark-navy right-pointing chevron" behind each heading and ours drawing "nothing — no
+    /// fill, no outline, no shape at all". Page ink <b>4.25 before and 1.53 after</b>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AShapeNamingAPresetGeometryIsDrawnAsThatShape()
+    {
+        PageFrame frame = One(
+            "<v:shape type=\"#_x0000_t15\" style=\"position:absolute;margin-left:0;margin-top:0;"
+            + "width:200pt;height:26pt\" fillcolor=\"#002060\" strokecolor=\"#002060\"/>");
+
+        frame.Preset.ShouldBe("homePlate");
+        frame.Fill.ShouldBe(Colour.FromRgb(0x002060));
+        frame.BorderColour.ShouldBe(Colour.FromRgb(0x002060));
+    }
+
+    /// <summary>
+    /// The number may be on the <c>v:shapetype</c> the shape points at rather than in its id.
+    /// </summary>
+    /// <remarks>
+    /// Which is how Word actually writes it for anything but its own well-known types: a
+    /// <c>v:shapetype</c> carrying <c>o:spt</c> and a <c>v:shape type="#..."</c> naming it. Reading
+    /// only the <c>_x0000_tN</c> spelling would find none of those.
+    /// </remarks>
+    [Fact]
+    public void ThePresetIsTakenFromTheShapeTypesOwnSpt()
+    {
+        PageFrame frame = One(
+            "<v:shapetype id=\"banner\" o:spt=\"55\"/>"
+            + "<v:shape type=\"#banner\" style=\"position:absolute;margin-left:0;margin-top:0;"
+            + "width:80pt;height:20pt\" fillcolor=\"#ff0000\"/>");
+
+        frame.Preset.ShouldBe("chevron");
+        frame.Fill.ShouldBe(Colour.FromRgb(0xFF0000));
+    }
+
+    /// <summary>
+    /// A geometry this does not model is still not painted, and that is the rule kept.
+    /// </summary>
+    /// <remarks>
+    /// The controls. <c>#_x0000_t75</c> is the picture frame the words corpus has 103 of, almost
+    /// none of which states a fill — giving it a box would be the "confident wrong answer" the
+    /// original rule was written against — and a shape naming no type at all is not a rectangle
+    /// either. Both must come back unpainted even though they state a <c>fillcolor</c>.
+    /// </remarks>
+    [Fact]
+    public void AnUnmodelledGeometryIsStillNotPainted()
+    {
+        PageFrame picture = One(
+            "<v:shape type=\"#_x0000_t75\" style=\"position:absolute;margin-left:0;margin-top:0;"
+            + "width:50pt;height:50pt\" fillcolor=\"#ff0000\"/>");
+
+        picture.Preset.ShouldBeNull();
+        picture.Fill.ShouldBeNull();
+
+        PageFrame bare = One(
+            "<v:shape style=\"position:absolute;margin-left:0;margin-top:0;"
+            + "width:50pt;height:50pt\" fillcolor=\"#ff0000\"/>");
+
+        bare.Preset.ShouldBeNull();
+        bare.Fill.ShouldBeNull();
+    }
+
+    /// <summary>A plain <c>v:rect</c> keeps painting without naming a geometry.</summary>
+    [Fact]
+    public void ARectIsStillPaintedWithNoPreset()
+    {
+        PageFrame frame = One(
+            "<v:rect style=\"position:absolute;margin-left:0;margin-top:0;width:50pt;height:50pt\""
+            + " fillcolor=\"#00ff00\"/>");
+
+        frame.Preset.ShouldBeNull();
+        frame.Fill.ShouldBe(Colour.FromRgb(0x00FF00));
+    }
 }

@@ -388,7 +388,54 @@ public static class SlideChart
             // underestimate puts the widest of them outside the frame. Laying the line out at
             // the origin and adding up its advances is the same arithmetic the layout used to
             // place them — through the same `OnChartDevice` call — so the two cannot disagree.
+            Length width = Advances(body, height, size);
+
+            // …and that is exactly why the trailing blanks have to be added back. A line's
+            // trailing blanks are not part of its width — they hang past its right edge rather
+            // than pushing a word onto the next line — so `SlideTextLayout` stops the drawn run
+            // at `TextLine.VisibleEnd` and the sum above never sees them. That is right for a
+            // wrapped body and wrong for a chart label, which is an EditEngine text shape
+            // autogrown around the paragraph whole.
+            //
+            // An accounting number format puts one there on every value-axis tick: the positive
+            // and zero subformats of `_("$"* #,##0.00_);…;_("$"* "-"??_)` both end in `_)`, a
+            // blank the width of a closing parenthesis. Measured on `Demick_JetBlue.pptx` page 5
+            // against 26.2.4.2 by deleting that one token from the format and changing nothing
+            // else (`probes/chartblank-r191/`): the reference's plot area starts at x = 165.71
+            // as authored and at 162.65 without it, with the gap from the widest label's last
+            // glyph to the plot edge going 5.91 pt to 2.85 — and this tree drew 161.99 and 2.66,
+            // which is the without-it answer. Deleting the zero row's two `?` placeholders
+            // instead moves nothing, because that row is not the widest.
+            //
+            // The blanks are measured where they are not trailing, by putting a digit after them
+            // and taking the digit back off; a space kerns against nothing in any of the faces a
+            // chart resolves to, so the pair the sentinel introduces costs nothing.
+            int visible = text.Length;
+            while (visible > 0 && text[visible - 1] == ' ') visible--;
+
+            if (visible < text.Length)
+            {
+                width += Advances(
+                             Body(text[visible..] + Sentinel, size, Colour.Black, family, bold),
+                             height, size)
+                         - Advances(
+                             Body(Sentinel, size, Colour.Black, family, bold), height, size);
+            }
+
+            return new DocSize(width, height);
+        }
+
+        /// <summary>A character that is neither blank nor dropped, for measuring blanks with.</summary>
+        private const string Sentinel = "0";
+
+        /// <summary>The sum of the advances the layout gave one body's glyphs.</summary>
+        /// <param name="body">The one-line body.</param>
+        /// <param name="height">The height to lay it out in.</param>
+        /// <param name="size">The em size, for the chart device's own scale.</param>
+        private Length Advances(SlideTextBody body, Length height, Length size)
+        {
             Length width = Length.Zero;
+
             foreach (PlacedGlyphRun placed in OnChartDevice(
                 SlideTextLayout.Place(
                     body, new DocRect(Length.Zero, Length.Zero, Length.Zero, height), fonts),
@@ -397,7 +444,7 @@ public static class SlideChart
                 foreach (PositionedGlyph glyph in placed.Run.Glyphs) width += glyph.Advance;
             }
 
-            return new DocSize(width, height);
+            return width;
         }
 
         /// <summary>

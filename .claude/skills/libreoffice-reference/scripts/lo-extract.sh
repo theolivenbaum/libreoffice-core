@@ -32,7 +32,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 if [ -z "$outdir" ] || [ "${#inputs[@]}" -eq 0 ]; then usage >&2; exit 2; fi
-command -v soffice >/dev/null 2>&1 || { echo "soffice not on PATH" >&2; exit 3; }
+# Which soffice is the reference. `$REF_SOFFICE` wins; otherwise whatever is on PATH.
+#
+# Hard-coding `soffice` is how a comparison silently scores against the wrong binary. On this
+# machine PATH is 24.2.7.2 and the tree is calibrated to 26.2.4.2, and the two genuinely
+# disagree -- `f445896e...docx` is 15 pages under 26.2.4.2 and 16 under 24.2.7.2, so a sweep
+# that took PATH banked a `pages` failure for a document that matches.
+REF="${REF_SOFFICE:-soffice}"
+command -v "$REF" >/dev/null 2>&1 || { echo "no soffice at $REF" >&2; exit 3; }
+echo "reference $(command -v "$REF") -- $("$REF" --version 2>/dev/null | head -1)" >&2
 
 mkdir -p "$outdir"; outdir="$(cd "$outdir" && pwd)"
 profile="$(mktemp -d)"; trap 'rm -rf "$profile"' EXIT
@@ -68,7 +76,7 @@ for input in "${inputs[@]}"; do
     key="$(printf '%s' "$base" | tr -c 'A-Za-z0-9._-' '_')"
     dest="$outdir/$key"; mkdir -p "$dest"
 
-    soffice --headless --norestore --nolockcheck --nodefault \
+    "$REF" --headless --norestore --nolockcheck --nodefault \
             -env:UserInstallation="file://$profile" \
             --convert-to "$target" --outdir "$dest" "$abs" >/dev/null 2>&1
 

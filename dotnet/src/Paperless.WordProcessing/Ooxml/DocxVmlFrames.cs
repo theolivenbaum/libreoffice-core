@@ -345,7 +345,8 @@ internal static class DocxVmlFrames
                 ? pictures.ReadVml(member)
                 : FramePicture.None;
 
-            VmlPaint paint = PaintOf(member, box);
+            string? memberPreset = PresetOf(member, member);
+            VmlPaint paint = PaintOf(member, box, memberPreset);
             if (segment is { } sense) paint = paint with { IsLineMirrored = sense.Mirrored };
 
             frames.Add(new PageFrame
@@ -367,9 +368,14 @@ internal static class DocxVmlFrames
                 Fill = paint.Fill,
                 BorderColour = paint.Line,
                 BorderWidth = paint.Width,
+                Preset = memberPreset,
                 IsLine = paint.IsLine,
                 IsLineMirrored = paint.IsLineMirrored,
+                HeadEnd = paint.HeadEnd,
+                TailEnd = paint.TailEnd,
                 Blocks = text is not null && content is not null ? content(text) : [],
+                Padding = text is null ? default : Insets(text),
+                HasFixedHeight = text is not null && !GrowsWithText(member, text),
             });
         }
     }
@@ -454,7 +460,8 @@ internal static class DocxVmlFrames
             ? pictures.ReadVml(shape)
             : FramePicture.None;
 
-        VmlPaint paint = PaintOf(shape, style);
+        string? preset = PresetOf(shape, element);
+        VmlPaint paint = PaintOf(shape, style, preset);
         VmlFontwork warp = DocxVmlFontwork.Read(
             shape, ShapeTypeOf(shape, element), new DocSize(across, down), typeface);
 
@@ -480,9 +487,14 @@ internal static class DocxVmlFrames
             Fill = paint.Fill,
             BorderColour = paint.Line,
             BorderWidth = paint.Width,
+            Preset = preset,
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
+            HeadEnd = paint.HeadEnd,
+            TailEnd = paint.TailEnd,
             Blocks = box is not null && content is not null ? content(box) : [],
+            Padding = box is null ? default : Insets(box),
+            HasFixedHeight = box is not null && !GrowsWithText(shape, box),
         };
     }
 
@@ -549,7 +561,8 @@ internal static class DocxVmlFrames
             ? put.Top
             : (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null) ?? Length.Zero;
 
-        VmlPaint paint = PaintOf(shape, style);
+        string? preset = PresetOf(shape, element);
+        VmlPaint paint = PaintOf(shape, style, preset);
 
         // Which diagonal of the box is drawn comes from the endpoints for a `v:line` and from
         // `style:flip` for everything else, so the two cannot share `IsMirrored`.
@@ -592,10 +605,14 @@ internal static class DocxVmlFrames
             Fill = paint.Fill,
             BorderColour = paint.Line,
             BorderWidth = paint.Width,
+            Preset = preset,
             IsLine = paint.IsLine,
             IsLineMirrored = paint.IsLineMirrored,
+            HeadEnd = paint.HeadEnd,
+            TailEnd = paint.TailEnd,
             Blocks = box is not null && content is not null ? content(box) : [],
-            Padding = box is null ? default : default,
+            Padding = box is null ? default : Insets(box),
+            HasFixedHeight = box is not null && !GrowsWithText(shape, box),
         };
     }
 
@@ -609,6 +626,12 @@ internal static class DocxVmlFrames
         Colour? Fill, Colour? Line, Length Width, bool IsLine, bool IsLineMirrored)
     {
         public static readonly VmlPaint None = new(null, null, Length.Zero, false, false);
+
+        /// <summary>The marker the outline carries at its first point, or none.</summary>
+        public LineEnd HeadEnd { get; init; }
+
+        /// <summary>The one at its last, or none.</summary>
+        public LineEnd TailEnd { get; init; }
     }
 
     /// <summary>
@@ -709,9 +732,125 @@ internal static class DocxVmlFrames
         return double.IsFinite(fraction) ? Math.Clamp(fraction, 0.0, 1.0) : null;
     }
 
-    private static VmlPaint PaintOf(XElement shape, Dictionary<string, string> style)
+    /// <summary>
+    /// The DrawingML preset a VML shape type names, or null for one this does not model.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>v:shape</c> names its geometry by number — <c>type="#_x0000_t15"</c>, or an
+    /// <c>o:spt</c> on the <c>v:shapetype</c> it points at — and the number is Escher's
+    /// <c>MSO_SPT</c>. The names here are the reference's own: <c>GETVMLShapeType</c>
+    /// (<c>filter/source/msfilter/util.cxx</c>:1072-1280) is the same table read the other way
+    /// round, from a DrawingML preset name to an <c>MSO_SPT</c>, and the numbering is the
+    /// <c>MSO_SPT</c> enum in <c>include/svx/msdffdef.hxx</c>:274.
+    /// </para>
+    /// <para>
+    /// <strong>Without this every one of them was drawn as its bounding rectangle, and unpainted
+    /// at that.</strong> <see cref="PaintOf"/> painted only a <c>v:rect</c> and a
+    /// <c>v:roundrect</c>, on the stated grounds that filling a pentagon's box would be a
+    /// confident wrong answer — which was right, and left the pentagon itself undrawn. Naming the
+    /// geometry answers both halves at once: <see cref="Layout.PageFrame.Preset"/> already routes
+    /// a name through <c>CustomShapeGeometry.Preset</c>, which holds all 187 of them.
+    /// </para>
+    /// <para>
+    /// <strong>Censused over the corpus's 271 DOCX</strong>, counting only <c>v:shape</c> that
+    /// state a <c>fillcolor</c> or a <c>strokecolor</c> they do not then switch off: <b>202 uses in
+    /// 27 documents</b> are <c>t202</c>, the text box, which is a plain rectangle; <b>49 in 5</b>
+    /// are <c>t15</c>, the right-pointing pentagon; <b>30 in 2</b> are <c>t13</c>, the right arrow;
+    /// and the rest are the two dozen entries below, none more than 23. <c>t32</c> is excluded
+    /// because <see cref="IsStraightConnector"/> already draws it as a rule, and <c>t136</c>
+    /// because <see cref="DocxVmlFontwork"/> already draws its glyph outlines.
+    /// </para>
+    /// <para>
+    /// Nothing is defaulted by naming a geometry: the shape is still painted only with the fill and
+    /// the stroke it states, which is the rule <see cref="PaintOf"/> has always followed.
+    /// </para>
+    /// </remarks>
+    private static string? PresetOf(XElement shape, XElement scope)
     {
-        bool box = shape.Name.LocalName is "rect" or "roundrect";
+        if (shape.Name.LocalName is not "shape") return null;
+        if (Spt(shape, ShapeTypeOf(shape, scope)) is not { } spt) return null;
+
+        return spt switch
+        {
+            1 or 202 => "rect",
+            2 => "roundRect",
+            3 => "ellipse",
+            4 => "diamond",
+            5 => "triangle",
+            6 => "rtTriangle",
+            7 => "parallelogram",
+            8 => "trapezoid",
+            9 => "hexagon",
+            10 => "octagon",
+            11 => "plus",
+            12 => "star5",
+            13 => "rightArrow",
+            15 => "homePlate",
+            16 => "cube",
+            21 => "plaque",
+            22 => "can",
+            23 => "donut",
+            34 => "bentConnector3",
+            38 => "curvedConnector3",
+            55 => "chevron",
+            62 => "wedgeRoundRectCallout",
+            66 => "leftArrow",
+            67 => "downArrow",
+            68 => "upArrow",
+            93 => "stripedRightArrow",
+            102 => "curvedRightArrow",
+            103 => "curvedLeftArrow",
+            104 => "curvedUpArrow",
+            105 => "curvedDownArrow",
+            109 => "flowChartProcess",
+            110 => "flowChartDecision",
+            111 => "flowChartInputOutput",
+            112 => "flowChartPredefinedProcess",
+            113 => "flowChartInternalStorage",
+            114 => "flowChartDocument",
+            116 => "flowChartTerminator",
+            117 => "flowChartPreparation",
+            118 => "flowChartManualInput",
+            119 => "flowChartManualOperation",
+            120 => "flowChartConnector",
+            125 => "flowChartCollate",
+            _ => null,
+        };
+    }
+
+    /// <summary>The shape's <c>MSO_SPT</c>, from its own <c>o:spt</c>, its type's, or its id.</summary>
+    /// <remarks>
+    /// The same three places <see cref="DocxVmlFontwork"/> looks, and in the same order: Word
+    /// writes the number on the <c>v:shapetype</c> and refers to it as <c>#_x0000_t15</c>, so the
+    /// reference is the reliable one and the attribute is the exception.
+    /// </remarks>
+    private static int? Spt(XElement shape, XElement? shapeType)
+    {
+        XName name = XName.Get("spt", OoxmlNamespaces.VmlOffice);
+        foreach (XElement? carrier in new[] { shape, shapeType })
+        {
+            if (carrier?.Attribute(name)?.Value is not { Length: > 0 } stated) continue;
+            if (double.TryParse(
+                    stated, NumberStyles.Float, CultureInfo.InvariantCulture, out double spt))
+            {
+                return (int)spt;
+            }
+        }
+
+        const string Prefix = "#_x0000_t";
+        return shape.Attribute("type")?.Value is { } reference
+               && reference.StartsWith(Prefix, StringComparison.Ordinal)
+               && int.TryParse(
+                   reference.AsSpan(Prefix.Length), NumberStyles.Integer,
+                   CultureInfo.InvariantCulture, out int number)
+            ? number
+            : null;
+    }
+
+    private static VmlPaint PaintOf(XElement shape, Dictionary<string, string> style, string? preset)
+    {
+        bool box = shape.Name.LocalName is "rect" or "roundrect" || preset is not null;
         bool rule = IsStraightConnector(shape) || IsLine(shape);
         if (!box && !rule) return VmlPaint.None;
 
@@ -742,8 +881,60 @@ internal static class DocxVmlFrames
                 ?? string.Empty)
             ?? Hairline;
 
-        return new VmlPaint(
-            fill, line, width <= Length.Zero ? Hairline : width, rule, IsMirrored(style));
+        return new VmlPaint(fill, line, width <= Length.Zero ? Hairline : width, rule,
+            IsMirrored(style))
+        {
+            HeadEnd = Arrow(strokeElement, "start"),
+            TailEnd = Arrow(strokeElement, "end"),
+        };
+    }
+
+    /// <summary>
+    /// The marker one end of a <c>v:stroke</c> carries, in the DrawingML vocabulary
+    /// <see cref="LineEnds"/> speaks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// VML names five arrow shapes and DrawingML names the same five differently, so the reference
+    /// translates rather than reads: <c>lclGetDmlArrowType</c>
+    /// (<c>oox/source/vml/vmlformatting.cxx</c>:599-611) maps <c>block</c> to <c>triangle</c>,
+    /// <c>classic</c> to <c>stealth</c> and <c>open</c> to <c>arrow</c>, leaving <c>diamond</c> and
+    /// <c>oval</c> alone; the two size words map <c>narrow</c>/<c>short</c> to <c>sm</c> and
+    /// <c>wide</c>/<c>long</c> to <c>lg</c> (<c>:613-632</c>). An unknown or absent type is
+    /// <c>none</c>, which draws nothing.
+    /// </para>
+    /// <para>
+    /// This is on the <c>v:stroke</c> child and never on the shape, unlike every other outline
+    /// attribute here, each of which has a shape-level spelling as well.
+    /// </para>
+    /// </remarks>
+    /// <param name="stroke">The shape's <c>v:stroke</c>, or null when it carries none.</param>
+    /// <param name="which">Either <c>start</c> or <c>end</c>.</param>
+    private static LineEnd Arrow(XElement? stroke, string which)
+    {
+        if (stroke?.Attribute(which + "arrow")?.Value is not { Length: > 0 } arrow) return default;
+
+        string? type = arrow switch
+        {
+            "block" => "triangle",
+            "classic" => "stealth",
+            "diamond" => "diamond",
+            "oval" => "oval",
+            "open" => "arrow",
+            _ => null,
+        };
+
+        return type is null
+            ? default
+            : new LineEnd(type, Size(which + "arrowwidth"), Size(which + "arrowlength"));
+
+        string? Size(string name) => stroke.Attribute(name)?.Value switch
+        {
+            "narrow" or "short" => "sm",
+            "medium" => "med",
+            "wide" or "long" => "lg",
+            _ => null,
+        };
     }
 
     /// <summary>The thinnest line LibreOffice's PDF export writes, which is what it draws a VML
@@ -1110,6 +1301,87 @@ internal static class DocxVmlFrames
     /// <summary>The <c>w:txbxContent</c> a VML shape carries, or null when it carries none.</summary>
     private static XElement? TextBox(XElement shape)
         => shape.Descendants(Word.Name("txbxContent")).FirstOrDefault();
+
+    /// <summary>The <c>v:textbox</c> a <c>w:txbxContent</c> sits in, or null when it sits in none.</summary>
+    /// <remarks>
+    /// The content is the element the readers above carry, and the attributes that decide the box's
+    /// insets are on the <c>v:textbox</c> around it. Matched on the local name because a shape inside a
+    /// <c>mc:Fallback</c> is written in whichever VML namespace its producer chose.
+    /// </remarks>
+    private static XElement? Enclosure(XElement content)
+        => content.Ancestors().FirstOrDefault(element => element.Name.LocalName == "textbox");
+
+    /// <summary>
+    /// The distance between a VML text box's edge and its text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>v:textbox/@inset</c> is a comma list of up to four CSS lengths — left, top, right, bottom —
+    /// and a value omitted from it takes that <em>side's</em> default rather than nothing:
+    /// <c>TextBoxContext</c> reads each in turn and substitutes <c>0.1in</c> across and <c>0.05in</c>
+    /// down for an empty one (<c>oox/source/vml/vmltextboxcontext.cxx</c>:185-211). So an absent
+    /// attribute and a stated <c>0,0,0,0</c> are opposite answers, and <c>inset="4mm"</c> moves the
+    /// left side alone.
+    /// </para>
+    /// <para>
+    /// <strong><c>insetmode="auto"</c> takes none of that.</strong> The whole block is guarded on the
+    /// mode not being <c>auto</c>, so such a box leaves <c>borderDistanceSet</c> false and
+    /// <c>vmlshape.cxx</c>:778-784 sets no distance at all — the frame keeps Writer's own
+    /// <c>Frame</c> style, whose padding is 1.5 mm. No corpus document states the mode, so it is
+    /// modelled for the rule rather than for its reach.
+    /// </para>
+    /// <para>
+    /// Confirmed twice: 26.2.4.2's own <c>--convert-to fodt</c> of ten one-attribute fixtures states
+    /// the four <c>fo:padding-*</c> this computes, and its rendering of the same ten puts the first
+    /// line where they say. <c>probes/vmlinset-r171</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="content">The <c>w:txbxContent</c> whose enclosing box is read.</param>
+    private static Margins Insets(XElement content)
+    {
+        XElement? box = Enclosure(content);
+
+        if (box?.Attribute("insetmode")?.Value == "auto")
+        {
+            return new Margins(
+                WriterFrameInset, WriterFrameInset, WriterFrameInset, WriterFrameInset);
+        }
+
+        string[] stated = (box?.Attribute("inset")?.Value ?? string.Empty).Split(',');
+
+        return new Margins(
+            Side(0, DefaultInsetAcross), Side(1, DefaultInsetDown),
+            Side(2, DefaultInsetAcross), Side(3, DefaultInsetDown));
+
+        Length Side(int index, Length fallback)
+            => index < stated.Length && Css(stated[index]) is { } length ? length : fallback;
+    }
+
+    /// <summary>A VML text box's default inset to left and right.</summary>
+    private static readonly Length DefaultInsetAcross = Length.FromEmu(91440);
+
+    /// <summary>Its default inset above and below.</summary>
+    private static readonly Length DefaultInsetDown = Length.FromEmu(45720);
+
+    /// <summary>What a box asking for the automatic inset gets: Writer's own <c>Frame</c> padding.</summary>
+    private static readonly Length WriterFrameInset = Length.FromMm100(150);
+
+    /// <summary>
+    /// Whether a VML shape's box grows to hold its text rather than keeping the stated height.
+    /// </summary>
+    /// <remarks>
+    /// <c>mso-fit-shape-to-text</c> is the VML spelling of <c>a:spAutoFit</c>, and it is read from two
+    /// styles into one flag: the shape's (<c>oox/source/vml/vmlshapecontext.cxx</c>:551) and the box's
+    /// own (<c>vmltextboxcontext.cxx</c>:221-222). Both set <c>mbAutoHeight</c> true on presence
+    /// alone, whatever value follows the colon, and that becomes <c>SizeType::MIN</c> against
+    /// <c>FIX</c> (<c>vmlshape.cxx</c>:776-777). Measured: the reference exports a fitting box with no
+    /// <c>svg:height</c> at all and draws all four of a fixture's lines in a box that holds two.
+    /// </remarks>
+    /// <param name="shape">The <c>v:shape</c> or its equivalent, whose own style is read too.</param>
+    /// <param name="content">The <c>w:txbxContent</c> whose enclosing box is read.</param>
+    private static bool GrowsWithText(XElement shape, XElement content)
+        => Style(shape).ContainsKey("mso-fit-shape-to-text")
+            || (Enclosure(content) is { } box && Style(box).ContainsKey("mso-fit-shape-to-text"));
 
     /// <summary>Which layer a floating VML shape paints on, and where in that layer's stack.</summary>
     /// <param name="BehindText">True for the hell layer, painted before the text.</param>

@@ -3,6 +3,8 @@ using System.Text;
 using System.Xml.Linq;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Ooxml;
+using Paperless.Ooxml.OfficeMath;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
@@ -1485,6 +1487,46 @@ public sealed partial class DocxLayoutSource
     /// <param name="IsChecked">Whether it is ticked, so that it is crossed as well as bordered.</param>
     private sealed record CheckBoxAnchor(int Offset, XElement? RunProperties, bool IsChecked);
 
+    /// <summary>
+    /// The room a formula takes on the line it sits on — nothing drawn, and no width.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 26.2.4.2 does not lay an OMML formula out as text. Its importer builds a StarMath document
+    /// from the subtree and embeds it as an OLE object anchored as-character, so the line takes the
+    /// <em>object's</em> height — see <see cref="OfficeMathBox"/>, which is that height and which
+    /// arm of it is measured against what.
+    /// </para>
+    /// <para>
+    /// <strong>Zero width, because the marks are drawn as text anyway.</strong> This tree emits the
+    /// formula's own glyphs into the paragraph (<c>AppendMath</c>), so the advance is already paid
+    /// for; the frame contributes the <em>height</em> and nothing else. A frame that also claimed
+    /// the object's width would charge the line for the formula twice.
+    /// </para>
+    /// <para>
+    /// <strong>What it is worth.</strong> Our line reserved 11.90 pt for every shape at the default
+    /// size — a nested fraction cost exactly what a bare <c>x</c> did, and the reserved box was
+    /// shorter than the ink we drew into it. On <c>ABCD-FE-01-00 Flight Envelope</c>'s page 6 that
+    /// is 8.24 pt of slack across three formula paragraphs, which is the whole of the blank page
+    /// the reference emits and we did not: the slack sweep puts the reference's threshold at
+    /// 8.50 pt and ours at 16.75, either side of the document's own 10.008 pt.
+    /// <c>probes/blankpage-r163/results.md</c> §4.
+    /// </para>
+    /// </remarks>
+    private static PageFrame? MathFrame(FrameAnchor anchor)
+    {
+        if (OfficeMathBox.Measure(anchor.Element) is not { } extent) return null;
+
+        return new PageFrame
+        {
+            Size = new Core.Geometry.DocSize(Length.Zero, extent.Height),
+            Anchor = Layout.FrameAnchor.AsCharacter,
+            AnchorOffset = anchor.Offset,
+            InlineAscent = extent.Ascent,
+            IsTextPortion = true,
+        };
+    }
+
     private List<PageFrame> FramesOf(
         List<FrameAnchor> anchors,
         List<CheckBoxAnchor> checkBoxes,
@@ -1503,6 +1545,12 @@ public sealed partial class DocxLayoutSource
         {
             Func<XElement, IReadOnlyList<PageBlock>>? content =
                 _frameDepth < MaxFrameNesting ? Content : null;
+
+            if (anchor.Element.Name.NamespaceName == OoxmlNamespaces.OfficeMath)
+            {
+                if (MathFrame(anchor) is { } formula) frames.Add(formula);
+                continue;
+            }
 
             // VML states its geometry differently from DrawingML and most of it reserves nothing, so
             // it has a reader of its own rather than a branch inside `DocxFrames`.
@@ -1736,7 +1784,64 @@ public sealed partial class DocxLayoutSource
             /// is being read, so the runs inside it do not take the character style they name.
             /// </summary>
             internal bool IsIndexResult { get; set; }
+
+            /// <summary>
+            /// True when pagination will write this field's value over its cached result, so the
+            /// result's runs take <see cref="InstructionProperties"/> rather than their own.
+            /// </summary>
+            /// <remarks>
+            /// See <see cref="RewritesTheResultOf"/> for the rule and what it is measured against.
+            /// </remarks>
+            internal bool RewritesResult { get; set; }
         }
+
+        /// <summary>
+        /// True when this walk replaces the field's value, so the value's character properties are
+        /// the <em>field's</em> and not the cached result's.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <strong>26.2.4.2 discards a field result's own <c>w:rPr</c> entirely.</strong> writerfilter
+        /// builds a <c>com.sun.star.text.TextField</c> and deletes the cached result text with it, so
+        /// the value is drawn in the character properties the field's <em>instruction</em> run carries,
+        /// falling back to the paragraph style. Measured on seven one-attribute arms in a footer, where
+        /// both engines recompute (<c>probes/fieldrpr-r168</c>): a cached result stating 20 pt red comes
+        /// back at the style's 10 pt black in five of them, and the two arms whose <c>w:instrText</c> run
+        /// states the 20 pt come back at 20 pt — including the one whose cached result states 10 pt,
+        /// which inverts the sign and is what says the rule is the instruction's and not "the smaller of
+        /// the two". A <c>w:fldSimple</c> has no instruction run at all, so it falls all the way back to
+        /// the paragraph style, and its own <c>w:rPr</c> child does not count.
+        /// </para>
+        /// <para>
+        /// <strong>Word does not, when the field says not to.</strong> <c>\* MERGEFORMAT</c> means
+        /// <em>preserve the formatting of the previous result</em>, which is exactly the cached runs'
+        /// <c>w:rPr</c>; without the switch Word reformats from the field's own. So the default follows
+        /// Word — the rule applies to a field that does not carry the switch — and
+        /// <see cref="WordParity"/> applies it to every field, which is 26.2.4.2's own reading. The
+        /// reference honours the switch nowhere: five of the seven arms carry it and answer the same as
+        /// the one that does not.
+        /// </para>
+        /// <para>
+        /// <strong>Only a field whose value this walk actually writes.</strong> For anything else the
+        /// cached text <em>is</em> what gets drawn, and drawing it in anything but its own formatting
+        /// would be a defect rather than a fix — the reference recomputes far more fields than this tree
+        /// does, and the rule about a value's formatting cannot be borrowed for a value that was never
+        /// recomputed.
+        /// </para>
+        /// <para>
+        /// Reach, censused over the corpus DOCX on the properties that change the drawn glyphs rather
+        /// than on the presence of a <c>w:rPr</c> — a result stating only <c>w:noProof</c>,
+        /// <c>w:webHidden</c> or <c>w:lang</c> is formatted identically either way:
+        /// <strong>470 field results in 59 documents</strong> without the switch, which is what moves by
+        /// default, and 106 in 29 with it, which move only under <see cref="WordParity"/>.
+        /// <c>probes/fieldrpr-r168/census.py</c>.
+        /// </para>
+        /// </remarks>
+        private bool RewritesTheResultOf(string instruction)
+            => (FieldInstructions.PageFieldOf(instruction) is not null
+                || ValueOf(instruction) is not null)
+               && (WordParity.ReproduceLibreOffice
+                   || !instruction.Contains("MERGEFORMAT", StringComparison.OrdinalIgnoreCase));
 
         /// <summary>
         /// How many index fields' results the walk is inside, so a run's <c>w:rStyle</c> is ignored.
@@ -1849,6 +1954,39 @@ public sealed partial class DocxLayoutSource
         }
 
         /// <summary>
+        /// Makes a result for a page field that has none, so that pagination has somewhere to write.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A complex field with no <c>w:fldChar w:fldCharType="separate"</c> has no cached result at
+        /// all, and a page field's value is written by <see cref="PageFields"/> over a span of the
+        /// paragraph's text — so with no span there is nothing to write over and the field draws
+        /// <em>nothing</em>. 26.2.4.2 computes and draws it. Measured as the <c>NOSEPARATOR</c> arm of
+        /// <c>probes/fieldrpr-r168</c>, and censused at <strong>10 such <c>PAGE</c> fields in 8 corpus
+        /// documents, every one of them in a running head</strong> — so those eight print no page
+        /// number at all, on every page.
+        /// </para>
+        /// <para>
+        /// One character, in the field's own properties, and its <em>width never reaches the page</em>:
+        /// <see cref="PageFields.Resolve"/> substitutes before the flow is laid out, precisely so that a
+        /// value of a different width from the one it replaces does not move the rest of the line. The
+        /// one pass that can draw it is the measuring pass of a two-pass layout, where a
+        /// <c>NUMPAGES</c> is not yet resolvable — and there this stands in for a cached result that
+        /// does not exist rather than for one it is overriding.
+        /// </para>
+        /// </remarks>
+        private bool PlaceHolder(OpenField field)
+        {
+            if (FieldInstructions.PageFieldOf(field.Instruction.ToString()) is null) return false;
+
+            XElement? outer = _runProperties;
+            _runProperties = field.InstructionProperties;
+            Emit("1");
+            _runProperties = outer;
+            return true;
+        }
+
+        /// <summary>
         /// Records a field that has just ended, when it is one whose value pagination decides.
         /// </summary>
         private void CloseField(OpenField field)
@@ -1915,6 +2053,24 @@ public sealed partial class DocxLayoutSource
 
             foreach (XElement child in element.Elements())
             {
+                // A formula's own elements share local names with WordprocessingML's — `m:r` and `m:t`
+                // against `w:r` and `w:t` — so the switch below reads one as ordinary text unless the
+                // namespace is tested first. See `AppendMath`.
+                if (child.Name.NamespaceName == OoxmlNamespaces.OfficeMath)
+                {
+                    // The reference imports the formula into a StarMath object anchored
+                    // as-character, so the line takes the object's height rather than the text's.
+                    // The anchor is registered here and sized in `MathFrame`; the marks themselves
+                    // are still emitted as text, so the formula stays searchable and extractable.
+                    if (child.Name.LocalName is "oMath" or "oMathPara")
+                    {
+                        _frames.Add(new FrameAnchor(_builder.Length, child));
+                    }
+
+                    AppendMath(child, depth + 1);
+                    continue;
+                }
+
                 switch (child.Name.LocalName)
                 {
                     case "del" or "delText":
@@ -1975,10 +2131,20 @@ public sealed partial class DocxLayoutSource
                                         _indexResults++;
                                     }
 
+                                    open.RewritesResult =
+                                        RewritesTheResultOf(open.Instruction.ToString());
+
                                     // The one point at which a field this walk computes can be written:
                                     // the instruction has been read in full, so the field's name is
                                     // known, and the cached result it replaces starts here.
-                                    if (_hidden == 0) Substitute(open, _runProperties);
+                                    if (_hidden == 0)
+                                    {
+                                        Substitute(
+                                            open,
+                                            open.RewritesResult
+                                                ? open.InstructionProperties
+                                                : _runProperties);
+                                    }
                                 }
 
                                 break;
@@ -2013,6 +2179,10 @@ public sealed partial class DocxLayoutSource
                                             closing.ResultAt = at;
                                             _hidden--;
                                         }
+                                        else if (PlaceHolder(closing))
+                                        {
+                                            closing.ResultAt = at;
+                                        }
                                     }
                                     else if (closing.Substituted)
                                     {
@@ -2034,11 +2204,18 @@ public sealed partial class DocxLayoutSource
                         OpenField simple = new() { ResultAt = _builder.Length };
                         simple.Instruction.Append(Word.Attribute(child, "instr") ?? "");
 
-                        // The cached result's own runs carry the formatting the producer gave the field —
-                        // here the whole field is one element, so the first of them is taken rather than
-                        // the paragraph's, which would draw the value in the style's weight instead.
+                        // A `w:fldSimple` states no instruction run, so a value written over it takes
+                        // the paragraph's own style — see `RewritesTheResultOf`. Where the rule does not
+                        // apply, the cached result's first run carries the formatting the producer gave
+                        // the field and is kept, which is what `\* MERGEFORMAT` asks for.
+                        simple.RewritesResult = RewritesTheResultOf(simple.Instruction.ToString());
+
                         if (_hidden == 0
-                            && Substitute(simple, Word.Child(Word.Child(child, "r"), "rPr")))
+                            && Substitute(
+                                simple,
+                                simple.RewritesResult
+                                    ? null
+                                    : Word.Child(Word.Child(child, "r"), "rPr")))
                         {
                             _hidden--;
                         }
@@ -2048,12 +2225,20 @@ public sealed partial class DocxLayoutSource
                             // its runs' character styles for the same reason.
                             bool index = IsIndexField(simple.Instruction.ToString());
                             if (index) _indexResults++;
+
+                            // Pushed so that the result's runs can see it: the compact form states no
+                            // instruction run, so a value written over it is drawn in the paragraph's
+                            // own style, which is what a null `InstructionProperties` means here.
+                            bool pushed = simple.RewritesResult && _fields.Count < MaxDepth;
+                            if (pushed) _fields.Push(simple);
+
                             try
                             {
                                 Append(child, depth + 1);
                             }
                             finally
                             {
+                                if (pushed) _fields.Pop();
                                 if (index) _indexResults--;
                             }
                         }
@@ -2235,8 +2420,17 @@ public sealed partial class DocxLayoutSource
                     case "r":
                         // The one element that carries character formatting. Runs do not nest, but this
                         // saves and restores anyway so that a malformed file cannot lose the outer state.
+                        //
+                        // Inside the cached result of a field whose value pagination will write over it,
+                        // the run's own `w:rPr` is not what the value is drawn in — see
+                        // `RewritesTheResultOf`. The field's own is substituted for it, and null there is
+                        // an answer rather than an absence: it means the paragraph's style, which is what
+                        // a `w:fldSimple` falls back to.
                         XElement? outer = _runProperties;
-                        _runProperties = Word.Child(child, "rPr");
+                        _runProperties =
+                            _fields.Count > 0 && _fields.Peek() is { RewritesResult: true, ResultAt: >= 0 } rewritten
+                                ? rewritten.InstructionProperties
+                                : Word.Child(child, "rPr");
                         Append(child, depth + 1);
                         _runProperties = outer;
                         break;
@@ -2271,6 +2465,345 @@ public sealed partial class DocxLayoutSource
             _symbolFace = (resolved.Face, resolved.Font);
             Emit(resolved.Text);
             _symbolFace = null;
+        }
+
+        /// <summary>
+        /// Walks a formula, emitting the characters it states and the characters it generates.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// OMML states a formula structurally: a fraction is a <c>m:f</c> holding a numerator and a
+        /// denominator and nothing says "draw a rule between them", a radical is a <c>m:rad</c> and
+        /// nothing says <c>U+221A</c>, a delimiter pair is a <c>m:d</c> whose brackets live in
+        /// <em>attributes</em>. So a reader that emits only the <c>m:t</c> leaves draws
+        /// <c>a1b2</c> for a fraction of two subscripted terms and <c>i=1nxi</c> for a sum. Measured
+        /// against 26.2.4.2 on a fifteen-construct ladder
+        /// (<c>tests/corpus/features/words-formula-complexity.docx</c>): fifteen of fifteen wrong, and
+        /// the page's alphanumeric count identical on both sides throughout, so no gate column could
+        /// see it.
+        /// </para>
+        /// <para>
+        /// <strong>This is the one-dimensional half.</strong> The reference builds a StarMath object per
+        /// <c>m:oMath</c> and lays it out in two dimensions — a stacked fraction, limits above and below
+        /// an n-ary, a vinculum over a radicand. Reproducing that needs a box model with its own
+        /// baseline, which this does not have; what it does is put every generated mark on the line in
+        /// reading order, so the formula is legible, searchable and roughly the right width. The
+        /// vertical half is the height reservation, which gives the line the reference's own height for
+        /// the line even though we draw the content flat.
+        /// </para>
+        /// <para>
+        /// The defaults are the specification's and each costs a formula when it is missed: a
+        /// <c>m:d</c> with no <c>m:begChr</c> is a parenthesis rather than nothing, an <c>m:nary</c>
+        /// with no <c>m:chr</c> is an integral rather than nothing.
+        /// </para>
+        /// </remarks>
+        /// <param name="element">A node of the formula's subtree.</param>
+        /// <param name="depth">Recursion depth, against the same bound the ordinary walk uses.</param>
+        private void AppendMath(XElement element, int depth)
+        {
+            if (depth > MaxDepth) return;
+
+            switch (element.Name.LocalName)
+            {
+                // Properties and the control run that carries a construct's own formatting. Neither is
+                // drawn, and `m:ctrlPr` holds a `w:rPr` that would otherwise be read as a run's.
+                case "argPr" or "ctrlPr" or "accPr" or "barPr" or "boxPr" or "dPr" or "eqArrPr"
+                    or "fPr" or "funcPr" or "groupChrPr" or "limLowPr" or "limUppPr" or "mPr"
+                    or "mcPr" or "mcs" or "mc" or "naryPr" or "phantPr" or "radPr" or "sPrePr"
+                    or "sSubPr" or "sSubSupPr" or "sSupPr" or "oMathParaPr":
+                    return;
+
+                case "t":
+                    if (!Suppressed) Emit(element.Value);
+                    return;
+
+                case "r":
+                {
+                    // `m:r` carries a `w:rPr` exactly as `w:r` does — that half really is
+                    // WordprocessingML — so the run formatting in force is saved and restored the same
+                    // way. Its `m:t` children are reached by the recursion below.
+                    XElement? outer = _runProperties;
+                    if (Word.Child(element, "rPr") is { } properties) _runProperties = properties;
+                    AppendMathChildren(element, depth);
+                    _runProperties = outer;
+                    return;
+                }
+
+                case "sSub":
+                    AppendMathChild(element, "e", depth);
+                    AppendScript(element, "sub", subscript: true, depth);
+                    return;
+
+                case "sSup":
+                    AppendMathChild(element, "e", depth);
+                    AppendScript(element, "sup", subscript: false, depth);
+                    return;
+
+                case "sSubSup":
+                    AppendMathChild(element, "e", depth);
+                    AppendScript(element, "sub", subscript: true, depth);
+                    AppendScript(element, "sup", subscript: false, depth);
+                    return;
+
+                case "sPre":
+                    // A pre-script states its scripts before the base and draws them to its left.
+                    AppendScript(element, "sub", subscript: true, depth);
+                    AppendScript(element, "sup", subscript: false, depth);
+                    AppendMathChild(element, "e", depth);
+                    return;
+
+                case "f":
+                    // Until there is a box model to stack them in, a fraction reads as a solidus. The
+                    // *height* the reference gives it is reserved regardless — see `DocxMathHeight`.
+                    AppendMathChild(element, "num", depth);
+                    Emit("/");
+                    AppendMathChild(element, "den", depth);
+                    return;
+
+                case "rad":
+                {
+                    if (!MathFlag(MathChild(element, "radPr"), "degHide"))
+                    {
+                        AppendScript(element, "deg", subscript: false, depth);
+                    }
+
+                    Emit("√");
+                    AppendMathChild(element, "e", depth);
+                    return;
+                }
+
+                case "nary":
+                {
+                    XElement? properties = MathChild(element, "naryPr");
+                    Emit(MathValue(properties, "chr") is { Length: > 0 } sign ? sign : "\u222B");
+                    if (!MathFlag(properties, "subHide"))
+                    {
+                        AppendScript(element, "sub", subscript: true, depth);
+                    }
+
+                    if (!MathFlag(properties, "supHide"))
+                    {
+                        AppendScript(element, "sup", subscript: false, depth);
+                    }
+
+                    AppendMathChild(element, "e", depth);
+                    return;
+                }
+
+                case "d":
+                {
+                    // The brackets are attributes rather than elements, and their defaults are real: a
+                    // `m:d` stating nothing is a parenthesised group, not a bare one.
+                    XElement? properties = MathChild(element, "dPr");
+                    Emit(Delimiter(properties, "begChr", "("));
+
+                    bool first = true;
+                    foreach (XElement argument in element.Elements())
+                    {
+                        if (argument.Name.LocalName != "e") continue;
+                        if (!first) Emit(Delimiter(properties, "sepChr", "|"));
+                        AppendMath(argument, depth + 1);
+                        first = false;
+                    }
+
+                    Emit(Delimiter(properties, "endChr", ")"));
+                    return;
+                }
+
+                case "func":
+                    AppendMathChild(element, "fName", depth);
+                    AppendMathChild(element, "e", depth);
+                    return;
+
+                case "acc":
+                    // The accent follows its base as a combining mark, which is where Unicode puts it.
+                    AppendMathChild(element, "e", depth);
+                    Emit(MathValue(MathChild(element, "accPr"), "chr") is { Length: > 0 } accent
+                        ? accent
+                        : "̂");
+                    return;
+
+                case "limLow":
+                    AppendMathChild(element, "e", depth);
+                    AppendScript(element, "lim", subscript: true, depth);
+                    return;
+
+                case "limUpp":
+                    AppendMathChild(element, "e", depth);
+                    AppendScript(element, "lim", subscript: false, depth);
+                    return;
+
+                case "m":
+                    // A matrix reads row by row: cells separated by a space, rows by a line break, which
+                    // is what a one-dimensional rendering of a grid can honestly offer.
+                    foreach (XElement row in element.Elements())
+                    {
+                        if (row.Name.LocalName != "mr") continue;
+
+                        bool opening = true;
+                        foreach (XElement cell in row.Elements())
+                        {
+                            if (cell.Name.LocalName != "e") continue;
+                            if (!opening) Emit(" ");
+                            AppendMath(cell, depth + 1);
+                            opening = false;
+                        }
+
+                        Emit("\n");
+                    }
+
+                    return;
+
+                default:
+                    AppendMathChildren(element, depth);
+                    return;
+            }
+        }
+
+        /// <summary>Walks a math element's children, staying inside the math walk.</summary>
+        private void AppendMathChildren(XElement element, int depth)
+        {
+            foreach (XElement child in element.Elements())
+            {
+                // A `w:` element inside a formula — the `w:rPr` of an `m:r` is the common one — belongs
+                // to the ordinary walk, which is what reads run formatting.
+                if (child.Name.NamespaceName == OoxmlNamespaces.OfficeMath) AppendMath(child, depth + 1);
+            }
+        }
+
+        /// <summary>Walks one named child of a math element, if it has one.</summary>
+        private void AppendMathChild(XElement element, string name, int depth)
+        {
+            foreach (XElement child in element.Elements())
+            {
+                if (child.Name.LocalName == name
+                    && child.Name.NamespaceName == OoxmlNamespaces.OfficeMath)
+                {
+                    AppendMath(child, depth + 1);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Walks a script — a subscript, a superscript, a radical's degree or an n-ary's limit — with the
+        /// run properties a raised or lowered run would carry.
+        /// </summary>
+        /// <remarks>
+        /// A synthesised <c>w:rPr</c> is the carrier because it is what the rest of this reader already
+        /// understands: <see cref="WordCharacterFormat"/> turns <c>w:vertAlign</c> into the same
+        /// escapement an ordinary superscript gets, so the script is drawn smaller and off the baseline
+        /// without a second formatting path existing to disagree with the first.
+        /// <para>
+        /// It is not StarMath's own arithmetic, and the residual is measured rather than guessed. The
+        /// reference sets a script at 60 % (<c>SIZ_INDEX</c>) and drops it by
+        /// <c>max(0.20·em, ascent·0.60·em − 0.30·em)</c> — the second arm, a clamp to the delimiter line
+        /// in <c>SmSubSupNode::Arrange</c>, winning for every Latin face — where an ordinary
+        /// <c>w:vertAlign</c> subscript is 58 % and a fixed fraction of the font's height. The gap is a
+        /// fraction of a point at body size and the structure is right; closing it needs the script's
+        /// own escapement computed from the face, which this does not yet do.
+        /// </para>
+        /// </remarks>
+        /// <param name="element">The construct holding the script.</param>
+        /// <param name="name">Which child of it is the script.</param>
+        /// <param name="subscript">True to lower it, false to raise it.</param>
+        /// <param name="depth">Recursion depth.</param>
+        private void AppendScript(XElement element, string name, bool subscript, int depth)
+        {
+            XElement? script = null;
+            foreach (XElement child in element.Elements())
+            {
+                if (child.Name.LocalName == name
+                    && child.Name.NamespaceName == OoxmlNamespaces.OfficeMath)
+                {
+                    script = child;
+                    break;
+                }
+            }
+
+            if (script is null) return;
+
+            XElement? outer = _runProperties;
+            _runProperties = ScriptProperties(outer, subscript);
+            AppendMath(script, depth + 1);
+            _runProperties = outer;
+        }
+
+        /// <summary>
+        /// The run properties in force, with a vertical alignment added.
+        /// </summary>
+        /// <remarks>
+        /// The outer properties are copied rather than replaced so a script inside a bold or coloured
+        /// run keeps that, and the result is cached against the pair so that two scripts under one run
+        /// share an element — <see cref="Emit"/> merges adjacent ranges by reference equality of their
+        /// properties, so building a fresh element per script would split every one of them into its
+        /// own range for nothing.
+        /// </remarks>
+        private XElement ScriptProperties(XElement? outer, bool subscript)
+        {
+            Dictionary<(XElement?, bool), XElement> cache = _scriptProperties;
+            if (cache.TryGetValue((outer, subscript), out XElement? cached)) return cached;
+
+            XElement properties = outer is null
+                ? new XElement(XName.Get("rPr", OoxmlNamespaces.WordprocessingML))
+                : new XElement(outer);
+
+            properties.Elements(XName.Get("vertAlign", OoxmlNamespaces.WordprocessingML))
+                .Remove();
+            properties.Add(new XElement(
+                XName.Get("vertAlign", OoxmlNamespaces.WordprocessingML),
+                new XAttribute(
+                    XName.Get("val", OoxmlNamespaces.WordprocessingML),
+                    subscript ? "subscript" : "superscript")));
+
+            cache[(outer, subscript)] = properties;
+            return properties;
+        }
+
+        /// <summary>One synthesised script `w:rPr` per (outer properties, direction) pair.</summary>
+        private readonly Dictionary<(XElement?, bool), XElement> _scriptProperties = [];
+
+        /// <summary>A delimiter character stated on <c>m:dPr</c>, or the specification's default.</summary>
+        private static string Delimiter(XElement? properties, string name, string fallback)
+            => MathValue(properties, name) is { Length: > 0 } stated ? stated : fallback;
+
+        /// <summary>
+        /// The <c>m:val</c> of a formula property's named child, or null.
+        /// </summary>
+        /// <remarks>
+        /// <strong>Not <see cref="Word.Value"/>.</strong> That resolves the child and the attribute in
+        /// the WordprocessingML namespace, and a formula states both in its own: <c>&lt;m:chr
+        /// m:val="∑"/&gt;</c>. Asking the `w:` question of an `m:` element does not fail — it answers
+        /// null, which every caller here reads as "not stated" and replaces with a default. Measured:
+        /// the ladder fixture's summation drew <c>∫</c>, because `m:naryPr/m:chr` was invisible and the
+        /// n-ary default is the integral.
+        /// </remarks>
+        private static string? MathValue(XElement? element, string name)
+        {
+            if (element is null) return null;
+
+            XElement? child = element.Element(XName.Get(name, OoxmlNamespaces.OfficeMath));
+            return child?.Attribute(XName.Get("val", OoxmlNamespaces.OfficeMath))?.Value;
+        }
+
+        /// <summary>A formula element's named child, in the math namespace.</summary>
+        private static XElement? MathChild(XElement? element, string name)
+            => element?.Element(XName.Get(name, OoxmlNamespaces.OfficeMath));
+
+        /// <summary>True when a formula property's named flag is on.</summary>
+        /// <remarks>
+        /// An OMML boolean is on when it is present and its <c>m:val</c> is not a false token — the
+        /// same three-valued shape <c>w:val</c> has, so a bare <c>&lt;m:degHide/&gt;</c> means hidden.
+        /// </remarks>
+        private static bool MathFlag(XElement? element, string name)
+        {
+            if (element is null) return false;
+
+            XElement? child = element.Element(XName.Get(name, OoxmlNamespaces.OfficeMath));
+            if (child is null) return false;
+
+            string? value = child.Attribute(XName.Get("val", OoxmlNamespaces.OfficeMath))?.Value;
+            return value is not ("0" or "false" or "off");
         }
 
         /// <summary>Appends text under the run properties currently in force.</summary>

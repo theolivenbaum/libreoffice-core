@@ -462,6 +462,53 @@ public static class TableLayouter
 
         candidates.Sort();
 
+        // Whether anything is left over, asked of the content rather than of the candidate list: a cut a
+        // nested table forbade is absent from that list, and reading the deepest *legal* cut as the
+        // deepest content would report a part complete while a whole nested table still waited below it.
+        //
+        // Hoisted above the search because `Fits` needs it: it does not depend on the cut.
+        Length last = Length.Zero;
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+
+            foreach (PlacedLine line in flow.Lines)
+            {
+                last = Length.Max(last, flow.Area.Y + line.Top + line.Box.Height);
+            }
+
+            foreach (PlacedTable nested in flow.Tables) last = Length.Max(last, nested.Area.Bottom);
+        }
+
+        // What a part cut here costs, or null when it does not fit.
+        //
+        // A part that does NOT finish the row is measured twice. The reference prefers to carry the
+        // trailing `w:spacing w:after` of the cells that finished above the cut, and drops it whole —
+        // never clipped — when the part would not otherwise fit, taking the split anyway rather than
+        // moving the row. A part that DOES finish the row is not a split: it owes that spacing exactly
+        // as `LayOut` charged the row for it, so it is measured once and moves whole if it will not fit.
+        //
+        // [bin] 26.2.4.2 on a three-row two-column fixture with `w:spacing before=40 line=233`, `after`
+        // swept and the bottom margin swept in 10 twip steps so the room varies continuously: the master
+        // part measures 26.90 (before + line + after + border) while the room allows it and 14.90
+        // (before + line + border) once it does not, with no intermediate value anywhere in the sweep.
+        // The same all-or-nothing shape at `after=40`. See `probes/orphan3-r163/`.
+        //
+        // Both measures are non-decreasing in the cut, so `break` still ends the search at the first
+        // candidate that fails.
+        Length? Fits(Length candidate)
+        {
+            Length needed = head + HeightAt(
+                cells, rowTop, above, candidate, border, keepsSpacingAtPages, chargeTrailing: true);
+            if (needed <= room) return needed;
+
+            if (candidate >= last) return null;
+
+            needed = head + HeightAt(
+                cells, rowTop, above, candidate, border, keepsSpacingAtPages, chargeTrailing: false);
+            return needed <= room ? needed : null;
+        }
+
         // The deepest cut whose part still fits. The height is not decreasing in the cut, so the first
         // candidate that does not fit ends the search.
         Length? chosen = null;
@@ -470,10 +517,7 @@ public static class TableLayouter
         foreach (Length candidate in candidates)
         {
             if (chosen is { } already && already == candidate) continue;
-
-            Length needed = head
-                + HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
-            if (needed > room) break;
+            if (Fits(candidate) is not { } needed) break;
 
             chosen = candidate;
             height = needed;
@@ -517,10 +561,7 @@ public static class TableLayouter
             foreach (Length candidate in deep)
             {
                 if (chosen is { } already && already == candidate) continue;
-
-                Length needed = head
-                    + HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
-                if (needed > room) break;
+                if (Fits(candidate) is not { } needed) break;
 
                 chosen = candidate;
                 height = needed;
@@ -529,22 +570,6 @@ public static class TableLayouter
         }
 
         if (chosen is not { } cut) return null;
-
-        // Whether anything is left over, asked of the content rather than of the candidate list: a cut a
-        // nested table forbade is absent from that list, and reading the deepest *legal* cut as the
-        // deepest content would report a part complete while a whole nested table still waited below it.
-        Length last = Length.Zero;
-        foreach (PlacedTableCell cell in cells)
-        {
-            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
-
-            foreach (PlacedLine line in flow.Lines)
-            {
-                last = Length.Max(last, flow.Area.Y + line.Top + line.Box.Height);
-            }
-
-            foreach (PlacedTable nested in flow.Tables) last = Length.Max(last, nested.Area.Bottom);
-        }
 
         // A nested table contributes its whole rectangle's bottom to `last`, which is right while a cut
         // can only fall between nested tables: the part is incomplete exactly when one is still below it.
@@ -615,7 +640,8 @@ public static class TableLayouter
         Length above,
         Length cut,
         Length border,
-        bool keepsSpacingAtPages)
+        bool keepsSpacingAtPages,
+        bool chargeTrailing)
     {
         // The row's own first part keeps the offset it was laid out with — see `Sliced` — so its cells
         // begin at the top of their flow and not at their first line.
@@ -691,7 +717,8 @@ public static class TableLayouter
                 // block top *is* this line's bottom and this changes nothing.
                 bottom = Length.Max(bottom, flow.Area.Y + next.Top - next.UpperSpace);
             }
-            else if (!tableBelow
+            else if (chargeTrailing
+                     && !tableBelow
                      && flow.Lines.Count > 0
                      && flow.Area.Y + flow.Lines[^1].Top + flow.Lines[^1].Box.Height <= cut)
             {
@@ -700,6 +727,9 @@ public static class TableLayouter
                 // keeps that from firing on a cell whose *lines* all fit while a nested table below them
                 // does not: charging the whole cell's advance there makes the part as tall as the row
                 // and nothing ever fits.
+                //
+                // `chargeTrailing` is false on the second measure a split takes when the first did not
+                // fit: the reference drops this spacing whole rather than move the row. See `Fits`.
                 bottom = Length.Max(bottom, flow.Area.Y + flow.Advance);
             }
 
