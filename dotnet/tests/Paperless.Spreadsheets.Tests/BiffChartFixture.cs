@@ -168,11 +168,21 @@ internal static class BiffChartFixture
     /// <c>EXC_CHSRCLINK_WORKSHEET</c>, which is the only type that carries a formula at all. The
     /// formula is one <c>tRef3d</c> token: the opcode, the <c>ixti</c>, then the row and column.
     /// </remarks>
-    public static byte[] SeriesLink() => Record(ChSourceLink,
+    /// <param name="destination">
+    /// Which part of the series the cell feeds — 1 for <c>EXC_CHSRCLINK_VALUES</c>, 3 for
+    /// <c>EXC_CHSRCLINK_BUBBLES</c>, which is a bubble chart's third dimension.
+    /// </param>
+    /// <param name="row">
+    /// Which row of the worksheet's one column the token names. The fixture's sheet holds 42 in
+    /// row 0 and 7 in row 1, so two links naming different rows give a series two distinct
+    /// sequences — which is what a case about the sizes needs, or it cannot tell them from the
+    /// values.
+    /// </param>
+    public static byte[] SeriesLink(byte destination = 1, ushort row = 0) => Record(ChSourceLink,
     [
-        1, 2, 0, 0, 0, 0,
+        destination, 2, 0, 0, 0, 0,
         .. Word(7),
-        0x3A, .. Word(0), .. Word(0), .. Word(0),
+        0x3A, .. Word(0), .. Word(row), .. Word(0),
     ]);
 
     /// <summary>
@@ -462,6 +472,8 @@ internal static class BiffChartFixture
     public const ushort ChProperties = 0x1044;
     public const ushort ChBar = 0x1017;
     public const ushort ChLine = 0x1018;
+    public const ushort ChPie = 0x1019;
+    public const ushort ChScatter = 0x101B;
 
     /// <summary>An axis' own number format index — <c>EXC_ID_CHFORMAT</c>.</summary>
     public const ushort ChFormat = 0x104E;

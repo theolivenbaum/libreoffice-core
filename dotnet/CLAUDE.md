@@ -3200,6 +3200,67 @@ eight alphanumerics — so a volatile workbook drifts in ink and barely at all i
 scores. The corollary is the useful half: **`TODAY()` can be frozen at the file's own cached serial**,
 which makes the reference recompute what the author saw and turns a decaying row into a stable one.
 
+### A chart type LibreOffice "supports" is not one it draws, and two readers decided a type after reading a record
+
+**`chart2/source/inc/servicenames_charttypes.hxx` declares nineteen chart types and
+`VSeriesPlotter::createSeriesPlotter` (`chart2/source/view/charttypes/VSeriesPlotter.cxx`
+:2882-2907) has a plotter for eleven.** The other eight reach `UnsupportedChart`, which draws
+`STR_UNSUPPORTED_CHART_TYPE` and nothing else (`UnsupportedChart.cxx`:88-111). So *"the reference
+supports a treemap"* and *"the reference draws a treemap"* are different statements, and
+reproducing the eight means reproducing a string rather than a plot. `oox` says the same thing in
+its own words: `SERVICE_CHART2_SURFACE` is `"com.sun.star.chart2.ColumnChartType"; // Todo`
+(`oox/source/drawingml/chart/typegroupconverter.cxx`:79).
+
+**The whole corpus was swept by chart type to find out where that matters, and no type is
+systematically wrong.** 168 documents holding a `c:` or `cx:` chart part, rendered both ways,
+grouped by the *set* of plot elements their parts state — `barChart` 0.76 mean worst-page
+`|ink|%` over 55 documents, `lineChart` 0.58 over 14, `doughnutChart` 0.68 over 13, `radarChart`
+0.38 over 5, `bubbleChart` **0.13** over 9, `areaChart` **0.05** over 9, `cx:` chartex **0.01**
+over both witnesses. Every row that heads the table is one or two documents, so its mean is its
+worst and it is a *document* rather than a type. **The chart work left is per-document layout.**
+`probes/chartsweep-r186`.
+
+**What the same review did find is two readers that switch on a record id where the reference
+switches on a field inside it.** Both are closed, and the shape is worth remembering because it
+is invisible to a `grep` of type names:
+
+- **ODF: an unrecognised `chart:class` is a bar chart, not nothing.**
+  `SchXMLChartContext::ParseAttributes` sets the service name only for a `chart:`-namespace class
+  `GetChartTypeEnum` knows, or for the `ooo:` add-in branch
+  (`xmloff/source/chart/SchXMLChartContext.cxx`:372-402); everything else falls through to
+  `:470-478`, which reads `aChartClass_Bar`. Measured on 26.2.4.2 over fifteen one-attribute
+  variants, the reference draws the same 126 path operators for every one of them as it does for
+  `chart:bar` itself, and `OdfChartPlot` drew nothing. The `ooo:` spelling is the exception and is
+  left returning null. `probes/chartclass-r186`.
+- **BIFF: a doughnut and a bubble chart have no record id.** `XclImpChType::Finalize`
+  (`sc/source/filter/excel/xichart.cxx`:2288-2303) reads the body first —
+  `(mnPieHole > 0) ? DONUT : PIE` and `mnFlags & EXC_CHSCATTER_BUBBLES` — and a bubble series'
+  sizes arrive on source-link destination **3**, `EXC_CHSRCLINK_BUBBLES`, beside title 0, values 1
+  and categories 2. `XlsChartReader` read none of the three. On 26.2.4.2's own
+  `--convert-to 'xls:MS Excel 97'` of the corpus chart workbooks, worst-page `|ink|%` falls
+  0.88 → 0.37 and 0.36 → 0.16 with six controls unmoved to the hundredth.
+  `probes/chartbiff-r186`.
+
+**Three fields of those two records are read by the reference and then used by nothing**, so
+reproducing them would be a disagreement rather than a refinement: `CHPIE`'s `anStart` becomes a
+`StartingAngle` that `ChartPlot` does not model (and neither does `c:firstSliceAng`), and
+`CHSCATTER`'s `pcBubble`/`wBubble` are the BIFF spellings of `c:bubbleScale` and
+`c:sizeRepresents`, which `oox` also parses and ignores. `pcDonut` is dropped once the type is
+chosen, because a ring's hole is always half the radius.
+
+**And the reach of both is nil on this corpus, which is the point rather than a disappointment.**
+Every `chart:class` the converted-ODF corpus states is one the reader already drew; exactly one of
+the corpus's 180 OLE2 files states a `CHPIE` or `CHSCATTER` at all, and it is a plain scatter that
+was already right. The corpus is seven OOXML and MS-binary extensions and holds no hand-written
+ODF, so a reach census is the wrong instrument for an ODF reader rule — the right one is the
+reference's own answer to an authored file, which is what both probes measure.
+
+**Two census traps recurred here and both are already in this file under other headings.** A
+chart census keyed on `.xlsx`/`.pptx`/`.docx` misses a `.xlsm` — the first cut of the sweep above
+was 167 documents and is 168 — and one keyed on *zip parts* misses every BIFF chart substream,
+which is the same error that made an older reach figure short by eight. **Census the package's
+contents and walk OLE2 files, not extensions.**
+
 ### Stored evidence decays silently, and the prose knows it while the data does not
 
 Three cases surfaced in a single day: a `words-after.tsv` carrying numbers from a sweep that

@@ -199,6 +199,9 @@ internal sealed class XlsChartBuilder
     private ChartBarDirection _direction = ChartBarDirection.Column;
     private bool _stacked;
 
+    /// <summary>Whether the leading <c>CHPIE</c> declared a hole, making this a doughnut.</summary>
+    private bool _rings;
+
     /// <summary>What <c>CHBAR</c> states about the space between category slots and within one.</summary>
     /// <remarks>
     /// Null until a <c>CHBAR</c> is read, so that a chart with no bar group keeps
@@ -563,12 +566,51 @@ internal sealed class XlsChartBuilder
             }
 
             case BiffChartRecords.Pie:
+            {
+                bool leading = !_hasType;
+
+                // `anStart`, the angle the first wedge begins at, which nothing downstream reads:
+                // ConvertPieRotation puts it on the diagram as `StartingAngle`
+                // (xichart.cxx:384-388) and neither ChartPlot nor the DrawingML reader's
+                // `c:firstSliceAng` models one, so it is skipped here for the same reason.
+                stream.ReadUInt16();
+
+                // `pcDonut` — the hole as a percentage of the radius. A *non-zero* one is the
+                // whole of what makes this a doughnut rather than a pie:
+                // `(maData.mnPieHole > 0) ? EXC_CHTYPEID_DONUT : EXC_CHTYPEID_PIE`
+                // (xichart.cxx:2295-2298). The percentage itself is then dropped — chart2 gives
+                // ring *k* of *n* the band between k/(n+1) and (k+1)/(n+1) whatever the file
+                // states, which is what ChartPlot.Rings already records. Read at every BIFF
+                // version, as ReadChType does: only the flags *after* it are BIFF8-only. A
+                // record too short to hold it reads as zero, which is a pie.
+                int hole = stream.ReadUInt16();
+
                 SetKind(ChartPlotKind.Pie);
+                if (leading) _rings = hole > 0;
                 break;
+            }
 
             case BiffChartRecords.Scatter:
-                SetKind(ChartPlotKind.Scatter);
+            {
+                // BIFF5 states none of the three: XclImpChType::ReadChType reads them only under
+                // `GetBiff() == EXC_BIFF8` and leaves the flags zero otherwise
+                // (xichart.cxx:2263-2272), so an earlier scatter is never a bubble chart.
+                bool bubbles = false;
+                if (stream.Version == BiffVersion.Biff8)
+                {
+                    // `nBubbleSize` and `nBubbleType` — the scale as a percentage, and whether a
+                    // size is an area or a width. Both are read into `XclChTypeData` and then
+                    // used by nothing at all, exactly as `c:bubbleScale` and `c:sizeRepresents`
+                    // are on the OOXML side, so the reference draws every BIFF bubble chart at
+                    // ChartPlot's own defaults — which is what leaving them here does.
+                    stream.ReadUInt16();
+                    stream.ReadUInt16();
+                    bubbles = (stream.ReadUInt16() & ScatterBubbles) != 0;
+                }
+
+                SetKind(bubbles ? ChartPlotKind.Bubble : ChartPlotKind.Scatter);
                 break;
+            }
 
             case BiffChartRecords.RadarLine or BiffChartRecords.RadarArea:
                 SetKind(ChartPlotKind.Radar);
@@ -600,6 +642,7 @@ internal sealed class XlsChartBuilder
             if (series.Values is { } values) yield return values;
             if (series.Categories is { } categories) yield return categories;
             if (series.Title is { } title) yield return title;
+            if (series.Sizes is { } sizes) yield return sizes;
         }
     }
 
@@ -660,6 +703,7 @@ internal sealed class XlsChartBuilder
             Kind = _kind,
             Direction = _direction,
             IsStacked = _stacked,
+            Rings = _rings,
             GapWidth = _gapWidth ?? DefaultPlot.GapWidth,
             Overlap = _overlap ?? DefaultPlot.Overlap,
             Categories = categories,
@@ -806,6 +850,7 @@ internal sealed class XlsChartBuilder
             case SourceValues: series.Values = range; break;
             case SourceCategories: series.Categories = range; break;
             case SourceTitle: series.Title = range; break;
+            case SourceBubbles: series.Sizes = range; break;
             default: break;
         }
     }
@@ -885,6 +930,16 @@ internal sealed class XlsChartBuilder
                 name = data.TextOf(titleSheet, title.FirstRow, title.FirstColumn);
             }
 
+            // Only a bubble chart asks for them, exactly as chart2 does — a scatter series in
+            // the same workbook states the same link and nothing reads it.
+            IReadOnlyList<double?>? sizes = null;
+            if ((KindOf(series.Group) ?? _kind) is ChartPlotKind.Bubble
+                && series.Sizes is { } bubbles
+                && Resolve(bubbles, sheets, ownSheet) is { } bubbleSheet)
+            {
+                sizes = data.Numbers(bubbleSheet, bubbles, _visibleCellsOnly);
+            }
+
             built.Add(new ChartSeries(
                 name is { Length: > 0 } ? name : null,
                 numbers,
@@ -894,6 +949,7 @@ internal sealed class XlsChartBuilder
                 Kind: KindOf(series.Group))
             {
                 AxisIndex = axis,
+                SizeValues = sizes,
             });
         }
 
@@ -1660,6 +1716,9 @@ internal sealed class XlsChartBuilder
 
         public XlsChartRange? Title { get; set; }
 
+        /// <summary>The bubble sizes, from the series' <c>EXC_CHSRCLINK_BUBBLES</c> link.</summary>
+        public XlsChartRange? Sizes { get; set; }
+
         /// <summary>The name written literally, when the series states one that way.</summary>
         public string? Name { get; set; }
 
@@ -1680,6 +1739,17 @@ internal sealed class XlsChartBuilder
     private const int SourceValues = 1;
 
     private const int SourceCategories = 2;
+
+    /// <summary>
+    /// The bubble sizes — <c>EXC_CHSRCLINK_BUBBLES</c>, the third dimension of a bubble chart.
+    /// </summary>
+    /// <remarks>
+    /// A series carries one whether or not its group draws bubbles, and <c>XclImpChSeries</c>
+    /// offers it to chart2 as <c>EXC_CHPROP_ROLE_SIZEVALUES</c> (<c>xichart.cxx:2062</c>) — which
+    /// only <c>BubbleChart</c> ever asks for, so reading it unconditionally costs a scatter
+    /// chart nothing.
+    /// </remarks>
+    private const int SourceBubbles = 3;
 
     /// <summary>The only link type that carries a formula.</summary>
     private const int SourceLinkWorksheet = 2;
@@ -1820,6 +1890,9 @@ internal sealed class XlsChartBuilder
     private const ushort BarPercent = 0x0004;
     private const ushort LineStacked = 0x0001;
     private const ushort LinePercent = 0x0002;
+
+    /// <summary><c>EXC_CHSCATTER_BUBBLES</c> — this scatter group draws bubbles.</summary>
+    private const ushort ScatterBubbles = 0x0001;
 
     /// <summary><c>EXC_CHDATERANGE_DATEAXIS</c>, <c>xlchart.hxx:716</c>.</summary>
     private const ushort DateAxis = 0x0010;

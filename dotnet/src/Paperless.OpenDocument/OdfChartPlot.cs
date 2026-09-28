@@ -83,10 +83,9 @@ public static class OdfChartPlot
         if (plotArea is null) return null;
 
         // ODF states the type twice — on chart:chart and again on each chart:series — and either
-        // will do, since LibreOffice writes them to agree. A chart:class this does not draw yields
-        // null and the frame goes back to drawing nothing, which is what it did before charts were
-        // drawn, rather than being drawn as some other type.
-        if (KindOf(Attribute(chart, OdfNamespaces.Chart, "class")) is not { } kind) return null;
+        // will do, since LibreOffice writes them to agree.
+        string? stated = Attribute(chart, OdfNamespaces.Chart, "class");
+        if (ChartLevelKind(stated) is not { } kind) return null;
 
         // ODF has no class for an of-pie, so LibreOffice writes it as a circle carrying two
         // extension attributes on chart:chart itself — SchXMLExport.cxx:1331-1372 writes
@@ -388,6 +387,61 @@ public static class OdfChartPlot
 
         int colon = stated.IndexOf(':', StringComparison.Ordinal);
         return (colon >= 0 ? stated[(colon + 1)..] : stated) == "filled-radar";
+    }
+
+    /// <summary>
+    /// The kind a <c>chart:chart/@chart:class</c> names, with the reference's own fallback.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An unrecognised class is a bar chart, not nothing.</strong>
+    /// <c>SchXMLChartContext::ParseAttributes</c> sets <c>maChartTypeServiceName</c> only when the
+    /// class is in the <c>chart:</c> namespace <em>and</em>
+    /// <c>SchXMLTools::GetChartTypeEnum</c> knows the token
+    /// (<c>xmloff/source/chart/SchXMLChartContext.cxx</c>:372-395), and whatever is left over
+    /// falls through to <c>:474-475</c>, which reads it as <c>aChartClass_Bar</c>. So a class that
+    /// names a type LibreOffice cannot draw — and there are nine of those in
+    /// <c>chart2/source/inc/servicenames_charttypes.hxx</c> that
+    /// <c>VSeriesPlotter::createSeriesPlotter</c> has no plotter for — still comes out as bars.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on 26.2.4.2</strong>, <c>probes/chartclass-r186</c>: one flat ODS whose
+    /// <c>chart:chart/@chart:class</c> alone is varied, its series left at <c>chart:bar</c>
+    /// throughout. The reference draws the same <b>126 path operators</b> — a full bar chart, and
+    /// the same 126 it draws for <c>chart:bar</c> itself — for <c>chart:histogram</c>,
+    /// <c>chart:gantt</c>, <c>chart:donut</c>, <c>chart:pyramid</c>, <c>chart:add-in</c> and for
+    /// all nine <c>com.sun.star.chart2.*ChartType</c> service names written without a prefix.
+    /// We drew <b>6 on fourteen of the fifteen</b>, which is the sheet's own furniture with no
+    /// chart in it at all, and draw 156 on all fifteen now — the control row's own figure before
+    /// and after, so the 30 that separates it from the reference is how this tree draws a bar
+    /// chart rather than anything this fallback introduced.
+    /// </para>
+    /// <para>
+    /// <strong>The <c>ooo:</c> spelling is the exception and is left alone.</strong> That prefix
+    /// is the add-in branch (<c>:395-402</c>): the service name is taken verbatim, so the
+    /// fallback never fires, and the reference draws 22 paths there rather than 126 — not a bar
+    /// chart. The corpus's two witnesses are both
+    /// <c>chart:class="ooo:com.sun.star.chart2.ClusteredColumnChartType"</c> and already have the
+    /// reference drawing <em>less</em> on the page than we do, so bars could only take it further
+    /// away.
+    /// </para>
+    /// <para>
+    /// <strong>No corpus rendering moves</strong>: every class the converted-ODF corpus states is
+    /// one this reader already drew, and the only exceptions are that <c>ooo:</c> pair. This is
+    /// the reference's rule for files the corpus does not contain — it holds no hand-written ODF
+    /// — rather than a fix with reach.
+    /// </para>
+    /// </remarks>
+    private static ChartPlotKind? ChartLevelKind(string? stated)
+    {
+        if (KindOf(stated) is { } known) return known;
+
+        // `chart:class` holds a QName, and only the `ooo:` prefix reaches the add-in branch.
+        int colon = stated?.IndexOf(':', StringComparison.Ordinal) ?? -1;
+        bool addin = colon > 0
+                     && stated.AsSpan(0, colon).Equals("ooo", StringComparison.Ordinal);
+
+        return addin ? null : ChartPlotKind.Bar;
     }
 
     /// <summary>
