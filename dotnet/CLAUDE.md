@@ -3447,6 +3447,65 @@ renderings give **15.21 → 14.47**. When a chart is displaced by more than its 
 headline number measures the displacement and nothing else — **render the reference with the
 displacement removed and score against that.**
 
+### A hatch's distance is a number and the drawing layer decides the unit — Writer's is twips
+
+**Measured, implemented, and withdrawn; the patch is banked at `probes/charthatch-r191/withdrawn.patch`
+and nothing in `dotnet/src` carries it.** Read this before sending a round after a chart's pattern
+fill: the feature works, the reach is three documents, and what blocks it is a *hatch phase* rule
+shared with every slide shape.
+
+**`a:pattFill` on a chart's own backdrop is real ink the reference draws and we draw none of.** On
+`028_Unit_Circle_Chart_Optimized_Graph.docx` 26.2.4.2's page carries **298 strokes, of which 295
+are the `dkDnDiag` hatch** of the chart area. `ChartPlot.Background` and `ChartPlot.PlotBackground`
+are `Colour?` and have nowhere to put one.
+
+**Census the element the fill sits on, not the string.** Parsing all 947 documents' chart parts:
+`c:chartSpace/c:spPr` holds 161 `noFill`, 113 `solidFill`, **1 `gradFill`** (`Intersil_Italy_CAN_Bus…pptx`)
+and **1 `pattFill`** (`028`); `c:plotArea/c:spPr` holds 222, 47, 0 and **1** (`065_Weight_loss_tracker.xlsx`).
+That is the whole non-solid chart-backdrop surface of the corpus: **three fills in three documents**.
+A `grep` for `a:pattFill` finds 13 in 6 documents and **11 of them are in `style1.xml`**, the chart
+*style* part, which LibreOffice does not read at all.
+
+***The transferable finding is not about charts: a Writer document's drawing layer works in twips,
+so a hatch's stated hundredths of a millimetre are drawn as twips — 2540/1440 = 1.7639 times as far
+apart.*** Measured over four one-attribute variants of that document's `a:pattFill/@prst`: `dkDnDiag`
+states 50 and draws 88.4, `wdDnDiag` 100 → 176.3, `ltHorz` 50 → 88.4, `dkHorz` 25 → 45.9 — flat
+1.76–1.77 with **no dependence on the angle**. Confirmed out of VCL as well:
+`CalcHatchValues`' `nDist = fround(nDist / cos(45°))` gives `round(50/cos45) = 71`, and **71 twips
+is 3.55 pt, which is exactly the corner step on the reference's page**; in hundredths of a
+millimetre the same arithmetic gives 125 = 3.5433 pt, which the page does not hold. **The other two
+tracks do not do it**, which is what makes it the unit and not the chart: on
+`slide-pattern-fill.pptx` this tree already draws 112/70/70/70/28 hairlines against 26.2.4.2's
+115/71/71/70/28 with no correction, and on `065`'s hatched wall the reference draws 238 lines where
+the stated 100 predicts about 219.
+
+**What blocks it is the phase, and there are two phases in evidence.** With the twips correction the
+implementation drew **296 lines against the reference's 295** — and in the reference's *gaps*. Read
+out of the raw content streams: our family's invariant `x + y` runs `218.045 + 3.5356k` and
+26.2.4.2's `1259.239 − 3.55k`, and a line through the chart rectangle's **top-left corner** is
+`k = 167` exactly in theirs and `k = 126.81` in ours. `CalcHatchValues` phases on
+`rRect.TopLeft()`; `Hatching.Family` deliberately phases on the box's *centre*, reproducing
+`GeoTexSvxHatch`, and **that has its own measurement behind it** (its remark records
+`BMFE-06-03 (Gerflor)` page 3 at 3.28 of unaccounted ink centred against 0.00 in phase). Re-checked
+here: on the slide fixture the two phases agree to **0.296 pt out of a 3.97 pt step** and a
+corner-phased family would be a half-step out. So one rule does not fit both, and choosing needs the
+corpus's 65 pattern fills in 7 decks re-measured — which is the next round's, not a line of
+arithmetic.
+
+**What it scored, which is why it is withdrawn**: `028` against the `incell0` reference 14.42 →
+14.43 `diff%` with `|ink|%` 3.58 → 3.95, and `065` page 1 26.71 → 26.70 with 2.88 → 3.24. Flat both
+ways and about 0.36 of `|ink|%` worse on each — exactly what a correct hatch half a step out of
+phase costs. The third document is the gradient, which the patch leaves collapsing to one colour
+because `DrawingGradient.Paint` needs the rectangle it fills and a chart's frame is not known until
+layout.
+
+**Two instrument warnings from it.** A `pdf-ops.py` stroke record is a **bounding box**, and for one
+of the two diagonal senses its corners are *not* the segment's endpoints — so a midpoint-based
+reading reports 295 strokes as 42 lines and 522 as 3. Count strokes and divide the box's projected
+extent by them (`probes/charthatch-r191/spacing.py`), or read the content stream's own `m`/`l`. And
+**LibreOffice draws a gradient chart background as a Form XObject of band fills where this tree
+writes one shading**, so a fill count is not comparable on the gradient document either.
+
 ### A chart label's width includes its trailing blank, and an accounting axis puts one on every tick
 
 **A chart label is an EditEngine text shape autogrown around its paragraph whole, so its trailing

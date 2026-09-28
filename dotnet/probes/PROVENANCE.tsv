@@ -3042,3 +3042,8 @@ dotnet/probes/chartblank-r191/plotrect.py	2026-09-28	current	26.2.4.2	present	cu
 dotnet/probes/chartblank-r191/grid.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/chartblank-r191/sweep.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/chartblank-r191/score.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/charthatch-r191/results.md	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/charthatch-r191/variants.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/charthatch-r191/spacing.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/charthatch-r191/spacing2.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/charthatch-r191/withdrawn.patch	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
