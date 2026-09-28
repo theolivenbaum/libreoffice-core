@@ -3262,6 +3262,27 @@ byte-identical**. `probes/pie3d-r187`.
   `ChartLayout.Squared` still squaring the rectangle, `021` came out 274 pt across against the
   reference's 469 and its `diff%` went **12.20 → 16.33 — worse than before the feature**.
 
+**And closing it turned up a four-round-old gap one layer down: a chart's bold text was drawn
+light on the whole words track.** `FrameChart.ChartFace` resolved one face and shaped every
+label through it, so a chart's bold title, axis labels, axis titles, legend and data labels were
+all light on a DOCX, a DOC and an RTF while the model carried the right value — `SlideChart` and
+`SheetChart` having acted on `ChartLabel.IsBold` since they were written. The class's own remarks
+named the gap and deferred it for want of a words sweep. **The face set is the instrument, not
+`diff%`**: on `021_Unit_Circle_Chart_3D_Pie_Chart` the page went from embedding `Carlito-Regular`
+to embedding `Carlito-Bold`, which is what 26.2.4.2 embeds, while its `diff%` went 5.64 → 5.68
+because bold labels are wider and move where a label wraps. Reach **5 of the 10 chart-bearing
+words documents — exactly the 5 that state a `b="1"` in a chart part** — and nothing on the other
+two tracks, `ChartFace` having one consumer. `probes/chartbold-r188`.
+
+**A per-point override has to be counted against what it inherits.** The first reading of that
+defect was that `021` states its weight only on each per-point `c:dLbl`, which no reader reads —
+taken from the first `c:dLbls` in document order, which is the per-point one nested inside the
+series-level one. Censused properly, a per-point `c:dLbl` states a size, weight or colour
+*beyond its enclosing `c:dLbls`* in **4 of the corpus's 699 chart parts**, and `021` is not one
+of them: its series-level `c:dLbls` carries the same `<a:defRPr sz="1400" b="1">` after its four
+`c:dLbl` children. An override that repeats its parent cannot be seen on the page, and a census
+that does not subtract the parent sends a round after a reader gap that is not there.
+
 **One instrument warning from the shading measurement.** A colour that is a flat multiple of a
 series' declared colour is not necessarily a *wall*: `(64, 99, 41)` is accent6 × 0.574 and is the
 10% sector's **top face**, in the darker shade `c:varyColors` hands the fourth point. Locate a

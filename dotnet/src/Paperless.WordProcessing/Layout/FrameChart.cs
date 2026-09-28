@@ -121,10 +121,12 @@ internal static class FrameChart
             return;
         }
 
-        if (face.Shape(label.Text, label.Size) is not { } run) return;
+        bool bold = label.IsBold == true;
 
-        Length line = face.LineHeightAt(label.Size);
-        Length ascent = face.AscentAt(label.Size);
+        if (face.Shape(label.Text, label.Size, bold) is not { } run) return;
+
+        Length line = face.LineHeightAt(label.Size, bold);
+        Length ascent = face.AscentAt(label.Size, bold);
         Length width = run.Width;
 
         if (label.Rotation != 0.0)
@@ -191,13 +193,13 @@ internal static class FrameChart
         List<ChartRun> runs = [];
         foreach (string part in parts)
         {
-            if (face.Shape(part, label.Size) is { } shaped) runs.Add(shaped);
+            if (face.Shape(part, label.Size, label.IsBold == true) is { } shaped) runs.Add(shaped);
         }
 
         if (runs.Count == 0) return;
 
-        Length line = face.LineHeightAt(label.Size);
-        Length ascent = face.AscentAt(label.Size);
+        Length line = face.LineHeightAt(label.Size, label.IsBold == true);
+        Length ascent = face.AscentAt(label.Size, label.IsBold == true);
         Length block = line * runs.Count;
 
         Length top = label.Anchor switch
@@ -281,12 +283,26 @@ internal sealed class ChartFace : IChartTextMeasurer
     private readonly FontReference _reference;
     private readonly LineMetrics? _metrics;
 
-    private ChartFace(OpenTypeFace? face, FontReference? reference, string family)
+    /// <summary>The bold twin of <see cref="_face"/>, or null where the family has none.</summary>
+    /// <remarks>
+    /// Resolved beside the regular face rather than on demand, because a chart asks for both on
+    /// the same page and the resolver's own cache is not shared with this one. A family whose
+    /// bold is the regular face — which is what the resolver answers for a roman-only family —
+    /// leaves this null and every label is drawn in the one face, exactly as before.
+    /// </remarks>
+    private readonly ChartFace? _bold;
+
+    private ChartFace(OpenTypeFace? face, FontReference? reference, string family,
+                      ChartFace? bold = null)
     {
         _face = face;
         _reference = reference ?? new FontReference { FamilyName = family, FaceKey = string.Empty };
         _metrics = face is null ? null : LineSpacing.Resolve(face, MetricGrid.Chart);
+        _bold = bold;
     }
+
+    /// <summary>This face, or its bold twin when there is one and the caller wants it.</summary>
+    private ChartFace Weighted(bool bold) => bold && _bold is not null ? _bold : this;
 
     /// <summary>The face a family resolves to, resolved once and shared.</summary>
     /// <param name="family">The family, or null for <see cref="DefaultFamily"/>.</param>
@@ -298,7 +314,16 @@ internal sealed class ChartFace : IChartTextMeasurer
         {
             if (Cache.TryGetValue(wanted, out ChartFace? cached)) return cached;
 
-            ChartFace resolved = Load(wanted);
+            ChartFace regular = Load(wanted, weight: RegularWeight);
+            ChartFace bold = Load(wanted, weight: BoldWeight);
+
+            // A family with no bold of its own resolves to the same file for both weights, and
+            // pairing a face with itself would embed a second identical subset and change every
+            // such document's bytes for nothing.
+            ChartFace resolved = regular.Same(bold)
+                ? regular
+                : Load(wanted, weight: RegularWeight, bold: bold);
+
             Cache[wanted] = resolved;
             return resolved;
         }
@@ -312,8 +337,12 @@ internal sealed class ChartFace : IChartTextMeasurer
     /// single-line label. See the remark on this class.
     /// </remarks>
     /// <param name="size">The em size.</param>
-    public Length AscentAt(Length size)
-        => _metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
+    /// <param name="bold">Whether the label is drawn in the bold face.</param>
+    public Length AscentAt(Length size, bool bold = false)
+    {
+        ChartFace face = Weighted(bold);
+        return face._metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
+    }
 
     /// <summary>How tall one line of a chart's text is, at a size.</summary>
     /// <remarks>
@@ -322,12 +351,16 @@ internal sealed class ChartFace : IChartTextMeasurer
     /// for the measurement.
     /// </remarks>
     /// <param name="size">The em size.</param>
-    public Length LineHeightAt(Length size)
-        => _metrics is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
+    /// <param name="bold">Whether the label is drawn in the bold face.</param>
+    public Length LineHeightAt(Length size, bool bold = false)
+    {
+        ChartFace face = Weighted(bold);
+        return face._metrics is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
+    }
 
     /// <summary>
-    /// <paramref name="family"/> is ignored because this instance is already bound to one, and
-    /// <paramref name="bold"/> because this instance holds no bold face.
+    /// Measures one line; <paramref name="family"/> is ignored because this instance is already
+    /// bound to one.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -338,22 +371,23 @@ internal sealed class ChartFace : IChartTextMeasurer
     /// same rule today, in two places — this can take the argument and the duplicate can go.
     /// </para>
     /// <para>
-    /// <strong><paramref name="bold"/> is the slides track's <see cref="ChartPlot.IsTitleBold"/>
-    /// reaching a consumer that cannot yet act on it.</strong> A <see cref="ChartFace"/> resolves
-    /// one face and shapes every label through it, so drawing a title bold means resolving a
-    /// second face here and threading it through <see cref="Shape"/> — a change that moves every
-    /// DOCX whose chart has a title, on a words sweep this round did not run. Taking the argument
-    /// and dropping it keeps the words track byte-identical while the model gets the value right.
+    /// <strong><paramref name="bold"/> is honoured, and for four rounds it was not.</strong> This
+    /// class resolved one face and shaped every label through it, so a chart's bold title, bold
+    /// axis labels and bold data labels were all drawn light on the words track while the model
+    /// carried the right value — the slides and sheets painters having acted on it all along.
+    /// <c>021_Unit_Circle_Chart_3D_Pie_Chart</c> is the witness: its series-level
+    /// <c>c:dLbls/c:txPr</c> states <c>sz="1400" b="1"</c>, 26.2.4.2 draws Carlito-Bold at 14.01
+    /// and this tree drew Carlito-Regular at 14.00.
     /// </para>
     /// </remarks>
     public DocSize Measure(string text, Length size, string? family, bool bold)
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        Length height = LineHeightAt(size);
+        Length height = LineHeightAt(size, bold);
         return text.Length == 0
             ? new DocSize(Length.Zero, height)
-            : new DocSize(Shape(text, size)?.Width ?? Length.Zero, height);
+            : new DocSize(Shape(text, size, bold)?.Width ?? Length.Zero, height);
     }
 
     /// <summary>Shapes one line, or null when there is no face to shape it with.</summary>
@@ -376,9 +410,13 @@ internal sealed class ChartFace : IChartTextMeasurer
     /// reference binaries at twelve sizes with a slide text box beside the chart as the control.
     /// </para>
     /// </remarks>
-    public ChartRun? Shape(string text, Length size)
+    /// <param name="text">The line.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="bold">Whether to shape through the bold twin.</param>
+    public ChartRun? Shape(string text, Length size, bool bold = false)
     {
-        if (text.Length == 0 || _face is not { } face) return null;
+        ChartFace weighted = Weighted(bold);
+        if (text.Length == 0 || weighted._face is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);
         double scale = MetricGrid.Chart.PixelEmScale(size);
@@ -398,7 +436,7 @@ internal sealed class ChartFace : IChartTextMeasurer
             pen += advance;
         }
 
-        return new ChartRun(glyphs, clusters, _reference, size, text, pen);
+        return new ChartRun(glyphs, clusters, weighted._reference, size, text, pen);
     }
 
     /// <summary>
@@ -412,13 +450,13 @@ internal sealed class ChartFace : IChartTextMeasurer
     /// references a face the file does not carry and a reader substitutes or draws tofu, with neither
     /// the page count nor the extracted words changing.
     /// </remarks>
-    private static ChartFace Load(string family)
+    private static ChartFace Load(string family, int weight, ChartFace? bold = null)
     {
         try
         {
             SystemFontResolver resolver = SystemFontResolver.Build();
-            FontReference reference = resolver.Resolve(new FontRequest(family));
-            return new ChartFace(resolver.LoadOpenType(reference), reference, family);
+            FontReference reference = resolver.Resolve(new FontRequest(family, weight));
+            return new ChartFace(resolver.LoadOpenType(reference), reference, family, bold);
         }
         catch (Exception exception) when (exception is Core.MalformedDocumentException
                                              or IOException
@@ -426,9 +464,25 @@ internal sealed class ChartFace : IChartTextMeasurer
         {
             // No readable face is not a reason to fail a layout: the plot area, the bars and everything
             // drawn as a path are already decided, and only the lettering is missing.
-            return new ChartFace(null, null, family);
+            return new ChartFace(null, null, family, bold);
         }
     }
+
+    /// <summary>Whether this face came out of the same file as another.</summary>
+    /// <remarks>
+    /// The resolver's <c>FaceKey</c> is the file's path, which is what the PDF writer embeds by,
+    /// so two references with one key are one face however they were asked for. A roman-only
+    /// family answers the same key for both weights, and pairing it with itself would embed a
+    /// second identical subset and change every such document's bytes for nothing.
+    /// </remarks>
+    private bool Same(ChartFace other)
+        => string.Equals(_reference.FaceKey, other._reference.FaceKey, StringComparison.Ordinal);
+
+    /// <summary>What a request asks for when it wants the ordinary weight.</summary>
+    private const int RegularWeight = 400;
+
+    /// <summary>And the bold one — <c>OS/2</c>'s own usWeightClass for bold.</summary>
+    private const int BoldWeight = 700;
 }
 
 /// <summary>A shaped line of a chart's text, given an origin once it is placed.</summary>
