@@ -2370,15 +2370,41 @@ is read and verified, so what remains is the filling of pages rather than the me
   of 676 converted words**, no page and no glyph moving on any of the four.
   `probes/words-close-r95/`.
 
-  **`bCheckBottom = !DoesObjFollowsTextFlow()` was named here as the likely missing half and is
-  refuted.** The bottom correction is skipped only for an object that follows the text flow
-  (`tocntntanchoredobjectposition.cxx`:457); `IsFollowingTextFlow`'s pool default is **false**
-  (`sw/source/core/bastyp/init.cxx`:437), no writerfilter path changes that default, and its three
-  per-object writes are each gated on the anchor being inside a table (`GraphicImport.cxx`:1316-1318,
-  :1859-1861, `OOXMLFastContextHandler.cxx`:1879-1883). **552 of 6055** positioned objects in 40 of
-  the 272 DOCX are inside a `w:tbl`, and none is in any of the ten documents the wide rule moved.
-  `mbFollowTextFlow` is still not modelled for that reason, and because inside a table the object is
-  captured in its **cell** (:576-591) — an area this tree does not have. `probes/words-seat-r94/`.
+  **`bCheckBottom = !DoesObjFollowsTextFlow()` was named here as the likely missing half, recorded as
+  refuted, and the refutation was one writerfilter seat short. It is implemented now, for an embedded
+  object.** The census this paragraph used to carry — `IsFollowingTextFlow`'s pool default is **false**
+  (`sw/source/core/bastyp/init.cxx`:437) and its per-object writes are gated on the anchor being inside
+  a table (`GraphicImport.cxx`:1316-1318, :1859-1861, `OOXMLFastContextHandler.cxx`:1879-1883) — is
+  true of every seat it names and misses **`DomainMapper_Impl.cxx`:9792**, which sets the property on a
+  `SwXTextEmbeddedObject` straight from `layoutInCell` with no `IsInTable()` test at all. A chart's
+  `a:graphicData` becomes a `com.sun.star.drawing.OLE2Shape` (`oox/source/drawingml/shape.cxx`:348-358)
+  and `PopShapeContext` replaces it with exactly that embedded object (`:5096-5112`), so **every
+  anchored chart in a DOCX follows the text flow** unless it states `layoutInCell="0"` — and
+  `m_bLayoutInCell` is initialised *true* (`GraphicImport.cxx`:340), so an absent attribute follows it
+  too.
+
+  `GetVertEnvironmentLayoutFrame` (`environmentofanchoredobject.cxx`:64-95) then resolves to the page
+  **body** frame rather than the page, and four things follow: a `PAGE_FRAME` offset is measured from
+  the body's top (`tocntntanchoredobjectposition.cxx`:590-596); the object is captured although its
+  wrap would exempt it; it is captured in the **sheet**, because the `compatibilityMode` 15 narrowing
+  needs `rPageAlignLayFrame.IsPageFrame()` and a body frame is not one (:562-566); and only at the top,
+  which is the `bCheckBottom` this paragraph named. The horizontal is untouched — that walk stops at a
+  cell, a fly or a page and has no body frame in it.
+
+  Measured on eight fixtures identical but for whether the anchored object is a `wps:wsp` or a
+  `c:chart`: 26.2.4.2 draws the shape at **180.00** at every margin and the chart at **252.35** with
+  `w:top="1440"`, **324.35** with `w:top="2880"` and **180.35** with `layoutInCell="0"`, and this tree
+  reproduces **8 of 8** within the two writers' own 0.36 pt border-origin constant. `PageFrame.FollowsTextFlow`,
+  `FrameLayout.Place`, `DocxFrames.FollowsTextFlow`, `FrameFollowsTextFlowTests`; `probes/pagev-r192/`.
+
+  **Two halves are still open and both are bounded.** The **in-table** capture is unmodelled: there the
+  object is held in its **cell** (`anchoredobjectposition.cxx`:576-591), an area this tree does not
+  have — 552 of the corpus's 6055 positioned objects are inside a `w:tbl`, in 40 of 272 documents, and
+  **none of the 5 embedded-object anchors is one of them** (`probes/words-seat-r94/`,
+  `probes/pagev-r192/census-embedded.py`). And `PAGE_PRINT_AREA_TOP` shares `PAGE_FRAME`'s branch in
+  both places the C++ decides this, so the same substitution is its rule too; it is left because no
+  corpus DOCX pairs a `topMargin` relation with an embedded object and the band's height under
+  following is unmeasured.
 
   **What is left is not the capture.** Two of the three `Unit_Circle` documents are worse against
   26.2.4.2 with the frame in the right place, and the frame provably *is* in the right place: each

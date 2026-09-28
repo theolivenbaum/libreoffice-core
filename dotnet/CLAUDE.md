@@ -3695,7 +3695,51 @@ two segments to 2.4 and 3.2 pt. That is what makes the pie's second pass shrink 
 predicts 17 and 21 and "one per character" 19 and 26, so one is exact on one label and wrong on
 the other and neither is settled.
 
-### A `relativeFrom="page"` vertical anchor counts from the page, except on one corpus document
+### A `relativeFrom="page"` vertical anchor counts from the page — unless the object is EMBEDDED, and then it counts from the page BODY
+
+***Closed. The missing variable was the object kind, and the section below is kept because its
+refutation is what a round would otherwise re-derive.*** An embedded object — a chart or an OLE
+object — follows the text flow whatever its anchor, so *the page* means the page body frame for it
+and not the sheet. The seat is **one unguarded line**: a chart's `a:graphicData` becomes a
+`com.sun.star.drawing.OLE2Shape` (`oox/source/drawingml/shape.cxx`:348-358), `DomainMapper_Impl`
+replaces that with a `SwXTextEmbeddedObject` (`:5096-5112`), and `:9792` then sets
+`IsFollowingTextFlow` straight from `layoutInCell` **with no `IsInTable()` test** — where both of
+`GraphicImport`'s own writes of the property have one (`:1316-1318`, `:1859-1861`). So a census of
+`PROP_FOLLOW_TEXT_FLOW`'s writers that finds "always false outside a table" is a census of the two
+guarded seats, and this project carried that conclusion for three rounds. And `m_bLayoutInCell` is
+initialised **true** (`GraphicImport.cxx`:340), so an anchor stating nothing follows the text flow too.
+
+`SwEnvironmentOfAnchoredObject::GetVertEnvironmentLayoutFrame`
+(`environmentofanchoredobject.cxx`:64-95) is where it all comes from: `FindPageFrame()` when the object
+does not follow the text flow, otherwise a walk up to the first cell, fly, header, footer, footnote,
+**page body** or page frame. Four things follow, and only the first is the 71.6 pt: the `PAGE_FRAME`
+base (`tocntntanchoredobjectposition.cxx`:590-596); the object being captured at all, since
+`mbDoNotCaptureAnchoredObj` is a product with `!mbFollowTextFlow` in it; its being captured in the
+**sheet** rather than the body, because the `compatibilityMode` 15 narrowing needs
+`rPageAlignLayFrame.IsPageFrame()` (:562-566) — the opposite of what the flag's name suggests; and the
+bottom correction not firing, `bCheckBottom = !DoesObjFollowsTextFlow()` (:457). The **horizontal** is
+untouched, and that is the same file's own doing: `GetHoriEnvironmentLayoutFrame`'s walk stops at a
+cell, a fly or a page and has no body frame in it.
+
+**The experiment is the one to copy, because the refuted fixture below differs from it by one
+variable.** Eight minimal DOCX stating the same `wp:anchor` at the same 180 pt offset, varying the
+object kind, `w:pgMar/@w:top` and `layoutInCell` (`probes/pagev-r192/fixture.py`). 26.2.4.2 draws the
+**shape at 180.00 at every margin** and the **chart at 252.35** (`w:top="1440"`), **324.35**
+(`w:top="2880"`) and **180.35** (`layoutInCell="0"`), with an absent `layoutInCell` matching
+`"1"` — so the kind decides it, the base tracks the top margin one for one, and the attribute
+switches it. This tree reproduces **8 of 8** within the two writers' own 0.36 pt border-origin
+constant. Reach by markup: **5 embedded-object anchors in 5 documents**, all five `Unit_Circle`
+charts, `page` on two and `margin` on three — and `margin` is `PAGE_PRINT_AREA`, which resolves to the
+body either way, so the base moves two documents and the capture rules reach all five.
+**`PAGE_PRINT_AREA_TOP` shares `PAGE_FRAME`'s branch and is deliberately left**: no corpus DOCX pairs
+a `topMargin` relation with an embedded object, and the band's height under following is unmeasured.
+`probes/pagev-r192/results.md`.
+
+---
+
+*What follows is the round that measured the displacement and could not explain it. Read it for the
+refutation in its second paragraph, which is correct and is exactly why the rule is not "page means
+margin".*
 
 Measured, mechanism not found, **not implemented**. On `028_Unit_Circle_Chart_Optimized_Graph`
 26.2.4.2 places the chart's `<wp:positionV relativeFrom="page"><wp:posOffset>` **71.6 pt lower
@@ -3717,6 +3761,13 @@ compatibility defaults apply — and 26.2.4.2 draws it at the page's own top edg
 reproduce. Reach if anyone takes it: **16 corpus DOCX, 41 page-relative vertical offsets**
 (`probes/ofpie-r190/census-pagev.py`). **Do not implement "page means margin" from the corpus
 document alone** — the fixture refutes it.
+
+*That second condition is the object kind, and the 41-offset figure is the wrong denominator for it:
+the rule needs an **embedded** object, of which the corpus holds 5. And one row of that round's variant
+table does not reconcile — it gives `layoutInCell="0"` a frame top of 214.94 and `w:top="0"` one of
+175.86 while annotating both "i.e. ours", where 247.86 − 175.86 is exactly the 72.00 the mechanism
+predicts and 247.86 − 214.94 is 32.92. The `w:top` linearity is sound and the 214.94 is not settled;
+re-measure it from the PDFs before using the `incell0` variant as a control.*
 
 ### A chart sweep's worst page is not the chart's, and "the line break charges its trailing blank" is refuted
 

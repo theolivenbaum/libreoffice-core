@@ -341,6 +341,38 @@ public sealed record PageFrame
     /// </remarks>
     public FrameObjectKind ObjectKind { get; init; }
 
+    /// <summary>
+    /// Whether the object follows the text flow, which changes what <em>the page</em> means to its
+    /// vertical position.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>IsFollowingTextFlow</c>. Its pool default is <b>false</b>
+    /// (<c>sw/source/core/bastyp/init.cxx</c>:437) and both of <c>GraphicImport</c>'s writes of
+    /// <c>PROP_FOLLOW_TEXT_FLOW</c> are gated on the anchor being inside a table
+    /// (<c>GraphicImport.cxx</c>:1316-1318 for a shape and :1859-1861 for a graphic), which is why this
+    /// is false for every shape and every picture and why the whole term was left out of
+    /// <see cref="FrameLayout"/> for several rounds.
+    /// </para>
+    /// <para>
+    /// <b>An embedded object is the exception, and its seat carries no such guard.</b> A chart's or an
+    /// OLE object's <c>a:graphicData</c> becomes a <c>com.sun.star.drawing.OLE2Shape</c>
+    /// (<c>oox/source/drawingml/shape.cxx</c>:348-358), which <c>DomainMapper_Impl</c> replaces with a
+    /// <c>SwXTextEmbeddedObject</c> (<c>DomainMapper_Impl.cxx</c>:5096-5112) and then sets
+    /// <c>IsFollowingTextFlow</c> on straight from <c>layoutInCell</c> with no <c>IsInTable()</c> test at
+    /// all (:9792). And <c>m_bLayoutInCell</c> is initialised <b>true</b> (<c>GraphicImport.cxx</c>:340),
+    /// so an anchor that states nothing follows the text flow too — only an explicit
+    /// <c>layoutInCell="0"</c> outside a table clears it.
+    /// </para>
+    /// <para>
+    /// What it does to the position is <see cref="FrameLayout.Place"/>'s business; see there for the
+    /// three things that change and for the measurement on
+    /// <c>028_Unit_Circle_Chart_Optimized_Graph.docx</c>. Only the DOCX reader sets it: the other three
+    /// word-processing readers build no embedded object, so the attribute has nothing to reach there.
+    /// </para>
+    /// </remarks>
+    public bool FollowsTextFlow { get; init; }
+
     /// <summary>What the horizontal position is measured from.</summary>
     public FrameHorizontalOrigin HorizontalOrigin { get; init; } = FrameHorizontalOrigin.Paragraph;
 

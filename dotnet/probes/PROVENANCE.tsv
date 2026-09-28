@@ -3055,3 +3055,8 @@ dotnet/probes/slidebullet-r191/sweep.py	2026-09-28	current	26.2.4.2	present	curr
 dotnet/probes/slidebullet-r191/score.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/slidebullet-r191/afterbullet.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/slidebullet-r191/bullet.py	2026-09-28	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/pagev-r192/results.md	2026-09-28	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/FrameLayout.cs
+dotnet/probes/pagev-r192/fixture.py	2026-09-28	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/FrameLayout.cs
+dotnet/probes/pagev-r192/census-embedded.py	2026-09-28	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/FrameLayout.cs
+dotnet/probes/pagev-r192/sweep.py	2026-09-28	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/FrameLayout.cs
+dotnet/probes/pagev-r192/confine.py	2026-09-28	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Layout/FrameLayout.cs

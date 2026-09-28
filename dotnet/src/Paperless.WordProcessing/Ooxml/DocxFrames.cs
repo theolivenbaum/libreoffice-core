@@ -317,6 +317,7 @@ internal static class DocxFrames
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),
             ObjectKind = ObjectKindOf(placed, box),
+            FollowsTextFlow = FollowsTextFlow(anchor, chart.Plot is not null),
             HorizontalOrigin = horigin,
             HorizontalAlignment = halign,
             HorizontalOffset = x,
@@ -1720,6 +1721,40 @@ internal static class DocxFrames
 
         return FrameObjectKind.Fly;
     }
+
+    /// <summary>
+    /// Whether this drawing follows the text flow, which is a question only an <em>embedded object</em>
+    /// answers yes to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="PageFrame.FollowsTextFlow"/> carries the seats and
+    /// <see cref="FrameLayout.Place"/> what it costs. Three conditions, and each of them is one the
+    /// writerfilter makes rather than one the specification does:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description><b>an anchor</b>, not a <c>wp:inline</c>: the write is guarded by
+    ///     <c>m_eGraphicImportType == IMPORT_AS_DETECTED_ANCHOR</c>
+    ///     (<c>DomainMapper_Impl.cxx</c>:9788);</description></item>
+    ///   <item><description><b>an embedded object</b>, which is the whole of why the guard is missing —
+    ///     a chart's or an OLE object's graphic data becomes a
+    ///     <c>com.sun.star.drawing.OLE2Shape</c> and is replaced by a <c>SwXTextEmbeddedObject</c>
+    ///     (:5096-5112), and only that replacement's property writes skip the
+    ///     <c>IsInTable()</c> test the shape and graphic paths make. A chart is the only embedded object
+    ///     this reader builds a frame for;</description></item>
+    ///   <item><description><b><c>layoutInCell</c> not explicitly off</b>. The attribute's absence is
+    ///     <em>true</em> here, because <c>m_bLayoutInCell</c> is initialised true
+    ///     (<c>GraphicImport.cxx</c>:340) and only the attribute's own handler ever clears it
+    ///     (:707-712). <c>layoutInCell="0"</c> outside a table clears it, since the compatibility
+    ///     force-on beside it needs <c>IsInTable()</c>.</description></item>
+    /// </list>
+    /// </remarks>
+    /// <param name="anchor">The <c>wp:anchor</c>, or null for a <c>wp:inline</c>.</param>
+    /// <param name="isEmbedded">Whether the drawing holds a chart or another embedded object.</param>
+    private static bool FollowsTextFlow(XElement? anchor, bool isEmbedded)
+        => anchor is not null
+            && isEmbedded
+            && anchor.Attribute("layoutInCell")?.Value is not ("0" or "false" or "off");
 
     private static XElement? Child(XElement parent, string name)
         => parent.Elements().FirstOrDefault(child => child.Name.LocalName == name);

@@ -104,15 +104,21 @@ public sealed record PaginationOptions
     /// <see cref="NarrowsCaptureToBody"/> now carries. <c>probes/words-close-r95</c>.
     /// </para>
     /// <para>
-    /// <c>mbFollowTextFlow</c> is deliberately not modelled: its pool default is <em>false</em>
-    /// (<c>sw/source/core/bastyp/init.cxx</c>:437) and each of the three writerfilter seats that write
-    /// <c>PROP_FOLLOW_TEXT_FLOW</c> is gated on the anchor being inside a table
-    /// (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
-    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883), so outside a table the term drops out. Inside one
-    /// it would make the object captured — in its <em>cell</em> rather than in the page
-    /// (<c>anchoredobjectposition.cxx</c>:576-591), which is an area this does not model. 552 of the
-    /// corpus's 6055 positioned objects, in 40 of 272 documents;
-    /// <c>probes/words-seat-r94/anchor-census.txt</c>.
+    /// <c>mbFollowTextFlow</c> <b>is modelled now, for an embedded object and nothing else</b> — see
+    /// <see cref="PageFrame.FollowsTextFlow"/>. This used to say it was not modelled at all, on the
+    /// grounds that its pool default is <em>false</em> (<c>sw/source/core/bastyp/init.cxx</c>:437) and
+    /// that each writerfilter seat writing <c>PROP_FOLLOW_TEXT_FLOW</c> is gated on the anchor being
+    /// inside a table (<c>GraphicImport.cxx</c>:1316-1318 and :1859-1861,
+    /// <c>OOXMLFastContextHandler.cxx</c>:1879-1883). Both halves are true and the census was one seat
+    /// short: <c>DomainMapper_Impl.cxx</c>:9792 sets it on a <c>SwXTextEmbeddedObject</c> straight from
+    /// <c>layoutInCell</c> with no table test, so a chart's own anchor follows the text flow wherever it
+    /// sits.
+    /// </para>
+    /// <para>
+    /// What stays unmodelled is the <em>in-table</em> half: inside a table such an object is captured in
+    /// its <em>cell</em> rather than in the page (<c>anchoredobjectposition.cxx</c>:576-591), an area
+    /// this tree does not have. 552 of the corpus's 6055 positioned objects are inside a <c>w:tbl</c>,
+    /// in 40 of 272 documents; <c>probes/words-seat-r94/anchor-census.txt</c>.
     /// </para>
     /// <para>
     /// Set for every DOCX, since <c>WriterFilter.cxx</c>:332 sets the flag for every writerfilter
