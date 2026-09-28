@@ -3211,14 +3211,35 @@ reproducing the eight means reproducing a string rather than a plot. `oox` says 
 its own words: `SERVICE_CHART2_SURFACE` is `"com.sun.star.chart2.ColumnChartType"; // Todo`
 (`oox/source/drawingml/chart/typegroupconverter.cxx`:79).
 
-**The whole corpus was swept by chart type to find out where that matters, and no type is
-systematically wrong.** 168 documents holding a `c:` or `cx:` chart part, rendered both ways,
-grouped by the *set* of plot elements their parts state — `barChart` 0.76 mean worst-page
-`|ink|%` over 55 documents, `lineChart` 0.58 over 14, `doughnutChart` 0.68 over 13, `radarChart`
-0.38 over 5, `bubbleChart` **0.13** over 9, `areaChart` **0.05** over 9, `cx:` chartex **0.01**
-over both witnesses. Every row that heads the table is one or two documents, so its mean is its
-worst and it is a *document* rather than a type. **The chart work left is per-document layout.**
+**The whole corpus was swept by chart type to find out where that matters, and the first cut of
+that sweep published a wrong conclusion because `|ink|%` is the wrong instrument for a chart.**
+168 documents holding a `c:` or `cx:` chart part, rendered both ways and grouped by the *set* of
+plot elements their parts state. Ranked on unsigned ink, no type looked systematically wrong.
+That was false, and twice over:
+
+- **`|ink|%` and `diff%` are both fractions of the whole PAGE**, and a chart is a small part of
+  one. `pie-chart-result.docx` scores **0.30** unsigned ink while the reference draws an extruded
+  3-D pie there and this tree draws a flat circle — as wrong as a pie can be.
+- **`|ink|%` is signed per region before the page's absolute value is taken**, so ink we add
+  where the reference removes it cancels *within* the page. A wrong-shaped pie in the right
+  colours is exactly the shape that cancels. `diff%` — the fraction of pixels that differ at all
+  — has neither property, and reads 2.76 on that same document.
+
+**Rank a chart on `diff%`.** (The standing *rank on the worst page, not on summed ink* rule is
+not what failed here; the quantity is.) On that column the types separate into three groups:
+right (`cx:` chartex 0.16, `areaChart` 0.39, `bubbleChart` 0.58), right in the main with bad
+individual documents (`barChart` 2.81 over 55 with a worst of 28.50, `lineChart` 2.59,
+`scatterChart` 2.93, `doughnutChart` 3.32, `pieChart` 3.57), and **wrong wherever they appear:
+`ofPieChart` 11.00 over both its documents and `pie3DChart` 5.06 over all three of its.**
 `probes/chartsweep-r186`.
+
+**A 3-D chart's reach is three documents and all three are pies** — no `bar3DChart`,
+`line3DChart`, `area3DChart` or `surface3DChart` exists anywhere in the corpus — so the 3-D work
+the corpus can witness is the pie alone and a general 3-D scene buys nothing beyond it. All three
+state `c:rAngAx val="0"` and no `c:perspective`, which `View3DConverter::convertFromModel`
+(`oox/source/drawingml/chart/plotareaconverter.cxx`:262-320) turns into
+`RotationHorizontal = clamp(rotX, 0, 90) - 90`, `Perspective = 30/2 = 15`, and therefore
+`ProjectionMode_PERSPECTIVE` rather than parallel.
 
 **What the same review did find is two readers that switch on a record id where the reference
 switches on a field inside it.** Both are closed, and the shape is worth remembering because it
