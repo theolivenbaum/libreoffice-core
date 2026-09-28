@@ -155,3 +155,68 @@ OpenDocument 210, WordProcessing 2189, Spreadsheets 1492, Presentations 1220 —
   `<a:pattFill prst="dkDnDiag">` with `lt1 lumMod 95%` on `lt1`; 26.2.4.2 draws it as a white
   fill plus 45° `#F2F2F2` strokes across the whole frame. `ChartPlot.Background` is a
   `Colour?`, so a pattern fill reads as nothing and we draw neither.
+
+## 7. An `inEnd` pie label is at the rim, not at half the radius — and that is what shrinks the diagram
+
+This is the arm §3 said to measure, and it is bigger than the of-pie: the corpus's pie charts
+state `inEnd` on **76 points in 5 documents** and `outEnd` on 37 in 4, against 188 points in 19
+documents that state nothing (`census-dlblpos.py`, which counts the value that survives the
+point-over-series-over-group merge inside a `c:pieChart`, `c:pie3DChart`, `c:doughnutChart` or
+`c:ofPieChart` and nowhere else).
+
+`PolarLabelPositionHelper::getLabelScreenPositionAndAlignmentForUnitCircleValues` takes the
+ring's **outer** radius for `INSIDE` and `OUTSIDE` alike and the middle of the ring for
+everything else — `bCenter` is exactly `nLabelPlacement != OUTSIDE && != INSIDE`
+(`PolarLabelPositionHelper.cxx`:68-76) — and `createTextLabelShape` then pulls an `INSIDE`
+anchor **back** along the radius by the same flat 150 hundredths of a millimetre it pushes an
+`OUTSIDE` one out by (`PieChart.cxx`:439-452, applied at `:490-497`). The eight-row alignment
+table is `bOutside ? A : B` with B the opposite of A on every row (`:112-137`), so the block
+hangs back over the slice instead of away from it. The wrapping width stays the default
+`0.8 * fPieRadius`: the room-to-the-edge arm is guarded by `nLabelPlacement == OUTSIDE` and the
+comment beside it is a TODO asking for a better guess for `INSIDE` (`:544-576`).
+
+Measured on `029_Unit_Circle_Chart_Pie_Theme_8a922142.docx`, whose four labels 26.2.4.2 places
+`inEnd` (`labelreach.py`). Each label's distance from the pie's centre as a fraction of its
+radius — the ratio, because the two pies differ by 2 pt:
+
+```
+reference  0.804  0.839  0.917  0.953  0.890  0.923  0.841
+before     0.414  0.451  0.563  0.588  0.527  0.549  0.467
+after      0.806  0.841  0.918  0.953  0.891  0.924  0.842
+```
+
+**Seven of seven within 0.002**, with no free parameter — and the distance is measured to the
+*block*, not to the anchor, so it says the mirrored alignment is right as well as the anchor.
+
+**Reach 5 of the 168 chart documents, 163 byte-identical.** `005_Contextures_chart_sample`
+1.66 → 1.57, `100_Lime_and_Lemon` 10.49 → 10.37, `029` 5.53 → 5.36, `bitesize-writing-a-report`
+level, and `028` 16.72 → 16.78 on the naive metric and **14.47 → 14.42** against the reference
+placed at our position.
+
+### And the of-pie radius is the BAR's labels, not the ring's
+
+`028`'s radius does not move with this, and measuring where the reference actually puts that
+chart's labels says why: all sixteen of its ring labels sit within 93 pt of a centre whose radius
+is 90.3, so **the ring's labels do not leave the ring and never could have consumed anything**.
+What does is the **bar's** labels, and they are a unit bug in the reference:
+
+```cpp
+const double fTextMaximumFrameWidth = 0.8 * (m_fBarRight - m_fBarLeft);   // PieChart.cxx:780
+const sal_Int32 nTextMaximumFrameWidth = ceil(fTextMaximumFrameWidth);
+```
+
+`m_fBarRight - m_fBarLeft` is `1.25 - 0.75` in **unit-circle logic** units, so the wrapping width
+handed to the label is `ceil(0.4)` = **1 hundredth of a millimetre** — one character per line.
+That is the "vertical column of single letters" a blind reading saw in the reference's bar, and
+it is why the diagram shrinks: two columns 17 and 25 lines tall at a 10.47 pt pitch reach far
+past a bar that is 135 pt tall, and at pass 1 they are the same height beside a bar of 84.
+
+Measured on the reference's page: the bar's glyphs form two runs at x ≈ 437.8, pitch 10.47 —
+**17 rows** centred on y 454.35 against the upper segment's centre of 451.94, and **25 rows**
+centred on 381.06 against the lower's 384.24. Against the labels' own text, `Branch 3 Leaf 16`
++ `48%` and `Branch 3 Stem 6 Leaf 15` + `52%`, "one line per non-space character" predicts 17 and
+21 and "one line per character" predicts 19 and 26 — so the first is exact on one label and four
+short on the other and neither is settled. **That exact count is what task #20 needs**, and it
+has to come from a measurement of EditEngine's own breaking at a one-unit paper rather than from
+either guess. `AddOfPieBar` currently emits the label unwrapped and `PieConsumedRect` does not
+measure it at all.

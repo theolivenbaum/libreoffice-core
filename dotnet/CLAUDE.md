@@ -3447,6 +3447,50 @@ renderings give **15.21 → 14.47**. When a chart is displaced by more than its 
 headline number measures the displacement and nothing else — **render the reference with the
 displacement removed and score against that.**
 
+### An `inEnd` pie label is at the rim, and an of-pie's radius is its BAR's labels
+
+**`INSIDE` and `OUTSIDE` share one anchor and differ only in a sign.**
+`PolarLabelPositionHelper::getLabelScreenPositionAndAlignmentForUnitCircleValues` takes the
+ring's *outer* radius for both and the middle of the ring for everything else — `bCenter` is
+exactly `nLabelPlacement != OUTSIDE && != INSIDE` (`PolarLabelPositionHelper.cxx`:68-76), and
+`AVOID_OVERLAP` has already become `CENTER` by the time it is asked
+(`PieChart.cxx`:434-437) — and `createTextLabelShape` then pulls an `INSIDE` anchor **back**
+along the radius by the same flat 150 hundredths of a millimetre it pushes an `OUTSIDE` one out
+by (`:439-452`, applied at `:490-497`). The eight-row alignment table is `bOutside ? A : B` with
+B the opposite of A on every row (`:112-137`), so the block hangs back over the slice instead of
+away from it; the wrapping width stays the default `0.8 * fPieRadius`, the room-to-the-edge arm
+being guarded by `nLabelPlacement == OUTSIDE` (`:544-576`). This tree treated `inEnd` as
+`CENTER` and drew it at half the radius.
+
+Measured on `029_Unit_Circle_Chart_Pie_Theme`, each label's distance from the pie's centre as a
+fraction of its radius — the ratio, because the two pies differ by 2 pt:
+
+```
+reference  0.804  0.839  0.917  0.953  0.890  0.923  0.841
+before     0.414  0.451  0.563  0.588  0.527  0.549  0.467
+after      0.806  0.841  0.918  0.953  0.891  0.924  0.842
+```
+
+**Seven of seven within 0.002 with no free parameter**, and the distance is to the *block*
+rather than to the anchor, so it fixes the mirrored alignment as well. Reach: the corpus's pie
+charts state `inEnd` on **76 points in 5 documents** and `outEnd` on 37 in 4, against 188 points
+in 19 that state nothing; **5 of the 168 chart documents move and 163 are byte-identical**, four
+improving or level.
+
+***And the of-pie radius is not the ring's labels — it is the bar's, through a unit bug.*** All
+sixteen of `028`'s ring labels sit within 93 pt of a centre whose radius is 90.3 in the
+reference's own rendering, so they never leave the ring and cannot consume anything. The bar's
+do: `createBarLabelShape` sets
+`fTextMaximumFrameWidth = 0.8 * (m_fBarRight - m_fBarLeft)` (`PieChart.cxx`:780) where those two
+are `1.25` and `0.75` in **unit-circle logic** units, so the wrapping width is `ceil(0.4)` = **1
+hundredth of a millimetre** and every bar label is drawn one character per line. Measured on the
+reference's page: two columns at x ≈ 437.8, pitch 10.47, of **17 and 25 rows**, centred on the
+two segments to 2.4 and 3.2 pt. That is what makes the pie's second pass shrink the diagram, and
+`AddOfPieBar` emits the label unwrapped while `PieConsumedRect` does not measure it at all.
+**Do not model the line count from either obvious guess** — "one line per non-space character"
+predicts 17 and 21 and "one per character" 19 and 26, so one is exact on one label and wrong on
+the other and neither is settled.
+
 ### A `relativeFrom="page"` vertical anchor counts from the page, except on one corpus document
 
 Measured, mechanism not found, **not implemented**. On `028_Unit_Circle_Chart_Optimized_Graph`

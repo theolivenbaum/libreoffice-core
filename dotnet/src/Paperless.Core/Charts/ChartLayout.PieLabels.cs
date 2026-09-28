@@ -197,7 +197,14 @@ public static partial class ChartLayout
                 centre.X + (radius * 0.5 * Math.Cos(Radians(bisector))),
                 centre.Y - (verticalRadius * 0.5 * Math.Sin(Radians(bisector))));
 
-            if (placement is not (ChartLabelPlacement.BestFit or ChartLabelPlacement.Outside))
+            // CENTER and everything that is not INSIDE or OUTSIDE take the middle of the ring
+            // and LABEL_ALIGN_CENTER: `bCenter` is exactly
+            // `nLabelPlacement != OUTSIDE && != INSIDE`
+            // (PolarLabelPositionHelper.cxx:68-76), and AVOID_OVERLAP has already been turned
+            // into CENTER by the time it is asked (PieChart.cxx:434-437).
+            if (placement is not (ChartLabelPlacement.BestFit
+                                  or ChartLabelPlacement.Outside
+                                  or ChartLabelPlacement.Inside))
             {
                 placed.Add(Assemble(lines, Centred(at05, block), block, gap, key,
                                     label.ShowLegendKey ? series.FillAt(at) : null, null));
@@ -228,9 +235,10 @@ public static partial class ChartLayout
 
             // OUTSIDE: the rim point on the bisector, plus a flat 150 in the radius direction, and
             // a wrapping width taken from the room between that point and the diagram's own edge.
+            // INSIDE is the same rim point less the same 150, with the alignment mirrored.
             (DocRect outside, string[] outLines, DocSize outBlock) = OutsidePlacement(
                 plot, measurer, text, size, bold, gap, centre, radius, verticalRadius,
-                bisector, available);
+                bisector, available, placement is ChartLabelPlacement.Inside);
 
             placed.Add(Assemble(outLines, outside, outBlock, gap, key,
                                 label.ShowLegendKey ? series.FillAt(at) : null, ghost));
@@ -312,7 +320,8 @@ public static partial class ChartLayout
         Length radius,
         Length verticalRadius,
         double bisector,
-        DocRect available)
+        DocRect available,
+        bool inside = false)
     {
         double angle = Norm360(bisector);
         double cos = Math.Cos(Radians(angle));
@@ -322,9 +331,14 @@ public static partial class ChartLayout
         // from — `nOuterX` in PieChart::createTextLabelShape.
         Length rim = centre.X + (radius * cos);
 
-        Length allowance = available.Width * CompatWidthFraction;
+        // An INSIDE label keeps the default guess, `0.8 * fPieRadius`: the room-to-the-edge arm
+        // of that function is guarded by `nLabelPlacement == OUTSIDE` and the comment beside it
+        // is a TODO asking for a better guess for INSIDE (PieChart.cxx:544-576).
+        Length allowance = inside
+            ? radius * BestFitWidthFraction
+            : available.Width * CompatWidthFraction;
 
-        if (available.Width > Length.Zero)
+        if (!inside && available.Width > Length.Zero)
         {
             Length room = angle < 90 || angle > 270
                 ? available.Width - (rim - available.X)
@@ -338,19 +352,32 @@ public static partial class ChartLayout
         string[] lines = LinesOf(measurer, text, size, bold, allowance);
         DocSize block = BlockOf(measurer, lines, size, bold, gap);
 
+        Length offset = inside ? Length.Zero - OutsideLabelOffset : OutsideLabelOffset;
+
         DocPoint anchor = new(
-            centre.X + ((radius + OutsideLabelOffset) * cos),
-            centre.Y - ((verticalRadius + OutsideLabelOffset) * sin));
+            centre.X + ((radius + offset) * cos),
+            centre.Y - ((verticalRadius + offset) * sin));
 
         // The eight-way alignment table, as two independent families. `right` puts the block's
         // left edge on the anchor and grows rightward; `top` puts the block's bottom edge on it
         // and grows upward, which in these coordinates — y downward, as LibreOffice's screen — is
         // a subtraction.
+        //
+        // The table is written as `bOutside ? A : B` on all eight rows and B is A's opposite on
+        // every one of them (PolarLabelPositionHelper.cxx:112-137), so an INSIDE label is the
+        // same two families swapped — which is what makes its block hang back over the slice
+        // instead of away from it.
         bool right = angle <= 5 || angle >= 355 || angle < 85 || angle > 275;
         bool left = (angle > 95 && angle < 175) || angle is >= 175 and <= 185
                     || (angle > 185 && angle < 265);
         bool up = angle is (< 85 and > 5) or (> 95 and < 175);
         bool down = angle is (> 185 and < 265) or (> 275 and < 355);
+
+        if (inside)
+        {
+            (right, left) = (left, right);
+            (up, down) = (down, up);
+        }
 
         Length x = right ? anchor.X + (block.Width / 2)
                  : left ? anchor.X - (block.Width / 2)
