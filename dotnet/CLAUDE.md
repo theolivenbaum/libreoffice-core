@@ -3514,6 +3514,41 @@ reproduce. Reach if anyone takes it: **16 corpus DOCX, 41 page-relative vertical
 (`probes/ofpie-r190/census-pagev.py`). **Do not implement "page means margin" from the corpus
 document alone** — the fixture refutes it.
 
+### An EditEngine line break charges its trailing blank, and a chart sweep's worst page is not the chart's
+
+**Two findings from one page, and the first is about instruments.** The chart-type sweep ranked
+`Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final.pptx` at 18.08 `diff%` and a task carried
+that as a `barChart` seat. **The deck's one chart is on slide 30, which scores 5.38**; the 18.08
+is slide **37**, a bulleted text slide, and 15.91 is slide 13. *A sweep that ranks a document on
+its worst page attributes that page to whatever the document was selected for* — census which
+page the feature is on before working the number.
+
+**The second: a slide's line break charges the blank that ends the line, and this tree hangs
+it.** Slide 37's body placeholder is `<a:off x="609599"/><a:ext cx="11012681"/>`, right edge
+**915.14 pt**. Our line `One transceiver will be active while the other transceiver` ends at
+906.82 and we keep it; the reference breaks before the last word. It is not metrics — five
+identical lines measure the same on the two sides to **0.6 pt**. Rewriting `cx` alone
+(`probes/slidewrap-r190/widths.py`) puts the boundary between a right edge of **915.0**, where
+the reference still breaks, and **915.6**, where it keeps the word — and the kept line's own
+extent is **915.70**, which is 906.82 plus the 8.88 pt blank. So the blank is charged to within
+half a point and "it hangs past the end of the line" is refuted.
+
+***And the leading difference on the same page is that one line, not a second defect.*** The
+extra line tips the body past its autofit box, so the reference takes `constScaleLevels[0]` —
+`{1.000, 1.000, 1.0, 0.9}`, font unscaled and **spacing 0.9**, applied as
+`nHeight = round(GetHeight() * fSpacingY)` in the `InterLineSpaceRule::Off` arm
+(`editeng/source/editeng/impedit3.cxx`:1584-1600) — and draws a 28.15 pt pitch where we draw
+31.27 at the same 25.99 pt size, `31.27 × 0.9 = 28.14`. Widen the placeholder by 1 pt and the
+reference draws our two lines at our exact baselines, 241.97 and 274.68. **A page that reads as
+wholly displaced can be one word's worth of wrap plus an autofit that followed it**; measure the
+line count before the pitch.
+
+Not implemented: the wrap is `Paperless.Text/Layout/ParagraphLayouter`, which all three tracks
+share, and **Writer genuinely does hang a trailing blank** — so it needs a mode the slides path
+(and Calc's shape text, which is the same EditEngine) opts into, plus a slides-track confinement
+sweep, because the rule is a tie-breaker that fires wherever a line's next word lands within one
+space of the limit and cannot be censused from markup. Task #28.
+
 ### Stored evidence decays silently, and the prose knows it while the data does not
 
 Three cases surfaced in a single day: a `words-after.tsv` carrying numbers from a sweep that
