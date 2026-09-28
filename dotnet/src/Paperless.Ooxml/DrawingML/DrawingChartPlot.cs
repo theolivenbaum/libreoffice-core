@@ -249,7 +249,8 @@ public static class DrawingChartPlot
         IReadOnlyList<string?> orderedCategories = categories;
         IReadOnlyList<ChartSeries> orderedSeries = series;
 
-        ChartDateAxis? dateAxis = DateAxisOf(chartSpace, axes.Category, categoryValues);
+        ChartDateAxis? dateAxis =
+            DateAxisOf(chartSpace, axes.Category, axes.Crossing, categoryValues);
         if (dateAxis is not null)
         {
             (dateAxis, orderedCategories, orderedSeries) =
@@ -852,9 +853,12 @@ public static class DrawingChartPlot
     /// </remarks>
     /// <param name="chartSpace">The <c>c:chartSpace</c>, for <c>c:date1904</c>.</param>
     /// <param name="axis">The category axis element, or null when the chart has none.</param>
+    /// <param name="crossing">
+    /// The value axis this one crosses, which is where <c>c:crossBetween</c> is stated.
+    /// </param>
     /// <param name="values">The category cells read as numbers.</param>
     private static ChartDateAxis? DateAxisOf(
-        XElement chartSpace, XElement? axis, double?[] values)
+        XElement chartSpace, XElement? axis, XElement? crossing, double?[] values)
     {
         if (axis is null || !Is(axis, "dateAx") || values.Length == 0) return null;
 
@@ -884,8 +888,28 @@ public static class DrawingChartPlot
             TimeUnitOf(Value(Child(axis, "baseTimeUnit"))),
             Flag(chartSpace, "date1904") == true
                 ? SpreadsheetDateSystem.Date1904
-                : SpreadsheetDateSystem.Date1900);
+                : SpreadsheetDateSystem.Date1900,
+            ShiftedCategoriesOf(crossing));
     }
+
+    /// <summary>
+    /// Whether the categories sit between the ticks rather than on them.
+    /// </summary>
+    /// <remarks>
+    /// <c>AxisConverter::convertFromModel</c> reads it off the *crossing* axis — the value axis —
+    /// as <c>mnCrossBetween == XML_between</c>, and defaults it to true for a bar, line or stock
+    /// group when the attribute is absent
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx</c>:292-301). The two type overrides
+    /// above that test, a 3-D bar and a radar, are not modelled here: no corpus chart pairs
+    /// either with a date axis.
+    /// </remarks>
+    private static bool ShiftedCategoriesOf(XElement? crossing)
+        => Value(Child(crossing, "crossBetween")) switch
+        {
+            "between" => true,
+            "midCat" => false,
+            _ => true,
+        };
 
     /// <summary>The three <c>ST_TimeUnit</c> spellings, or null when the element is absent.</summary>
     private static ChartTimeUnit? TimeUnitOf(string? stated) => stated switch

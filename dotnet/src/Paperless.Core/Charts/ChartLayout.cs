@@ -4563,23 +4563,51 @@ public static partial class ChartLayout
         double denominator = series + outer + inner * (series - 1);
         if (!(denominator > 0.0)) return;
 
-        double slotFraction = 1.0 / (categories * denominator);
+        // A date axis' category is one unit of its own time resolution wide and sits at the
+        // point's own date; a category axis' is one n-th of the plot and sits at the point's
+        // index. Only the width and the centre differ — the share of the category each series
+        // takes inside it is the same arithmetic either way.
+        ChartDateAxis? dates = plot.DateAxis;
+        double categoryFraction = dates?.SlotFraction ?? (1.0 / categories);
+
+        double slotFraction = categoryFraction / denominator;
         double baseline = Math.Clamp(scale.Fraction(0.0), 0.0, 1.0);
+
+        // A date axis can carry more points than the axis has categories, and it drops the ones
+        // off its own ends rather than squeezing them in.
+        int points = dates is null
+            ? categories
+            : Math.Max(categories, dates.CategoryValues.Count);
 
         // A stacked chart's series pile onto a running total per category rather than each
         // starting from the baseline, and positives and negatives pile separately so that a
         // mixed category does not cancel itself out.
-        double[] positive = new double[categories];
-        double[] negative = new double[categories];
+        double[] positive = new double[Math.Max(categories, points)];
+        double[] negative = new double[Math.Max(categories, points)];
 
         for (int index = 0; index < series; index++)
         {
             ChartSeries one = plot.Series[index];
 
-            for (int at = 0; at < categories; at++)
+            for (int at = 0; at < points; at++)
             {
                 if (at >= one.Values.Count) continue;
                 if (one.Values[at] is not { } value || !double.IsFinite(value)) continue;
+
+                // `BarChart::createShapes` rasterises the point's own x to the axis' resolution
+                // and then skips it outright when it is off the axis — three `continue`s before
+                // any geometry (chart2/source/view/charttypes/BarChart.cxx:694-704). Laying these
+                // out by index instead put 171128IPAP page 40's 67 drawn bars into the left
+                // two-thirds of a plot where 26.2.4.2 draws 44 across the whole of it.
+                double? dated = null;
+                if (dates is not null)
+                {
+                    if (at >= dates.CategoryValues.Count) continue;
+                    if (dates.CategoryValues[at] is not { } serial) continue;
+                    if (dates.SlotStart(serial) is not { } placed) continue;
+
+                    dated = placed;
+                }
 
                 double from;
                 double to;
@@ -4619,8 +4647,20 @@ public static partial class ChartLayout
                 from = Math.Clamp(from, 0.0, 1.0);
                 to = Math.Clamp(to, 0.0, 1.0);
 
-                // The slot the bar sits in, as a fraction of the plot area's long side.
-                double slotStart = (double)at / categories
+                // The slot the bar sits in, as a fraction of the plot area's long side. A
+                // category begins at its own point and runs one unit — on an index axis that is
+                // `at/categories`, and on a date axis it is where the rasterised date falls.
+                //
+                // It is NOT centred on the point, although
+                // `CategoryPositionHelper::getScaledSlotPos` subtracts half a category width:
+                // the axis' own maximum carries one extra interval for the same reason, so the
+                // subtraction and the extension cancel and every category sits to the right of
+                // its tick. Solved rather than assumed — 044_Cash_flow_forecast's date axis was
+                // rendered by 26.2.4.2 three times, as authored and with two different explicit
+                // ranges, and the plot's left edge comes out at 414.3 pt under the left-aligned
+                // reading in both patched cases and at two different values under the centred
+                // one. probes/bardate-r189.
+                double slotStart = (dated ?? ((double)at / categories))
                     + (outer / 2.0 + index * (1.0 + inner)) * slotFraction;
 
                 // A reversed category axis mirrors the whole bar, not its slot — so the series

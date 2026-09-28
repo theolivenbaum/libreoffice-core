@@ -111,7 +111,7 @@ The individual pages at 8 diff% or worse:
 | 20.31 | 2.37 | `Demick_JetBlue` | open |
 | 18.08 | 1.91 | `Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final` | open |
 | 16.47 | 3.58 | `028_Unit_Circle_Chart_Optimized_Graph` | known: ofPie layout, task #20 |
-| 16.01 | 1.91 | `171128IPAP` | known: `c:smooth` splines, task #24 |
+| 16.01 | 1.91 | `171128IPAP` | open; **NOT the `c:smooth` splines** — those closed in round 102, `probes/chart-smooth-r102` |
 | 15.93 | 0.94 | `Sector_Skills_Insights_Advanced_Manufacturing_summary_slide_pack` | open |
 | 12.39 | 0.88 | `093_Insightful_Zoom_Chart` | open |
 | 12.20 | 5.18 | `021_Unit_Circle_Chart_3D_Pie_Chart` | known: 3-D pie, task #19 |

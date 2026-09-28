@@ -312,9 +312,18 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    gets no mark of its own. On `171128IPAP.pptx` slide 38 the three series now run 119.55 … 615.56
    against 26.2.4.2's 119.54 … 615.49, where they ran −866.50 … 758.03 on a 720 pt page; all four
    renderings improve and no page or alphanumeric count moves. **The area, net/radar and regression
-   clips are still open**, and so is the splined line: that chart's three series state
-   `c:smooth val="1"` and 26.2.4.2 draws 801 segments through 132 points where we draw 131.
-   `probes/chart-resid-r75/results.md` §1.
+   clips are still open.** `probes/chart-resid-r75/results.md` §1.
+
+   ***The splined line that stood beside them is closed and this paragraph said otherwise for
+   eleven rounds.*** *"That chart's three series state `c:smooth val="1"` and 26.2.4.2 draws 801
+   segments through 132 points where we draw 131"* was true when it was written and round 102
+   closed it: `ChartSpline` is the natural cubic spline over the point index at
+   `CurveResolution` 20, reproducing 26.2.4.2's own flattened polyline to **0.0495 pt**, which is
+   1.75 hundredths of a millimetre. Its reach is **12 documents by markup and 2 in drawn
+   geometry** — nine of the eleven that state `c:smooth` carry arithmetic-progression data, whose
+   spline *is* the straight line, and one suppresses its line altogether.
+   `probes/chart-smooth-r102`. A round briefed off the old sentence would re-derive a feature the
+   tree already has; `171128IPAP`'s residual is real and is not this.
 
    **And a chart's range excludes the cells of hidden rows and columns, which is not a chart rule
    the record had.** `ScChart2DataSequence::BuildDataCache` asks `ColHidden` and `RowHidden` per
@@ -3329,6 +3338,55 @@ chart census keyed on `.xlsx`/`.pptx`/`.docx` misses a `.xlsm` — the first cut
 was 167 documents and is 168 — and one keyed on *zip parts* misses every BIFF chart substream,
 which is the same error that made an older reach figure short by eight. **Census the package's
 contents and walk OLE2 files, not extensions.**
+
+### A bar on a date axis is placed by its date, and for years it was placed by its index
+
+**`ChartLayout.AddBars` put every bar at `(double)at / categories`, whatever the axis was.** A
+line series has gone through `ChartDateAxis` since it was written, so on a date-axis combination
+chart the line spanned the plot and the bars did not: on `171128IPAP.pptx` page 40 this tree drew
+**67 bars across the left two-thirds of a plot where 26.2.4.2 draws 44 across the whole of it**,
+at a pitch that changed partway along — which is the signature of a layout that does not know
+what its x coordinate means. Page 40 is now **16.01 → 7.94 `diff%`** and MAJOR → shifted, with
+its bars at 350.07…635.85 pt against the reference's 350.05…635.75. `probes/bardate-r189`.
+
+Four rules, and only the first two are readable from the source alone:
+
+- **A category is one unit of the axis' own time resolution wide**, not one n-th of the points —
+  `PlottingPositionHelper::setTimeResolution` sets it to 1, and to 12 at year resolution because
+  the scaling counts months (`PlottingPositionHelper.cxx`:670-690).
+- **The axis is linear in that unit and not in days.** `DateScaling::doScaling`
+  (`chart2/source/view/axes/DateScaling.cxx`:56-91) returns `year × 12 + month` plus the fraction
+  of the month elapsed. Over 132 months the difference is under a tenth of a percent; over eleven
+  it is 5%, and 26.2.4.2 spaces `044_Cash_flow_forecast`'s twelve monthly bars at a flat 35.26 pt
+  where days give 30.2 to 33.4. **A date span measured in days over 30.44 is not the span in
+  months.**
+- **A shifted axis carries one extra interval** — `"for explicit scales we need one interval more
+  (maximum excluded)"`, `ScaleAutomatism.cxx`:565-597 — **whether or not the range is stated**,
+  and the interval is chosen from the span *after* the extension, so it moves every tick too.
+- **And a shifted axis' categories lead their own dates**, where an unshifted axis' straddle
+  them. That half is *not* in the source: `CategoryPositionHelper::getScaledSlotPos` subtracts
+  half a category width unconditionally and something adds it back. It was solved instead.
+
+***The experiment that solved it is the one to copy.*** One rendering cannot separate "centred on
+the date" from "running from the date", because the plot's left edge is unknown and both readings
+fit at different edges. Render the same file twice with two *different stated ranges* and the
+edge has to come out the same — and, better, **read the plot's own rule out of the page instead
+of inferring it**: the widest horizontal is the plot rectangle, 414.31 in both variants. The
+first cut of this probe inferred the edge from the bars, concluded "centred", and was refuted by
+the tick row in the same PDF.
+
+**Which arm applies is the crossing *value* axis' `c:crossBetween`**, read as `== "between"` with
+a fallback of true for a bar, line or stock group
+(`oox/source/drawingml/chart/axisconverter.cxx`:292-301). Measured: the same file with the
+attribute deleted renders identically to `between`, and rewritten to `midCat` loses the extra
+interval and straddles. **`ChartDateScale.Resolve`'s own default is `false`**, because that OOXML
+fallback belongs to the OOXML reader — the BIFF reader passes nothing and keeps the geometry it
+had, `CHVALUERANGE`'s crossing flag being unmeasured.
+
+**Reach 7 chart parts in 5 documents by markup; 8 of the 168 chart-bearing documents move and 160
+are byte-identical**, the three extra being charts whose *lines and ticks* moved with the
+month-linear axis. Two improve (16.01 → 12.91 and 2.57 → 2.12), five are level, one worsens by
+0.05 on a chart already within 0.13 pt.
 
 ### Stored evidence decays silently, and the prose knows it while the data does not
 
