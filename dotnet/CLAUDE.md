@@ -3447,6 +3447,60 @@ renderings give **15.21 → 14.47**. When a chart is displaced by more than its 
 headline number measures the displacement and nothing else — **render the reference with the
 displacement removed and score against that.**
 
+### An autofitted slide body shrinks its text and not its bullet's label, and the first line moves
+
+**Diagnosed, pinned with no free parameter, and not implemented.** `probes/slidebullet-r191`.
+
+The rule, on 26.2.4.2:
+
+```
+firstLineTextX = max(marL, marL + indent + advance(bullet))
+```
+
+and **the advance is taken at the run's stated size, not at the size the autofit draws it at.**
+`Sector_Skills_Insights_Advanced_Manufacturing_summary_slide_pack.pptx` page 13 is the witness: its
+runs state `sz="5600"`, its body states `<a:normAutofit fontScale="25000" …>` so the text is drawn at
+**14 pt**, and the en-dash bullet's label is measured at **56 pt** — 31.13 pt wide, which overruns
+the level's 22.5 pt hanging indent and pushes every second-level paragraph's first line **8.63 pt**
+right of its own continuation lines. The bullet glyph itself does not move.
+
+Pinned over **ten one-attribute variants** of that one master: `indent` 0 / −9 / −22.5 / −36 and
+`marL` 58.5 / 78.75 give first-line positions of 89.63, 80.62, 67.13, clamped and 87.37 against
+89.62, 80.62, 67.12, clamped and 87.37 predicted — **five of five exact and two clamped as
+predicted** — and the bullet character decides the width: `–` 0.5562 em → 31.15 (31.13 measured),
+`W` 0.9438 → 52.85 (52.87), `i` 0.2222 → 12.43, which fits inside the hanging indent and is
+therefore invisible.
+
+**Two variants that decide nothing and are worth knowing.** The bullet's own stated size — the
+`<a:defRPr sz="2800">` on the same `lvl2pPr` — moves the offset not at all at 14, 28 or 56 pt, so the
+label takes the *run's* size and not the level's. And **rewriting `fontScale` or deleting it outright
+changes nothing, because LibreOffice recomputes the autofit rather than honouring the stated scale** —
+all three variants draw the text at 14.00 pt. A probe cannot vary the shrink through the file; the
+unshrunk size has to be read off the runs.
+
+**It is a cascade, which is why it is worth a round.** Page 13 is `diff%` **15.93** with `|ink|%`
+**0.14**: nothing is drawn differently and one wrap is. Our line fits 94 glyphs where the reference's
+fits 92, so a paragraph we set in two lines takes three, everything below drops one pitch, and the
+reference's last line is clipped by the slide's edge. **Reach is uncensused** and the census is the
+first job: every slide text body with a `normAutofit` and a `buChar` whose advance at the run's
+*stated* size exceeds `|indent|`.
+
+**And the same page taught a census rule again**: that deck heads the chart ranking at 15.93 and its
+worst page holds **no chart at all**. Census which page the feature is on before working the number.
+
+***A second lead from the same deck, read blind and not measured: our drop shadow ignores its blur
+and its lateral offset.*** On page 11 ours is a uniform RGB 153 band 4 rows deep offset straight down
+by ~2.2 pt with **zero** spread to the left, the right or above, where 26.2.4.2 ramps 157 → 249 over
+about 11 rows below, 8 px right, 7 px left and 3 px above — a 4–6 pt blur offset down *and* to the
+right. That is what an ignored `a:outerShdw/@blurRad` with a substituted vertical `@dist` looks like.
+It is not only cosmetic: this file already records that **LibreOffice rasterises a blurred shadow**,
+so its PDF holds a picture with no words where a hard one stays vector and searchable — which makes
+the text layer the cheap instrument for it. The same reading found a shadowed white container the
+reference draws and we appear not to, plausibly the same defect (under a no-blur no-lateral shadow the
+only visible strip is covered by the box below), and one difference where **the reference is the wrong
+one**: its first teal box is 11 px shorter than ours and its last line's white glyphs fall onto white
+paper.
+
 ### A hatch's distance is a number and the drawing layer decides the unit — Writer's is twips
 
 **Measured, implemented, and withdrawn; the patch is banked at `probes/charthatch-r191/withdrawn.patch`
