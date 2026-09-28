@@ -3447,6 +3447,77 @@ renderings give **15.21 → 14.47**. When a chart is displaced by more than its 
 headline number measures the displacement and nothing else — **render the reference with the
 displacement removed and score against that.**
 
+### A chart label's width includes its trailing blank, and an accounting axis puts one on every tick
+
+**A chart label is an EditEngine text shape autogrown around its paragraph whole, so its trailing
+blanks are part of its width** — and the value axis reserves its widest label's width, so a lost
+blank makes the band narrow and the plot area that much too wide, with every gridline and every bar
+in it displaced. Excel's accounting formats end their positive and zero subformats in `_)`, a blank
+the width of a closing parenthesis, so this fires on every currency axis.
+
+**Only the slides path had it, and the reason is the mechanism rather than the track.**
+`SlideChart.Measurer` sums the advances `SlideTextLayout.Place` emitted, and `Emit` runs to
+`TextLine.VisibleEnd` — which exists precisely to keep a line's trailing blanks out of its width,
+because they hang past the right edge rather than pushing a word onto the next line. That is right
+for a wrapped body and wrong for a label that never wraps. `SheetBandText.ChartShape` and
+`FrameChart.ChartFace.Shape` shape the string and sum every advance, so both were already right.
+**This is not the rule round 190 refuted** — *"a slide line break charges its trailing blank"* is
+about where a line **breaks** and stays refuted; this is the width of a paragraph that does not
+break at all.
+
+**Measured by deleting one token of one format and nothing else** on `Demick_JetBlue.pptx` page 5
+(`probes/chartblank-r191`), reading the plot rectangle out of the extent of the major gridlines with
+`pdf-ops.py dump --only stroke` grouped by colour:
+
+| rendering | plot left | widest label's ink right | gap |
+|---|---:|---:|---:|
+| ours, base | 161.99 | 159.33 | **2.66** |
+| 26.2.4.2, as authored | 165.71 | 159.80 | **5.91** |
+| 26.2.4.2, `_)` deleted | 162.65 | 159.80 | **2.85** |
+| 26.2.4.2, the zero row's `??` deleted | 165.71 | 159.80 | 5.91 |
+
+The base tree renders the reference's *`_)`-deleted* answer, and the `??` control does not move
+because the zero row is not the widest label. Deleting `_(` instead moves the edge by the same blank
+again — **both ends count and only the trailing one was lost.** On the authored fixture
+`slide-chart-accounting-axis.pptx` the wall's left edge goes **128.70 → 131.41 against 26.2.4.2's
+131.41**, exact with no free parameter; `SlideChartTrailingBlankTests` pins it.
+
+**Reach: 4 of the 67 chart-bearing decks move and 63 are byte-identical.** Three improve and none
+worsens — `Demick_JetBlue` worst 20.31 → 19.03 and summed 86.78 → 82.14 over four pages,
+`southern-classic-kennesaw-state-university-final` 75.64 → 74.94, `Sector_Skills_Insights` 139.85 →
+139.74, `171128IPAP` level in pixels although its bytes moved. **No gate column can see it** and
+that is checked: the four movers' alphanumeric and page counts are identical before and after,
+because a blank is not an alphanumeric character.
+
+**Two traps.** Replacing `_)` with `)` leaves a literal closing parenthesis behind and answers a
+different question — delete both characters. And a glyph-count difference between the two sides is
+*not* evidence here: our PDF draws 14 glyphs for `" $1,200,000.00 "` and the reference 15, but that
+is the writer declining to emit an inkless trailing space and it is true before and after the fix.
+**Measure the gap from the last glyph's ink to the plot's edge, not the glyph count.**
+
+***What is still open on that page, measured and not taken.*** The chart's text is drawn at 10.01 pt
+where the reference draws 9.89 at a horizontal scale of 9.92 — the anisotropic fit squeezing a chart
+whose labels overflow — which is 0.6% of every advance and the whole of the residual 0.62 pt. The
+plot is 190.58 pt tall against 186.98 with the top edges 0.46 pt apart, so the reference gives up
+4.06 pt more below it: the category axis is interior here (the `$-` gridline) and `PlotAreaOf`
+reserves nothing for an interior axis' labels, which is right as far as it goes —
+`VDiagram::adjustInnerSize` then shrinks the inner rectangle by how far the drawn labels *overflow*
+the available one, and we do not. Our rotated labels also hang about 3.3 pt further below the axis
+line than the reference's, so **the overflow shrink and the label depth have to be separated before
+either is worth implementing.** The legend sits 4.20 pt lower in the reference and the rotated axis
+title 4.09 pt further right. And 26.2.4.2 **outlines** that page's 26 turned category labels — 156
+glyph-sized fills, no text records at all — so part of the page is the shear ceiling.
+
+***And the tiled ground is not the answer, which a round could easily have spent itself on.*** That
+page's theme repeats a 5 × 5 px bitmap through `<a:tile sx="65000" sy="65000"/>` about 37 000 times
+and our pitch is 3.25 pt against the reference's ≈ 3.2325, so the phase drifts across the page — but
+the plot rectangle is what the 20.31 was, and the blind reader called the tiled ground *"the closest
+match on the page"*. Censused for whoever takes it: **91 documents, 400 `a:tile` elements** — by part
+`theme` 171, `slides` 160, `document.xml` 41, `slideLayouts` 16, `slideMasters` 8, `charts` 4 — the
+heaviest being `048_Visual_Product_Roadmap_Template_Quality_Layout` (26) and
+`082_Infographic_Funnel_with_4_Stages_for_PowerPoint` (24). `Demick_JetBlue` is not in the top
+fifteen.
+
 ### An `inEnd` pie label is at the rim, and an of-pie's radius is its BAR's labels
 
 **`INSIDE` and `OUTSIDE` share one anchor and differ only in a sign.**
