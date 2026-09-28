@@ -43,8 +43,7 @@ whose top is `w:pgMar/@w:top` below the sheet's. Then:
    whenever the anchor is outside a table, and its `compatibilityMode` 15 narrowing to the body
    needs `rPageAlignLayFrame.IsPageFrame()` — which a body frame is not. So a following object is
    held inside the **sheet**, which is the opposite of what the flag's name suggests.
-4. **only at the top.** `bCheckBottom = !DoesObjFollowsTextFlow()` (:457), and
-   `ImplAdjustVertRelPos` guards the first of its two corrections with it (:653-664).
+4. ~~**only at the top.**~~ **Withdrawn — implemented, then refuted by the corpus.** See §7.
 
 **The horizontal is untouched, and that is a property of the same file rather than an omission.**
 `GetHoriEnvironmentLayoutFrame`'s walk stops at a cell, a fly or a page and has no body frame in it
@@ -131,16 +130,56 @@ what they were.
 `Paperless.WordProcessing.Tests` **2200 passed, 0 failed** against the 2189 of the round's base — the
 eleven new cases being `FrameFollowsTextFlowTests`' seven methods, four of them theories.
 
-## 7. Not measured yet
+## 7. A fourth consequence was implemented and the corpus refuted it
 
-- **Confinement over the words track**: `sweep.py` twice, `confine.py` once. §5 argues it by
-  construction — one writer, and with the flag false every expression reduces to what it was — and
-  by-construction is not a measurement. The set that can move is 5 documents and the sweep is what
-  says so.
-- **`028` and `027` scored against the reference.** `028` needs the `v-incell0` variant as its
-  reference, per `probes/ofpie-r190/results.md` §4: with the chart displaced by more than its own
-  features, a page-fraction metric measures the displacement and nothing else, so the authored
-  reference cannot show this closing.
+**`bCheckBottom = !DoesObjFollowsTextFlow()` is real and it is not the rule for this case.** The
+expression appears three times — at `tocntntanchoredobjectposition.cxx`:457 in the *alignment* arm and
+at :678 and :718 in the offset one — and the offset arm has a **fourth** `AdjustVertRelPos` call, at
+:810-813, which **omits the argument** and so takes the `= true` default
+(`anchoredobjectposition.hxx`:185-192). That call sits under *"do not follow text flow respectively
+align at 'page areas', but stay inside given environment"*, and it is the path an offset that does not
+fit its upper's print area takes — which is the path a page-relative chart reaches.
+
+`027_Unit_Circle_Chart_Graphical_Chart` is the witness and it is unambiguous. Its chart is 470.30 pt
+tall on a 595.30 pt landscape page with `w:top="3139"` (156.95 pt) and an offset of 111.65 pt, so the
+body base puts its bottom at 738.90 — and 26.2.4.2 draws its top at **125.00**, which is
+`595.30 − 470.30` to the hundredth. Leaving the bottom unchecked drew it at 268.60:
+
+| | 26.2.4.2 | with the bottom skipped | with it kept |
+|---|---:|---:|---:|
+| `027` chart top, doc y | **125.00** | 268.60 | **125.00** |
+| `027` worst-page `diff%` | — | 28.42 | **4.61** (9.48 at the base) |
+
+So **three consequences, not four**. It is worth writing down twice: the fourth was read out of the
+source, it was read correctly, and the source had one more call site than the reading did.
+
+## 8. Confinement, and what the two movers score
+
+`sweep.py` over the words track's 337 documents at the round's base and again with the change, our
+half only, `SOURCE_DATE_EPOCH` pinned, one output directory per document:
+
+**2 moved, 335 byte-identical, 0 unrendered** — and the two are exactly the two whose chart states
+`relativeFrom="page"`. The three `margin` ones do not move by a byte, which is the prediction in §5
+arriving as a measurement: `PAGE_PRINT_AREA` resolves to the body either way.
+
+| document | worst-page `diff%` | `\|ink\|%` | chart top, ours → 26.2.4.2 |
+|---|---|---|---|
+| `027_Unit_Circle_Chart_Graphical_Chart` | 9.48 → **4.61** | 0.56 → 0.73 | 470.30 → 470.30, **exact** |
+| `028_Unit_Circle_Chart_Optimized_Graph` | 16.78 → **14.18** | 3.32 → 3.60 | 247.49 → 247.85, the 0.36 constant |
+
+Both improve on `diff%`, which is the metric to rank a chart on, and both rise slightly on `|ink|%` —
+the expected sign, since `|ink|` is signed per region before the page's absolute value is taken and a
+frame moving into place cancels less than one sitting 72 pt away.
+
+**`028` is scored against its *authored* reference here, and that is a change from
+`probes/ofpie-r190` §4.** That round scored it against the `v-incell0` variant because our chart was
+71.6 pt out of place and a page-fraction metric could only measure the displacement. With the
+displacement gone the authored reference is the right one — and scoring the fixed tree against
+`v-incell0` gives 18.89, which is that same displacement measured in the other direction. *A control
+built to remove a defect stops being a control once the defect is fixed.*
+
+Nothing outside the words track can move: `PageFrame.FollowsTextFlow` has one writer, and with the
+flag false every expression in `FrameLayout.Place` reduces to what it was.
 
 **And one banked row has to be re-measured before it is built on.**
 `probes/ofpie-r190/results.md`'s variant table gives `layoutInCell="0"` a frame top of **214.94**

@@ -3714,12 +3714,24 @@ initialised **true** (`GraphicImport.cxx`:340), so an anchor stating nothing fol
 does not follow the text flow, otherwise a walk up to the first cell, fly, header, footer, footnote,
 **page body** or page frame. Four things follow, and only the first is the 71.6 pt: the `PAGE_FRAME`
 base (`tocntntanchoredobjectposition.cxx`:590-596); the object being captured at all, since
-`mbDoNotCaptureAnchoredObj` is a product with `!mbFollowTextFlow` in it; its being captured in the
+`mbDoNotCaptureAnchoredObj` is a product with `!mbFollowTextFlow` in it; and its being captured in the
 **sheet** rather than the body, because the `compatibilityMode` 15 narrowing needs
-`rPageAlignLayFrame.IsPageFrame()` (:562-566) — the opposite of what the flag's name suggests; and the
-bottom correction not firing, `bCheckBottom = !DoesObjFollowsTextFlow()` (:457). The **horizontal** is
-untouched, and that is the same file's own doing: `GetHoriEnvironmentLayoutFrame`'s walk stops at a
-cell, a fly or a page and has no body frame in it.
+`rPageAlignLayFrame.IsPageFrame()` (:562-566) — the opposite of what the flag's name suggests. The
+**horizontal** is untouched, and that is the same file's own doing:
+`GetHoriEnvironmentLayoutFrame`'s walk stops at a cell, a fly or a page and has no body frame in it.
+
+***A fourth consequence was implemented on a correct reading of the source and the corpus refuted it in
+one document — read this before trusting a `bCheckBottom` argument you have found.***
+`bCheckBottom = !DoesObjFollowsTextFlow()` really is written at `tocntntanchoredobjectposition.cxx`:457,
+:678 and :718 — and the offset arm has a **fourth** `AdjustVertRelPos` call, at :810-813, which
+**omits the argument** and so takes the `= true` default (`anchoredobjectposition.hxx`:185-192). That
+call is under *"do not follow text flow respectively align at 'page areas', but stay inside given
+environment"* and is the path an offset which does not fit its upper's print area takes, which is the
+path a page-relative chart reaches. `027_Unit_Circle_Chart_Graphical_Chart` decides it: 470.30 pt of
+chart at a body base of 156.95 + 111.65 would reach 738.90 on a 595.30 pt landscape page and 26.2.4.2
+draws its top at **125.00**, exactly `595.30 − 470.30`. Skipping the correction drew it at 268.60 and
+took the document from 9.48 to **28.42** `diff%`; keeping it draws 470.30 against the reference's
+470.30. **Grep for every call of a function whose guard you are modelling, not for the guard.**
 
 **The experiment is the one to copy, because the refuted fixture below differs from it by one
 variable.** Eight minimal DOCX stating the same `wp:anchor` at the same 180 pt offset, varying the
@@ -3730,7 +3742,13 @@ object kind, `w:pgMar/@w:top` and `layoutInCell` (`probes/pagev-r192/fixture.py`
 switches it. This tree reproduces **8 of 8** within the two writers' own 0.36 pt border-origin
 constant. Reach by markup: **5 embedded-object anchors in 5 documents**, all five `Unit_Circle`
 charts, `page` on two and `margin` on three — and `margin` is `PAGE_PRINT_AREA`, which resolves to the
-body either way, so the base moves two documents and the capture rules reach all five.
+body either way, so the base moves two documents and the capture rules reach all five. Measured
+rather than censused: **2 of the words track's 337 renderings move and 335 are byte-identical**, the two
+being exactly the `page` pair, `027` going 9.48 → **4.61** worst-page `diff%` and `028` 16.78 →
+**14.18**. No gate column can see a frame's position, and `|ink|%` rises on both (0.56 → 0.73, 3.32 →
+3.60) because it is signed per region before the page's absolute value — a frame moving *into* place
+cancels less than one sitting 72 pt away, which is worth knowing before reading that column as a
+regression.
 **`PAGE_PRINT_AREA_TOP` shares `PAGE_FRAME`'s branch and is deliberately left**: no corpus DOCX pairs
 a `topMargin` relation with an embedded object, and the band's height under following is unmeasured.
 `probes/pagev-r192/results.md`.

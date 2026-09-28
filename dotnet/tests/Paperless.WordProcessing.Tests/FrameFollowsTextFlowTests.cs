@@ -8,22 +8,21 @@ namespace Paperless.WordProcessing.Tests;
 
 /// <summary>
 /// An object that follows the text flow is positioned against the page <em>body</em>, captured
-/// although its wrap would exempt it, held inside the sheet rather than the body, and never pulled up
-/// from below.
+/// although its wrap would exempt it, and held inside the sheet rather than inside the body.
 /// </summary>
 /// <remarks>
 /// <para>
-/// One function decides all four: <c>SwEnvironmentOfAnchoredObject::GetVertEnvironmentLayoutFrame</c>
+/// One function decides all three: <c>SwEnvironmentOfAnchoredObject::GetVertEnvironmentLayoutFrame</c>
 /// (<c>sw/source/core/objectpositioning/environmentofanchoredobject.cxx</c>:64-95) answers
 /// <c>FindPageFrame()</c> for an object that does not follow the text flow, and otherwise walks up from
 /// the anchor to the first cell, fly, header, footer, footnote, <b>page body</b> or page frame. A
 /// paragraph in the body lands on the page body frame, whose top is <c>w:pgMar/@w:top</c> below the
-/// sheet's — and the four consequences are <c>PAGE_FRAME</c>'s base
+/// sheet's — and the three consequences are <c>PAGE_FRAME</c>'s base
 /// (<c>tocntntanchoredobjectposition.cxx</c>:590-596), <c>mbFollowTextFlow</c> in
-/// <c>mbDoNotCaptureAnchoredObj</c> (<c>anchoredobjectposition.cxx</c>:125-144), the
-/// <c>compatibilityMode</c> 15 narrowing's own <c>rPageAlignLayFrame.IsPageFrame()</c> test (:562-566),
-/// and <c>bCheckBottom = !DoesObjFollowsTextFlow()</c>
-/// (<c>tocntntanchoredobjectposition.cxx</c>:457).
+/// <c>mbDoNotCaptureAnchoredObj</c> (<c>anchoredobjectposition.cxx</c>:125-144), and the
+/// <c>compatibilityMode</c> 15 narrowing's own <c>rPageAlignLayFrame.IsPageFrame()</c> test (:562-566).
+/// A fourth was implemented and measured away — see
+/// <see cref="AFollowingObjectIsPulledUpFromBelowThePageAsWell"/>.
 /// </para>
 /// <para>
 /// <b>Which objects follow it is the point, and it is one unguarded line.</b>
@@ -111,25 +110,35 @@ public sealed class FrameFollowsTextFlowTests
     }
 
     /// <summary>
-    /// The bottom correction does not fire for a following object, so it hangs off the page.
+    /// The bottom correction fires for a following object too, so it is pulled back onto the sheet.
     /// </summary>
     /// <remarks>
-    /// <c>bCheckBottom</c> guards only the first of <c>ImplAdjustVertRelPos</c>' two corrections
-    /// (<c>anchoredobjectposition.cxx</c>:653-664), and the caller passes
-    /// <c>!DoesObjFollowsTextFlow()</c>. The non-following row is the control and is the rule
-    /// <see cref="FrameCapturedOnPageTests"/> pins: a frame past the bottom comes back until its bottom
-    /// rests on the area's.
+    /// <para>
+    /// <b>This was implemented the other way round first, and the corpus refuted it in one document.</b>
+    /// <c>bCheckBottom = !DoesObjFollowsTextFlow()</c> is real — at
+    /// <c>tocntntanchoredobjectposition.cxx</c>:457 in the alignment arm and at :678 and :718 in the
+    /// offset one — but the offset arm has a third call at :810-813 which <b>omits the argument</b>, so
+    /// it takes the <c>= true</c> default (<c>anchoredobjectposition.hxx</c>:185-192). That is the path
+    /// an offset which does not fit its upper's print area takes, and it is the one a page-relative
+    /// chart reaches.
+    /// </para>
+    /// <para>
+    /// Measured on <c>027_Unit_Circle_Chart_Graphical_Chart</c>: 470.30 pt of chart at a body base of
+    /// 156.95 + 111.65 would reach 738.90 on a 595.30 pt landscape page, and 26.2.4.2 draws its top at
+    /// <b>125.00</b> — <c>595.30 − 470.30</c> to the hundredth. Leaving it to hang drew it at 268.60 and
+    /// took the document from 9.48 to 28.42 <c>diff%</c>.
+    /// </para>
     /// </remarks>
     [Theory]
-    [InlineData(false, 841.9 - 36)]
-    [InlineData(true, MarginPoints + 820)]
-    public void OnlyANonFollowingObjectIsPulledUpFromBelowThePage(bool follows, double expected)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AFollowingObjectIsPulledUpFromBelowThePageAsWell(bool follows)
     {
-        // 820 pt down a 841.9 pt page puts a 36 pt frame 14.1 pt past the bottom edge, so the
-        // correction under test is the one that fires rather than the one that does not.
+        // 820 pt down a 841.9 pt page puts a 36 pt frame past the bottom edge under either base, so the
+        // two rows land on the same answer for two different reasons.
         PageFrame frame = Chart(follows) with { VerticalOffset = Length.FromPoints(820) };
 
-        Docx(frame).Y.Points.ShouldBe(expected, 0.01);
+        Docx(frame).Y.Points.ShouldBe(841.9 - 36, 0.01);
     }
 
     /// <summary>
@@ -141,9 +150,10 @@ public sealed class FrameFollowsTextFlowTests
     /// the row with reach: an embedded object anchored to its paragraph is affected by the capture
     /// area although its base does not move.
     /// <para>
-    /// <b>This row and the bottom correction above are read out of the source and not measured at a
-    /// reference of their own</b> — <c>028</c> states <c>page</c> and so exercises neither.
-    /// <c>probes/pagev-r192</c> §4 says what would settle them.
+    /// <b>This row is read out of the source and not measured at a reference of its own</b>: all five of
+    /// the corpus's embedded-object anchors state <c>page</c> or <c>margin</c>, so none exercises a
+    /// paragraph-relative following object. Its sibling assumption, the bottom correction, was measured
+    /// and turned out to be wrong — so treat this one as source-derived and no more.
     /// </para>
     /// </remarks>
     [Theory]

@@ -153,8 +153,19 @@ public static class FrameLayout
         //   * it is captured in the **page**, not in the body: `ImplAdjustVertRelPos`:544-573 takes the
         //     page frame's own rectangle whenever the anchor is outside a table, and its
         //     `compatibilityMode` 15 narrowing needs `rPageAlignLayFrame.IsPageFrame()`, which a body
-        //     frame is not. Only the top correction fires, `bCheckBottom = !DoesObjFollowsTextFlow()`
-        //     (`tocntntanchoredobjectposition.cxx`:457).
+        //     frame is not.
+        //
+        // **`bCheckBottom = !DoesObjFollowsTextFlow()` is NOT a fourth, and the corpus refuted it.** That
+        // expression is real, at `tocntntanchoredobjectposition.cxx`:457 in the *alignment* arm and at
+        // :678 and :718 in the offset one — and the offset arm has a third call, at :810-813, which
+        // **omits the argument** and so takes its `= true` default (`anchoredobjectposition.hxx`:185-192).
+        // That is the path an offset which does not fit its upper's print area takes, under the comment
+        // *"do not follow text flow respectively align at 'page areas', but stay inside given
+        // environment"*, and it is the one a page-relative chart reaches.
+        // `027_Unit_Circle_Chart_Graphical_Chart` is the witness: 470.30 pt of chart at a body base of
+        // 156.95 + 111.65 would reach 738.90 on a 595.30 pt landscape page, and 26.2.4.2 draws its top at
+        // **125.00**, which is `595.30 - 470.30` to the hundredth. Skipping the bottom correction drew it
+        // at 268.60 and took that document from 9.48 to 28.42 `diff%`.
         //
         // The horizontal is untouched, and that is a property of the same file rather than an omission:
         // `GetHoriEnvironmentLayoutFrame`'s walk stops at a cell, a fly or a page and has no body frame in
@@ -349,9 +360,7 @@ public static class FrameLayout
             page,
             new DocRect(
                 captured ? CapturedOnPageAcross(frame, page, placedX) : placedX,
-                captured && !offPage
-                    ? CapturedOnPage(frame, verticalArea, placedY, checksBottom: !followsTextFlow)
-                    : placedY,
+                captured && !offPage ? CapturedOnPage(frame, verticalArea, placedY) : placedY,
                 frame.Size.Width,
                 frame.Size.Height),
             disablesOffPagePositioning);
@@ -565,21 +574,12 @@ public static class FrameLayout
     /// <c>compatibilityMode</c> 15 — see <see cref="PaginationOptions.NarrowsCaptureToBody"/>.
     /// </param>
     /// <param name="y">The position the origin and the offset gave it.</param>
-    /// <param name="checksBottom">
-    /// Whether the bottom correction applies at all — <c>bCheckBottom</c>, which
-    /// <c>SwToContentAnchoredObjectPosition::CalcPosition</c> passes as
-    /// <c>!DoesObjFollowsTextFlow()</c> (<c>tocntntanchoredobjectposition.cxx</c>:457), so an object
-    /// following the text flow is pulled back inside the area at the top and left hanging past the
-    /// bottom. <c>ImplAdjustVertRelPos</c> guards only the first of its two corrections with it
-    /// (<c>anchoredobjectposition.cxx</c>:653-664).
-    /// </param>
-    private static Length CapturedOnPage(
-        PageFrame frame, DocRect area, Length y, bool checksBottom = true)
+    private static Length CapturedOnPage(PageFrame frame, DocRect area, Length y)
     {
         if (frame.Anchor is not (FrameAnchor.Paragraph or FrameAnchor.Character)) return y;
 
         Length height = frame.Size.Height;
-        if (checksBottom && y + height > area.Bottom) y = area.Bottom - height;
+        if (y + height > area.Bottom) y = area.Bottom - height;
         if (y < area.Y) y = area.Y;
 
         return y;

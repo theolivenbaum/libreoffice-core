@@ -2386,16 +2386,37 @@ is read and verified, so what remains is the filling of pages rather than the me
   `GetVertEnvironmentLayoutFrame` (`environmentofanchoredobject.cxx`:64-95) then resolves to the page
   **body** frame rather than the page, and four things follow: a `PAGE_FRAME` offset is measured from
   the body's top (`tocntntanchoredobjectposition.cxx`:590-596); the object is captured although its
-  wrap would exempt it; it is captured in the **sheet**, because the `compatibilityMode` 15 narrowing
-  needs `rPageAlignLayFrame.IsPageFrame()` and a body frame is not one (:562-566); and only at the top,
-  which is the `bCheckBottom` this paragraph named. The horizontal is untouched — that walk stops at a
-  cell, a fly or a page and has no body frame in it.
+  wrap would exempt it; and it is captured in the **sheet**, because the `compatibilityMode` 15
+  narrowing needs `rPageAlignLayFrame.IsPageFrame()` and a body frame is not one (:562-566). The
+  horizontal is untouched — that walk stops at a cell, a fly or a page and has no body frame in it.
+
+  **The `bCheckBottom` this paragraph named is a fourth consequence that was implemented and then
+  refuted by the corpus, and the reason is worth more than the rule.** The expression is real, at :457,
+  :678 and :718 — and the offset arm has a *fourth* `AdjustVertRelPos` call, at :810-813, which omits
+  the argument and takes its `= true` default (`anchoredobjectposition.hxx`:185-192). That is the path
+  an offset which does not fit its upper's print area takes, and it is the one a page-relative chart
+  reaches. `027_Unit_Circle_Chart_Graphical_Chart` settles it: 470.30 pt of chart at a body base of
+  156.95 + 111.65 would reach 738.90 on a 595.30 pt landscape page and 26.2.4.2 draws its top at
+  **125.00**, which is `595.30 - 470.30`. Skipping the correction drew it at 268.60 and cost that
+  document 9.48 -> 28.42 `diff%`. **The source reading was right and had one call site fewer than the
+  source.**
 
   Measured on eight fixtures identical but for whether the anchored object is a `wps:wsp` or a
   `c:chart`: 26.2.4.2 draws the shape at **180.00** at every margin and the chart at **252.35** with
   `w:top="1440"`, **324.35** with `w:top="2880"` and **180.35** with `layoutInCell="0"`, and this tree
   reproduces **8 of 8** within the two writers' own 0.36 pt border-origin constant. `PageFrame.FollowsTextFlow`,
   `FrameLayout.Place`, `DocxFrames.FollowsTextFlow`, `FrameFollowsTextFlowTests`; `probes/pagev-r192/`.
+
+  **Confinement: 2 of the words track's 337 renderings move and 335 are byte-identical**, and the two
+  are exactly the two documents whose chart states `relativeFrom="page"` -- the three stating `margin`
+  do not move by a byte, `PAGE_PRINT_AREA` resolving to the body either way. `027` goes 9.48 ->
+  **4.61** worst-page `diff%` and draws its chart at 470.30 against 26.2.4.2's 470.30 exactly; `028`
+  goes 16.78 -> **14.18** and 247.49 against 247.85. `|ink|%` rises on both (0.56 -> 0.73 and 3.32 ->
+  3.60), which is the sign to expect: it is signed per region before the page's absolute value, so a
+  frame moving *into* place cancels less than one sitting 72 pt away. **No gate column can see any of
+  it** -- a frame's position adds no alphanumeric character and no page. And `028` is scored against
+  its *authored* reference now rather than against the `v-incell0` control `probes/ofpie-r190` used:
+  a control built to remove a defect stops being a control once the defect is fixed.
 
   **Two halves are still open and both are bounded.** The **in-table** capture is unmodelled: there the
   object is held in its **cell** (`anchoredobjectposition.cxx`:576-591), an area this tree does not
